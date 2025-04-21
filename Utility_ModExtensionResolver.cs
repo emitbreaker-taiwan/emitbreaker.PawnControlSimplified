@@ -101,6 +101,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Adds a tag to the appropriate extension based on source priority.
         /// </summary>
+        /// 
         public static void AddTag(ThingDef def, string tag)
         {
             if (def == null || string.IsNullOrWhiteSpace(tag)) return;
