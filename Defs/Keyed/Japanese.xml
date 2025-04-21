@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<LanguageData>
+
+	<!-- ========== 🧱 一般情報 ========== -->
+	<PawnControl_ModName>シンプル非ヒト型ポーン制御</PawnControl_ModName>
+	<PawnControl_Settings_Title>ポーン制御 – モッド設定</PawnControl_Settings_Title>
+
+	<!-- ========== 🎛️ メインエディタ：タグ編集 ========== -->
+	<PawnControl_AddTag>タグを追加</PawnControl_AddTag>
+	<PawnControl_AddAsNew>“{0}” を新しいタグとして追加</PawnControl_AddAsNew>
+	<PawnControl_AllowAllWork>すべての作業を許可</PawnControl_AllowAllWork>
+	<PawnControl_BlockAllWork>すべての作業を禁止</PawnControl_BlockAllWork>
+	<PawnControl_Context_Remove>タグを削除</PawnControl_Context_Remove>
+	<PawnControl_Context_Revert>タグを元に戻す</PawnControl_Context_Revert>
+	<PawnControl_EditTag>タグ編集対象：</PawnControl_EditTag>
+	<PawnControl_NewTag>新しいタグ：</PawnControl_NewTag>
+	<PawnControl_Remove>削除</PawnControl_Remove>
+	<PawnControl_SearchTags>タグを検索...</PawnControl_SearchTags>
+	<PawnControl_TagConflictResolved>競合する作業タグが削除されました：{0}</PawnControl_TagConflictResolved>
+	<PawnControl_TagDefCreated>新しいタグ定義を作成：{0}</PawnControl_TagDefCreated>
+	<PawnControl_Uncategorized>未分類</PawnControl_Uncategorized>
+
+	<!-- ========== 📌 お気に入りとピン固定 ========== -->
+	<PawnControl_CategoryPinned>📌</PawnControl_CategoryPinned>
+	<PawnControl_FavoritesHeader>📌 お気に入り</PawnControl_FavoritesHeader>
+	<PawnControl_FavoritesLabel>📌 お気に入り</PawnControl_FavoritesLabel>
+	<PawnControl_Pin>このタグはピン固定されていません。クリックで固定します。</PawnControl_Pin>
+	<PawnControl_PinTooltip>カテゴリを右クリックで固定/解除できます。</PawnControl_PinTooltip>
+	<PawnControl_StarIconPinned>★</PawnControl_StarIconPinned>
+	<PawnControl_StarIconUnpinned>☆</PawnControl_StarIconUnpinned>
+	<PawnControl_Star_Pinned>★</PawnControl_Star_Pinned>
+	<PawnControl_Star_Unpinned>☆</PawnControl_Star_Unpinned>
+	<PawnControl_TooManyPins>ピン固定できるタグは最大20個までです。</PawnControl_TooManyPins>
+	<PawnControl_Unpin>このタグはピン固定されています。クリックで解除します。</PawnControl_Unpin>
+
+	<!-- ========== 🧪 開発者ツール ========== -->
+	<PawnControl_DevAutoRegister>未定義タグを自動登録</PawnControl_DevAutoRegister>
+	<PawnControl_DevAutoRegistered>すべての未定義タグが登録されました。</PawnControl_DevAutoRegistered>
+	<PawnControl_ExportAllUnmatchedTags>すべての未定義タグをクリップボードに出力</PawnControl_ExportAllUnmatchedTags>
+	<PawnControl_ExportXML>未定義タグをXMLにエクスポート</PawnControl_ExportXML>
+	<PawnControl_ExportedTo>次の場所にエクスポートされました：{0}</PawnControl_ExportedTo>
+
+	<!-- ========== 🧩 ツールチップと出典表示 ========== -->
+	<PawnControl_AutoDesc>ThingDefまたはenumから自動生成。</PawnControl_AutoDesc>
+	<PawnControl_DefCopied>タグ '{0}' のPawnTagDefをクリップボードにコピーしました。</PawnControl_DefCopied>
+	<PawnControl_Define>➕ 定義</PawnControl_Define>
+	<PawnControl_SourceTooltip>出典：{0}</PawnControl_SourceTooltip>
+	<PawnControl_Unmatched_Tip>このタグはPawnTagDefとして定義されていません。「定義」をクリックして作成可能です。</PawnControl_Unmatched_Tip>
+
+	<!-- ========== 🧠 作業タイプ関連タグ ========== -->
+	<PawnControl_AddWorkTag_Label>AllowWork_* タグを追加：</PawnControl_AddWorkTag_Label>
+	<PawnControl_Button_Allow>+許可</PawnControl_Button_Allow>
+	<PawnControl_Button_Block>+禁止</PawnControl_Button_Block>
+	<PawnControl_SelectWorkType>作業タイプを選択</PawnControl_SelectWorkType>
+	<PawnControl_None>なし</PawnControl_None>
+
+	<!-- ========== 💾 クリップボード操作 ========== -->
+	<PawnControl_Button_ClearTags>すべてのタグをクリア</PawnControl_Button_ClearTags>
+	<PawnControl_Button_ExportToClipboard>タグをクリップボードに出力</PawnControl_Button_ExportToClipboard>
+	<PawnControl_Button_ImportFromClipboard>クリップボードからタグを読み込み</PawnControl_Button_ImportFromClipboard>
+	<PawnControl_Cancel>キャンセル</PawnControl_Cancel>
+	<PawnControl_Clear>クリア</PawnControl_Clear>
+	<PawnControl_ClearConfirm>本当にすべてのタグをクリアしますか？</PawnControl_ClearConfirm>
+	<PawnControl_ClipboardExported>タグ一覧をクリップボードにコピーしました。</PawnControl_ClipboardExported>
+	<PawnControl_ClipboardImported>クリップボードからタグを読み込みました。</PawnControl_ClipboardImported>
+	<PawnControl_Cleared>すべてのタグをクリアしました。</PawnControl_Cleared>
+	<PawnControl_Import>読み込み</PawnControl_Import>
+	<PawnControl_ImportConfirm>クリップボードからタグを読み込みますか？</PawnControl_ImportConfirm>
+
+	<!-- ========== 📦 プリセットエディタ ========== -->
+	<PawnControl_ApplyPreset>プリセットを適用</PawnControl_ApplyPreset>
+	<PawnControl_ApplyPresetSuccess>プリセット「{0}」を正常に適用しました。</PawnControl_ApplyPresetSuccess>
+	<PawnControl_ConfirmDeletePreset>プリセット「{0}」を削除しますか？</PawnControl_ConfirmDeletePreset>
+	<PawnControl_Delete>🗑 削除</PawnControl_Delete>
+	<PawnControl_ImportedPreset>プリセットを読み込みました：{0}</PawnControl_ImportedPreset>
+	<PawnControl_ImportFailed>読み込みに失敗しました。</PawnControl_ImportFailed>
+	<PawnControl_ImportFromFile>⬇ プリセットファイルを読み込む</PawnControl_ImportFromFile>
+	<PawnControl_ImportFromXML>XMLから読み込む</PawnControl_ImportFromXML>
+	<PawnControl_MessageImportedPreset>プリセット「{0}」を読み込みました。</PawnControl_MessageImportedPreset>
+	<PawnControl_NoActiveEditor>タグエディタが開かれていません。</PawnControl_NoActiveEditor>
+	<PawnControl_NoExtension>このポーンには制御拡張がありません。</PawnControl_NoExtension>
+	<PawnControl_NoPresetProvided>適用するプリセットが指定されていません。</PawnControl_NoPresetProvided>
+	<PawnControl_OpenPresetEditor>📁 プリセットエディタを開く</PawnControl_OpenPresetEditor>
+	<PawnControl_OpenPresetManager>プリセットマネージャを開く</PawnControl_OpenPresetManager>
+	<PawnControl_OverwritePresetConfirm>「{0}」という名前のプリセットが既に存在します。上書きしますか？</PawnControl_OverwritePresetConfirm>
+	<PawnControl_OverwritePresetTitle>プリセットの上書き</PawnControl_OverwritePresetTitle>
+	<PawnControl_PinnedPresetsHeader>⭐ お気に入りのプリセット</PawnControl_PinnedPresetsHeader>
+	<PawnControl_Preset_Cancel>キャンセル</PawnControl_Preset_Cancel>
+	<PawnControl_Preset_Save>保存</PawnControl_Preset_Save>
+	<PawnControl_PresetEditor_Title>プリセットエディタ</PawnControl_PresetEditor_Title>
+	<PawnControl_PresetLabel>プリセットを選択...</PawnControl_PresetLabel>
+	<PawnControl_PresetNameEmpty>プリセット名が空です。</PawnControl_PresetNameEmpty>
+	<PawnControl_PresetNameInvalid>プリセット名に無効な文字が含まれています。</PawnControl_PresetNameInvalid>
+	<PawnControl_PresetSaved>プリセットを保存しました：{0}</PawnControl_PresetSaved>
+	<PawnControl_PresetSaveFailed>プリセットの保存に失敗しました：{0}</PawnControl_PresetSaveFailed>
+	<PawnControl_PresetTooltip>タグ: {0}\nカテゴリ: {1}</PawnControl_PresetTooltip>
+	<PawnControl_ReservedName>「{0}」は予約済みの名前です。使用できません。</PawnControl_ReservedName>
+	<PawnControl_Rename>✎ 名前を変更</PawnControl_Rename>
+	<PawnControl_RenameErrorEmpty>名前が空です。</PawnControl_RenameErrorEmpty>
+	<PawnControl_RenamePresetTitle>プリセット名の変更</PawnControl_RenamePresetTitle>
+	<PawnControl_SearchPreset>プリセットを検索...</PawnControl_SearchPreset>
+	<PawnControl_Tooltip_Apply>このプリセットを現在のポーンに適用</PawnControl_Tooltip_Apply>
+	<PawnControl_Tooltip_Export>このプリセットをXML形式で出力</PawnControl_Tooltip_Export>
+	<PawnControl_Tooltip_Favorite>お気に入りにする/外す</PawnControl_Tooltip_Favorite>
+
+	<!-- ========== 🎭 推奨タグ ========== -->
+	<PawnControl_AddedSuggestedTag>推奨タグを追加：{0}</PawnControl_AddedSuggestedTag>
+	<PawnControl_IgnoreForever>このタグを今後無視する</PawnControl_IgnoreForever>
+	<PawnControl_SuggestedTagIgnored>タグ「{0}」は今後推奨されません。</PawnControl_SuggestedTagIgnored>
+	<PawnControl_SuggestedTag_Tip>このタグは他の種族で使用されていますが、この種族には未設定です。</PawnControl_SuggestedTag_Tip>
+	<PawnControl_SuggestedTags>推奨タグ</PawnControl_SuggestedTags>
+	<PawnControl_TagAdded>タグを追加：{0}</PawnControl_TagAdded>
+
+	<!-- ========== 🔘 トグルタグ ========== -->
+	<PawnControl_AutoDraftInjection>ドラフトボタン自動挿入</PawnControl_AutoDraftInjection>
+	<PawnControl_ForceAnimal>動物として強制</PawnControl_ForceAnimal>
+	<PawnControl_ForceDraftable>徴兵可能として強制</PawnControl_ForceDraftable>
+	<PawnControl_ForceTrainerTab>トレーナータブ表示を強制</PawnControl_ForceTrainerTab>
+	<PawnControl_ForceWork>作業を強制有効化</PawnControl_ForceWork>
+
+	<!-- ========== ⚙️ モッド設定 ========== -->
+	<PawnControl_InjectExtensionsButton>すべての非-HAR種族に制御拡張を注入</PawnControl_InjectExtensionsButton>
+	<PawnControl_ModSettings_AutoInjectSummary>{1}種族中{0}に制御拡張を適用済み</PawnControl_ModSettings_AutoInjectSummary>
+	<PawnControl_ModSettings_DeinjectedDone>{0}種族から削除されました。</PawnControl_ModSettings_DeinjectedDone>
+	<PawnControl_ModSettings_InjectDone>制御拡張が正常に挿入されました。</PawnControl_ModSettings_InjectDone>
+	<PawnControl_ModSettings_InjectNow>すべての非-HAR種族に挿入</PawnControl_ModSettings_InjectNow>
+	<PawnControl_ModSettings_OpenRaceDialog>種族選択エディタを開く</PawnControl_ModSettings_OpenRaceDialog>
+	<PawnControl_ModSettings_RemoveInjected>ランタイム挿入済み拡張を削除</PawnControl_ModSettings_RemoveInjected>
+	<PawnControl_OpenTagEditorGlobal>ポーンタグエディタを開く（全体）</PawnControl_OpenTagEditorGlobal>
+
+	<!-- ========== 👁️ 仮想プレビュー ========== -->
+	<PawnControl_Deinject>削除</PawnControl_Deinject>
+	<PawnControl_DeinjectedOne>{0} からランタイム挿入された拡張を削除しました。</PawnControl_DeinjectedOne>
+	<PawnControl_EditVirtual>プレビュー / 編集</PawnControl_EditVirtual>
+	<PawnControl_Inject>注入</PawnControl_Inject>
+	<PawnControl_InjectThisRaceNow>この種族に今すぐ注入</PawnControl_InjectThisRaceNow>
+	<PawnControl_InjectedOne>{0} に制御拡張を注入しました。</PawnControl_InjectedOne>
+	<PawnControl_InjectedRace>{0} に modExtension を挿入しました</PawnControl_InjectedRace>
+	<PawnControl_SelectNonHumanlikeRace_Label>非HAR種族を選択し、制御拡張のプレビューや注入ができます。</PawnControl_SelectNonHumanlikeRace_Label>
+	<PawnControl_SelectRaceDialog_AlreadyInjected>[注入済]</PawnControl_SelectRaceDialog_AlreadyInjected>
+	<PawnControl_SelectRaceDialog_Info>種族ごとに NonHumanlikePawnControlExtension をプレビューまたは注入します。</PawnControl_SelectRaceDialog_Info>
+	<PawnControl_SelectRaceDialog_Title>制御拡張を注入する種族を選択</PawnControl_SelectRaceDialog_Title>
+	<PawnControl_ThisRaceNowInjected>{0} に制御拡張が注入されました。</PawnControl_ThisRaceNowInjected>
+	<PawnControl_VirtualPreviewLabel>この種族には modExtension が存在しません。プレビュー表示中です。</PawnControl_VirtualPreviewLabel>
+
+	<!-- 🧬 Mod Settings: Race List View -->
+	<PawnControl_ModSettings_ShowRaceList>種族ごとの拡張を個別に管理</PawnControl_ModSettings_ShowRaceList>
+	<PawnControl_ModSettings_HasExtension>[✓]</PawnControl_ModSettings_HasExtension>
+	<PawnControl_ModSettings_NoExtension>[ ]</PawnControl_ModSettings_NoExtension>
+	<PawnControl_OpenEditor>エディターを開く</PawnControl_OpenEditor>
+
+	<!-- Tooltips -->
+	<PawnControl_ModSettings_Tooltip_OpenEditor>この種族のタグエディターを開きます。</PawnControl_ModSettings_Tooltip_OpenEditor>
+	<PawnControl_ModSettings_Tooltip_HasExtension>この種族には既に制御拡張が存在します。</PawnControl_ModSettings_Tooltip_HasExtension>
+	<PawnControl_ModSettings_Tooltip_NoExtension>この種族には制御拡張が存在しません。プレビュー モードで開かれます。</PawnControl_ModSettings_Tooltip_NoExtension>
+
+	<PawnControl_Menu_SelectRace>タグを編集する非人型種族を選択してください:</PawnControl_Menu_SelectRace>
+	<PawnControl_ModSettings_OpenSelector>種族ごとの拡張機能を個別に管理</PawnControl_ModSettings_OpenSelector>
+	<PawnControl_AlreadyHasPhysicalExtension>この種族にはすでに定義されたタグ拡張が存在します。</PawnControl_AlreadyHasPhysicalExtension>
+
+	<PawnControl_ExportVirtualTags>仮想タグをエクスポート</PawnControl_ExportVirtualTags>
+	<PawnControl_ExportedVirtualTags>仮想タグをエクスポートしました: {0}</PawnControl_ExportedVirtualTags>
+	<PawnControl_ImportVirtualTags>仮想タグをインポート</PawnControl_ImportVirtualTags>
+	<PawnControl_ImportedVirtualTags>仮想タグをインポートしました: {0}</PawnControl_ImportedVirtualTags>
+	<PawnControl_ImportFailed_NoFile>次のパスにエクスポートファイルが見つかりませんでした: {0}</PawnControl_ImportFailed_NoFile>
+	<PawnControl_TagChange_RequiresRestart>変更が適用されました。一部の効果はゲームの再起動またはマップの再読み込みが必要な場合があります。</PawnControl_TagChange_RequiresRestart>
+
+	<PawnControl_ExportCEPatch>CEパッチXMLをエクスポート</PawnControl_ExportCEPatch>
+	<PawnControl_ExportedCEPatch>CE形式のXMLをエクスポートしました: {0}</PawnControl_ExportedCEPatch>
+	<PawnControl_CEPatchExportFailed>CEパッチXMLのエクスポートに失敗しました。</PawnControl_CEPatchExportFailed>
+	<PawnControl_StringOnlyTags>[S] 文字列のみのタグ</PawnControl_StringOnlyTags>
+	<PawnControl_UnmatchedStringTooltip>このタグはPawnTagDefまたはEnumとして定義されておらず、生の文字列としてのみ保存されています。</PawnControl_UnmatchedStringTooltip>
+	<PawnControl_EnumTagsHeader>列挙型</PawnControl_EnumTagsHeader>
+
+	<PawnControl_AppliedPreset>プリセットが適用されました。</PawnControl_AppliedPreset>
+	<PawnControl_Apply>適用</PawnControl_Apply>
+	<PawnControl_Button_ApplyCombatPreset>戦闘用プリセットを適用</PawnControl_Button_ApplyCombatPreset>
+	<PawnControl_Button_ApplyWorkerPreset>作業用プリセットを適用</PawnControl_Button_ApplyWorkerPreset>
+  
+</LanguageData>

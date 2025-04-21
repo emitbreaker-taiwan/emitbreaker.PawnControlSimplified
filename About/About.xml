@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+	<name>Simple Non Humanlike Pawn Control</name>
+	<description>A simple pawn for both modders and users to customize their in-game, non-Humanlike pawns.</description>
+	<author>emitbreaker</author>
+	<packageId>emitbreaker.PawnControl</packageId>
+	<url></url>
+	<supportedVersions>
+		<li>1.5</li>
+	</supportedVersions>
+    <loadAfter>
+        <li>Ludeon.RimWorld</li>
+        <li>Ludeon.RimWorld.Royalty</li>
+		<li>Ludeon.Rimworld.Ideology</li>
+        <li>brrainz.harmony</li>
+    </loadAfter>
+</ModMetaData>
