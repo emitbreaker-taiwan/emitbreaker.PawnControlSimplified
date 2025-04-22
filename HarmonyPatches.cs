@@ -545,18 +545,6 @@ namespace emitbreaker.PawnControl
                     pawn.apparel.WornApparel.Clear();
                 }
             }
-            else if (virtualModExtension != null)
-            {
-                if (!virtualModExtension.restrictApparelByBodyType)
-                {
-                    return;
-                }
-
-                if (!Utility_HARCompatibility.IsAllowedBodyType(pawn, virtualModExtension.allowedBodyTypes))
-                {
-                    pawn.apparel.WornApparel.Clear();
-                }
-            }
         }
 
         public static void AssignGenericDefendDuty(LordToil __instance)

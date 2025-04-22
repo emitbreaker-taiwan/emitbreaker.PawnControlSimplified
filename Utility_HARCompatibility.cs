@@ -99,18 +99,10 @@ namespace emitbreaker.PawnControl
         public static bool IsApparelCompatibleWithPawn(Pawn pawn, ThingDef apparelDef)
         {
             var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
-            var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
 
             if (physicalModExtension != null)
             {
                 if (physicalModExtension.restrictApparelByBodyType && !IsAllowedBodyType(pawn, physicalModExtension.allowedBodyTypes))
-                {
-                    return false;
-                }
-            }
-            else if (virtualModExtension != null)
-            {
-                if (virtualModExtension.restrictApparelByBodyType && !IsAllowedBodyType(pawn, virtualModExtension.allowedBodyTypes))
                 {
                     return false;
                 }

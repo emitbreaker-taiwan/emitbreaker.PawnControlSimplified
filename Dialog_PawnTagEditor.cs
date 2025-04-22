@@ -184,6 +184,9 @@ namespace emitbreaker.PawnControl
                 Utility_CacheManager.RefreshTagCache(def, VirtualModExtension);
             }
 
+            // Refresh the SelectedModExtension cache (use this to force the updated selection)
+            _cachedSelectedModExtension = null; // Clear cache before rebuilding it
+
             // Refresh known tags
             if (Utility_CacheManager.allKnownTagNames == null)
             {

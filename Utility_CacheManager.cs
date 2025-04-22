@@ -326,27 +326,6 @@ namespace emitbreaker.PawnControl
                     }
                 }
             }
-            else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
-                {
-                    if (virtualModExtension.overrideThinkTreeMain != null)
-                    {
-                        result = virtualModExtension.overrideThinkTreeMain;
-                    }
-                    else
-                    {
-                        foreach (var kv in fallbackTagToTreeMain)
-                        {
-                            if (Tags.HasTag(pawn.def, kv.Key))
-                            {
-                                result = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(kv.Value);
-                                if (result != null)
-                                {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
 
             return result;
         }
@@ -407,27 +386,6 @@ namespace emitbreaker.PawnControl
                     }
                 }
             }
-            else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
-            {
-                if (virtualModExtension.overrideThinkTreeConstant != null)
-                {
-                    result = virtualModExtension.overrideThinkTreeConstant;
-                }
-                else
-                {
-                    foreach (var kv in fallbackTagToTreeMain)
-                    {
-                        if (Tags.HasTag(pawn.def, kv.Key))
-                        {
-                            result = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(kv.Value);
-                            if (result != null)
-                            {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
 
             return result;
         }
@@ -444,13 +402,6 @@ namespace emitbreaker.PawnControl
                 if (physicalModExtension != null)
                 {
                     result = physicalModExtension != null && physicalModExtension.restrictApparelByBodyType;
-                }
-
-                var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
-
-                if (virtualModExtension != null)
-                {
-                    result = virtualModExtension != null && virtualModExtension.restrictApparelByBodyType;
                 }
 
                 cachedApparelRestriction[pawn.def] = result;

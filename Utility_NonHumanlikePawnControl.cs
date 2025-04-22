@@ -244,16 +244,6 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
-
-            if (virtualModExtension != null)
-            {
-                if (!Utility_HARCompatibility.IsAllowedBodyType(pawn, virtualModExtension.allowedBodyTypes))
-                {
-                    return false;
-                }
-            }
-
             // Add more rules here if needed (e.g., gender-specific, CE armor tags, etc.)
             return true;
         }

@@ -17,7 +17,6 @@ namespace emitbreaker.PawnControl
             duty = null;
 
             var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
-            var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
 
             if (physicalModExtension != null)
             {
@@ -41,28 +40,6 @@ namespace emitbreaker.PawnControl
                     }
                 }
             }
-            else if (virtualModExtension != null)
-            {
-                if (virtualModExtension?.lordDutyMappings == null)
-                {
-                    return false;
-                }
-
-                string toilClassName = lordToil.GetType().Name;
-
-                foreach (var mapping in virtualModExtension.lordDutyMappings)
-                {
-                    if (mapping.lordToilClass == toilClassName)
-                    {
-                        var def = Utility_CacheManager.GetDuty(mapping.dutyDef);
-                        if (def != null)
-                        {
-                            duty = new PawnDuty(def, lordToil.FlagLoc, mapping.radius);
-                            return true;
-                        }
-                    }
-                }
-            }
 
             return false;
         }
@@ -72,7 +49,6 @@ namespace emitbreaker.PawnControl
         {
             duty = null;
             var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
-            var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
 
             if (physicalModExtension != null)
             {
@@ -84,22 +60,6 @@ namespace emitbreaker.PawnControl
                 {
                     float radius = physicalModExtension.defaultDutyRadius >= 0
                         ? physicalModExtension.defaultDutyRadius
-                        : Utility_CECompatibility.GetDefaultDutyRadius(pawn);
-
-                    duty = new PawnDuty(def, pawn.Position, radius);
-                    return true;
-                }
-            }
-            else if (virtualModExtension != null)
-            {
-                if (virtualModExtension?.defaultDutyDef == null)
-                    return false;
-
-                var def = Utility_CacheManager.GetDuty(virtualModExtension.defaultDutyDef);
-                if (def != null)
-                {
-                    float radius = virtualModExtension.defaultDutyRadius >= 0
-                        ? virtualModExtension.defaultDutyRadius
                         : Utility_CECompatibility.GetDefaultDutyRadius(pawn);
 
                     duty = new PawnDuty(def, pawn.Position, radius);

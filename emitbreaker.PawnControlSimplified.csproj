@@ -65,6 +65,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="LordDutyMapping.cs" />
     <Compile Include="VirtualNonHumanlikePawnControlExtension.cs" />
     <Compile Include="Utility_ModExtensionResolver.cs" />
     <Compile Include="VirtualTagStorage.cs" />
