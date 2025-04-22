@@ -16,6 +16,7 @@ using System.Security.Cryptography;
 
 namespace emitbreaker.PawnControl
 {
+    // Hey git hub copilot, are you there?
     public class Mod_SimpleNonHumanlikePawnControl : Mod
     {
         public override string SettingsCategory()
