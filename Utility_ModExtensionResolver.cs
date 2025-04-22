@@ -23,26 +23,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static bool HasPhysicalModExtension(ThingDef def)
         {
-            var modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
-
-            if (modExtension != null)
-            {
-                return true;
-            }
-
-            return false;
+            return def.GetModExtension<NonHumanlikePawnControlExtension>() != null;
         }
 
         public static bool HasVirtualModExtension(ThingDef def)
         {
-            var modExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
-
-            if (modExtension != null)
-            {
-                return true;
-            }
-
-            return false;
+            return def.GetModExtension<VirtualNonHumanlikePawnControlExtension>() != null;
         }
 
         /// <summary>

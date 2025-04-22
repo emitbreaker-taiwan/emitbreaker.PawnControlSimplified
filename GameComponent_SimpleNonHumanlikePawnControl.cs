@@ -14,6 +14,7 @@ namespace emitbreaker.PawnControl
         public static List<string> PinnedTags = new List<string>();
         public static List<string> PinnedPresets = new List<string>();
         public static HashSet<string> IgnoredSuggestions = new HashSet<string>();
+        //private HashSet<string> injectedVirtualExtensions = new HashSet<string>();
 
         public Dictionary<string, List<string>> serializedVirtualTagBuffer = new Dictionary<string, List<string>>();
 
@@ -73,6 +74,18 @@ namespace emitbreaker.PawnControl
             }
         }
 
+        //public void RegisterInjectedExtension(ThingDef def)
+        //{
+        //    if (def != null)
+        //    {
+        //        injectedVirtualExtensions.Add(def.defName);
+        //    }
+        //}
+
+        //public bool HasInjectedExtension(ThingDef def)
+        //{
+        //    return def != null && injectedVirtualExtensions.Contains(def.defName);
+        //}
 
         public override void ExposeData()
         {
@@ -94,6 +107,8 @@ namespace emitbreaker.PawnControl
             {
                 serializedVirtualTagBuffer = VirtualTagStorageService.Instance.Export() ?? new Dictionary<string, List<string>>();
             }
+
+            //Scribe_Collections.Look(ref injectedVirtualExtensions, "injectedVirtualExtensions", LookMode.Value);
         }
 
         public static void Save()

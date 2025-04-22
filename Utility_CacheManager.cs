@@ -849,7 +849,7 @@ namespace emitbreaker.PawnControl
                             def.GetModExtension<NonHumanlikePawnControlExtension>() == null)
                         .OrderBy(def => def.label)
                         .ToList();
-                    if (Utility_NonHumanlikePawnControl.DebugMode())
+                    if (LoadedModManager.GetMod<Mod_SimpleNonHumanlikePawnControl>().GetSettings<ModSettings_SimpleNonHumanlikePawnControl>().debugMode)
                     {
                         Log.Message($"[PawnControl] Cached {cachedRaceDefs.Count} eligible non-humanlike races.");
                     }

@@ -354,8 +354,20 @@ namespace emitbreaker.PawnControl
 
         public static bool IsValidRaceCandidate(ThingDef def)
         {
-            if (def == null || def.race == null) return false;
-            if (!typeof(Pawn).IsAssignableFrom(def.thingClass)) return false;
+            if (def == null || def.race == null)
+            {
+                return false;
+            }
+
+            if (def.defName.Contains("Corpse") || def.thingCategories?.Any(cat => cat.defName == "Corpses") == true)
+            {
+                return false;
+            }
+
+            if (!typeof(Pawn).IsAssignableFrom(def.thingClass))
+            {
+                return false;
+            }
 
             // Avoid HAR alien races (optional)
             if (def.modExtensions != null && def.modExtensions.Any(ext => ext.GetType().Name.Contains("AlienRace"))) return false;
