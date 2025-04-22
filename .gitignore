@@ -1,0 +1,17 @@
+# Ignore Visual Studio temporary files, build results, and cache
+.vs/
+*.user
+*.suo
+*.cache
+*.log
+
+# Build output
+bin/
+obj/
+
+# Rider
+.idea/
+
+# OS-generated files
+Thumbs.db
+.DS_Store
