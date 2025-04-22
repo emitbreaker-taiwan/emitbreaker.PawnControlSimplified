@@ -1,0 +1,5 @@
+E:\Workstation\VisualStudio\Assemblies\emitbreaker.PawnControl.dll
+E:\Workstation\VisualStudio\emitbreaker.PawnControlSimplified\emitbreaker.PawnControlSimplified\obj\Debug\emitbreaker.PawnControlSimplified.csproj.AssemblyReference.cache
+E:\Workstation\VisualStudio\emitbreaker.PawnControlSimplified\emitbreaker.PawnControlSimplified\obj\Debug\emitbreaker.PawnControlSimplified.csproj.CoreCompileInputs.cache
+E:\Workstation\VisualStudio\emitbreaker.PawnControlSimplified\emitbreaker.PawnControlSimplified\obj\Debug\emitbrea.80968ABD.Up2Date
+E:\Workstation\VisualStudio\emitbreaker.PawnControlSimplified\emitbreaker.PawnControlSimplified\obj\Debug\emitbreaker.PawnControl.dll

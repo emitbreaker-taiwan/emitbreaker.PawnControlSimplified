@@ -1,0 +1,363 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using RimWorld;
+using UnityEngine;
+using Verse;
+using Verse.AI;
+using static System.Net.Mime.MediaTypeNames;
+using static UnityEngine.Scripting.GarbageCollector;
+
+namespace emitbreaker.PawnControl
+{
+    public class Utility_NonHumanlikePawnControl
+    {
+        private static readonly Dictionary<ThingDef, DefModExtension> cache = new Dictionary<ThingDef, DefModExtension>();
+
+        private static readonly HashSet<ThingDef> ForceAnimalDefs = new HashSet<ThingDef>();
+        public static readonly HashSet<ThingDef> ForceDraftableDefs = new HashSet<ThingDef>();
+        public static readonly HashSet<ThingDef> ForceWorkDefs = new HashSet<ThingDef>();
+        public static readonly HashSet<ThingDef> ForceTrainerDefs = new HashSet<ThingDef>();
+
+        public static bool IsForceAnimal(ThingDef def) => ForceAnimalDefs.Contains(def);
+
+        public static DefModExtension GetExtension(ThingDef def)
+        {
+            if (def == null)
+            {
+                return null;
+            }
+
+            if (!cache.TryGetValue(def, out var modExtension))
+            {
+                modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
+
+                if (modExtension == null)
+                {
+                    modExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+                }
+
+                cache[def] = modExtension;
+            }
+
+            return modExtension;
+        }
+
+        public static bool HasTag(ThingDef def, string tag)
+        {
+            return Utility_CacheManager.Tags.HasTag(def, tag);
+        }
+
+        public static bool ShouldDraftInject(Pawn pawn)
+        {
+            if (!PawnChecker(pawn))
+            {
+                return false;
+            }
+            foreach (var tag in Utility_CacheManager.Tags.Get(pawn.def))
+            {
+                if (Utility_TagCatalog.ToEnum(tag) == PawnEnumTags.AutoDraftInjection)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public static void PrefetchAll()
+        {
+            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
+            {
+                var modExtension = GetExtension(def);
+
+                if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
+                {
+                    physicalModExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
+                    cache[def] = physicalModExtension;
+                }
+                else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
+                {
+                    virtualModExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+                    cache[def] = virtualModExtension;
+                }
+            }
+        }
+
+        public static void PrefetchAllTags()
+        {
+            ForceAnimalDefs.Clear();
+            ForceDraftableDefs.Clear();
+            ForceWorkDefs.Clear();
+            ForceTrainerDefs.Clear();
+
+            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
+            {
+                if (Utility_CacheManager.Tags.HasTag(def, ManagedTags.ForceAnimal))
+                {
+                    ForceAnimalDefs.Add(def);
+                }
+
+                if (Utility_CacheManager.Tags.HasTag(def, ManagedTags.ForceDraftable))
+                {
+                    ForceDraftableDefs.Add(def);
+                }
+
+                if (Utility_CacheManager.Tags.HasTag(def, ManagedTags.ForceWork))
+                {
+                    ForceWorkDefs.Add(def);
+                }
+
+                if (Utility_CacheManager.Tags.HasTag(def, ManagedTags.ForceTrainerTab))
+                {
+                    ForceTrainerDefs.Add(def);
+                }
+            }
+        }
+
+        public static string ResolveWorkTypeDefNameFromLabel(string label)
+        {
+            return DefDatabase<WorkTypeDef>.AllDefs
+                .FirstOrDefault(w =>
+                    w.labelShort != null &&
+                    w.labelShort.Replace(" ", "").Equals(label.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)
+                )?.defName;
+        }
+
+        public static bool PawnChecker(Pawn pawn)
+        {
+            if (pawn == null || pawn.RaceProps.Humanlike || pawn.Dead || !pawn.Spawned || pawn.IsDessicated())
+            {
+                return false;
+            }
+
+            if (Utility_VehicleFramework.IsVehiclePawn(pawn))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        public static bool ShouldAppearInWorkTab(Pawn p)
+        {
+            return p.RaceProps.Humanlike || HasTag(p.def, ManagedTags.ForceWork);
+        }
+
+        public static bool IsApparelAllowedForPawn(Pawn pawn, ThingDef apparelDef)
+        {
+            if (pawn == null || apparelDef == null || !apparelDef.IsApparel) return false;
+
+            var modExtension = GetExtension(pawn.def);
+
+            if (modExtension == null)
+            {
+                return true;
+            }
+
+            if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
+            {
+                if (physicalModExtension.restrictApparelByBodyType)
+                {
+                    if (!Utility_HARCompatibility.IsAllowedBodyType(pawn, physicalModExtension.allowedBodyTypes))
+                        return false;
+                }
+            }
+            else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
+            {
+                if (virtualModExtension.restrictApparelByBodyType)
+                {
+                    if (!Utility_HARCompatibility.IsAllowedBodyType(pawn, virtualModExtension.allowedBodyTypes))
+                        return false;
+                }
+            }
+
+            // Add more rules here if needed (e.g., gender-specific, CE armor tags, etc.)
+            return true;
+        }
+
+        public static ThinkTreeDef GetForcedThinkTreeDef(Pawn pawn)
+        {
+            return Utility_CacheManager.GetCachedMainThinkTree(pawn);
+        }
+
+        public static bool ApplyWorkTypeOverride(Pawn pawn, WorkTypeDef workType)
+        {
+            if (pawn == null || workType == null || pawn.def == null) return false;
+
+            var tags = Utility_CacheManager.Tags.Get(pawn.def);
+            if (tags.NullOrEmpty()) return false;
+
+            // 🔒 Handle global overrides first
+            if (tags.Contains(ManagedTags.BlockAllWork)) return true;
+            if (tags.Contains(ManagedTags.AllowAllWork)) return false;
+
+            string allowTag = ManagedTags.AllowWorkPrefix + workType.defName;
+            string blockTag = ManagedTags.BlockWorkPrefix + workType.defName;
+
+            if (tags.Contains(blockTag) && Utility_TagCatalog.CanUseWorkTag(blockTag))
+                return true;
+
+            if (tags.Contains(allowTag) && Utility_TagCatalog.CanUseWorkTag(allowTag))
+                return false;
+
+            return false;
+        }
+
+        // === Applies preset to currently active editor, or shows fallback message ===
+        public static void TryApplyPresetToActiveTagEditor(PawnTagPreset preset)
+        {
+            if (preset == null)
+            {
+                Messages.Message("PawnControl_NoPresetProvided".Translate(), MessageTypeDefOf.RejectInput, false);
+                return;
+            }
+
+            WindowStack stack = Find.WindowStack;
+            Dialog_PawnTagEditor editor = stack?.WindowOfType<Dialog_PawnTagEditor>();
+
+            if (editor?.SelectedModExtension != null)
+            {
+                var modExtension = editor.SelectedModExtension;
+
+                // Overwrite tags
+                if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
+                {
+                    foreach (string tag in preset.tags)
+                    {
+                        Utility_ModExtensionResolver.AddTag(editor.SelectedDef, tag);
+                    }
+                }
+                else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
+                {
+                    virtualModExtension.tags.Clear();
+                    foreach (string tag in preset.tags)
+                    {
+                        if (!virtualModExtension.tags.Contains(tag))
+                        {
+                            virtualModExtension.tags.Add(tag);
+                        }
+                    }
+                }
+
+                // Ensure tag cache and PawnTagDefs sync
+                if (modExtension != null && editor != null)
+                {
+                    Utility_CacheManager.RefreshTagCache(editor.SelectedDef, modExtension);
+                }
+
+                Messages.Message("PawnControl_ApplyPresetSuccess".Translate(preset.name), MessageTypeDefOf.TaskCompletion, false);
+                return;
+            }
+
+            // Fallback: No editor open
+            Messages.Message("PawnControl_NoActiveEditor".Translate(), MessageTypeDefOf.RejectInput, false);
+
+            // Optional: Export fallback to clipboard
+            string export = string.Join("\n", preset.tags);
+            GUIUtility.systemCopyBuffer = export;
+            Log.Warning($"[PawnControl] Copied preset '{preset.name}' tags to clipboard as fallback.\n{export}");
+        }
+
+        public static bool ShouldBlockAllWork(Pawn pawn)
+        {
+            return Utility_CacheManager.Tags.Get(pawn.def).Contains("BlockAllWork");
+        }
+
+        public static bool ShouldAllowAllWork(Pawn pawn)
+        {
+            return Utility_CacheManager.Tags.Get(pawn.def).Contains("AllowAllWork");
+        }
+
+        public static void InjectExtensionsToAllNonHAR()
+        {
+            int injectedCount = 0;
+
+            foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
+            {
+                if (def.race == null) continue;
+                if (Utility_HARCompatibility.IsHARRace(def)) continue;
+
+                if (def.modExtensions != null && def.modExtensions.OfType<NonHumanlikePawnControlExtension>().Any())
+                    continue;
+
+                if (def.modExtensions == null)
+                    def.modExtensions = new List<DefModExtension>();
+
+                def.modExtensions.Add(new VirtualNonHumanlikePawnControlExtension());
+                injectedCount++;
+            }
+
+            Messages.Message($"[PawnControl] Injected control extension to {injectedCount} races.", MessageTypeDefOf.TaskCompletion);
+        }
+
+        public static bool TryInjectVirtualAsPhysical(ThingDef def)
+        {
+            if (def == null)
+            {
+                return false;
+            }
+
+            // 🛑 Only inject if physical modExtension exists
+            if (def.GetModExtension<NonHumanlikePawnControlExtension>() != null)
+            {
+                return false;
+            }
+
+            var modExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+
+            if (modExtension == null)
+            {
+                modExtension = new VirtualNonHumanlikePawnControlExtension();
+            }
+
+            def.modExtensions.Add(modExtension);
+
+            modExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+
+            modExtension.tags = new List<string>(VirtualTagStorage.Instance.Get(def));
+
+            return true;
+        }
+
+        public static List<string> EnsureModExtensionTagList(NonHumanlikePawnControlExtension modExtension)
+        {
+            if (modExtension == null)
+                return null;
+
+            if (modExtension.tags == null)
+                modExtension.tags = new List<string>();
+
+            return modExtension.tags;
+        }
+
+        public static bool IsValidRaceCandidate(ThingDef def)
+        {
+            if (def == null || def.race == null) return false;
+            if (!typeof(Pawn).IsAssignableFrom(def.thingClass)) return false;
+
+            // Avoid HAR alien races (optional)
+            if (def.modExtensions != null && def.modExtensions.Any(ext => ext.GetType().Name.Contains("AlienRace"))) return false;
+
+            return true;
+        }
+
+        private static ThingDef _activeTagEditorTarget;
+
+        public static void SetActiveTagEditorTarget(ThingDef def)
+        {
+            _activeTagEditorTarget = def;
+        }
+
+        public static ThingDef GetActiveTagEditorTarget()
+        {
+            return _activeTagEditorTarget;
+        }
+
+        public static void ClearCache()
+        {
+            cache.Clear();      // extension cache
+        }
+    }
+}
