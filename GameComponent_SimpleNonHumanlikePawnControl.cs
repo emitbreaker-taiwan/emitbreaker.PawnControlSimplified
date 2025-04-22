@@ -59,15 +59,20 @@ namespace emitbreaker.PawnControl
 
         private void ApplyVirtualTagsFromStorage()
         {
-            foreach (var pair in serializedVirtualTagBuffer)
+            // Create a copy of the keys to avoid modifying the collection during enumeration
+            var keys = serializedVirtualTagBuffer.Keys.ToList();
+
+            foreach (var key in keys)
             {
-                ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(pair.Key);
+                ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(key);
                 if (def == null || Utility_ModExtensionResolver.HasPhysicalModExtension(def)) continue;
 
-                VirtualTagStorageService.Instance.Set(def, pair.Value);
+                // Process the value associated with the key
+                VirtualTagStorageService.Instance.Set(def, serializedVirtualTagBuffer[key]);
                 Utility_CacheManager.InvalidateTagCachesFor(def);
             }
         }
+
 
         public override void ExposeData()
         {
@@ -78,7 +83,7 @@ namespace emitbreaker.PawnControl
             Scribe_Collections.Look(ref IgnoredSuggestions, "IgnoredSuggestions", LookMode.Value);
 
             // === Virtual tag persistence ===
-            Scribe_Collections.Look(ref serializedVirtualTagBuffer, "VirtualTagStorage", LookMode.Value, LookMode.Deep);
+            Scribe_Collections.Look(ref serializedVirtualTagBuffer, "serializedVirtualTagBuffer", LookMode.Value, LookMode.Deep);
 
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {

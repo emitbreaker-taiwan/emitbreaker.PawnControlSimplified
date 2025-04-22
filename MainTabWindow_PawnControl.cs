@@ -17,10 +17,7 @@ namespace emitbreaker.PawnControl
         public override void PreOpen()
         {
             base.PreOpen();
-            raceDefs = DefDatabase<ThingDef>.AllDefsListForReading
-                .Where(t => t.GetModExtension<VirtualNonHumanlikePawnControlExtension>() != null && !t.race.Humanlike && t.GetModExtension<NonHumanlikePawnControlExtension>() == null)
-                .OrderBy(t => t.label)
-                .ToList();
+            raceDefs = Utility_CacheManager.GetEligibleNonHumanlikeRaces();
         }
 
         public override void DoWindowContents(Rect inRect)

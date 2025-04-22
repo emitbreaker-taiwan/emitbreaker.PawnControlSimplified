@@ -71,13 +71,10 @@ namespace emitbreaker.PawnControl
             Rect scrollOutRect = new Rect(inRect.x, top, inRect.width, inRect.height - top - spacing);
 
             // Calculate total height for all race rows
-            IEnumerable<ThingDef> raceDefs = DefDatabase<ThingDef>.AllDefsListForReading
-                .Where(def =>
-                    Utility_NonHumanlikePawnControl.IsValidRaceCandidate(def) &&
-                    (string.IsNullOrEmpty(searchText) || def.label.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0) && 
-                    !def.race.Humanlike
-                )
-                .OrderBy(def => def.label);
+            IEnumerable<ThingDef> raceDefs = Utility_CacheManager.GetEligibleNonHumanlikeRaces(
+                searchText: searchText,
+                additionalFilter: def => Utility_NonHumanlikePawnControl.IsValidRaceCandidate(def)
+            );
 
             // Height of each row
             float rowHeight = 36f;

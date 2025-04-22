@@ -26,6 +26,8 @@ namespace emitbreaker.PawnControl
         private static readonly Dictionary<SkillDef, SkillRecord> simulatedSkillCache = new Dictionary<SkillDef, SkillRecord>();
         private static readonly Pawn dummyPawnForSkills = CreateDummyPawnForSkills();
         private static readonly Dictionary<string, string> resolvedTagCache = new Dictionary<string, string>();
+        private static List<ThingDef> cachedRaceDefs;
+        private static int lastCacheTick;
 
         private static readonly Dictionary<string, string> fallbackTagToTreeMain = new Dictionary<string, string>
             {
@@ -770,6 +772,36 @@ namespace emitbreaker.PawnControl
 
             simulatedSkillCache[def] = skill;
             return skill;
+        }
+
+        public static List<ThingDef> GetEligibleNonHumanlikeRaces(string searchText = null, Func<ThingDef, bool> additionalFilter = null)
+        {
+            if (cachedRaceDefs == null || Find.TickManager.TicksGame - lastCacheTick > 600) // Refresh every 10 seconds
+            {
+                cachedRaceDefs = DefDatabase<ThingDef>.AllDefsListForReading
+                    .Where(def => def.race != null
+                                  && !Utility_HARCompatibility.IsHARRace(def)
+                                  && !def.race.Humanlike
+                                  && def.GetModExtension<NonHumanlikePawnControlExtension>() == null)
+                    .OrderBy(def => def.label)
+                    .ToList();
+                lastCacheTick = Find.TickManager.TicksGame;
+            }
+
+            // Apply additional filtering if provided
+            IEnumerable<ThingDef> filteredDefs = cachedRaceDefs;
+
+            if (!string.IsNullOrEmpty(searchText))
+            {
+                filteredDefs = filteredDefs.Where(def => def.label.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+
+            if (additionalFilter != null)
+            {
+                filteredDefs = filteredDefs.Where(additionalFilter);
+            }
+
+            return filteredDefs.ToList();
         }
 
         private static Pawn CreateDummyPawnForSkills()

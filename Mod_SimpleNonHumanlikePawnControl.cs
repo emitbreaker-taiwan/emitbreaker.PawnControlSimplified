@@ -16,7 +16,7 @@ using System.Security.Cryptography;
 
 namespace emitbreaker.PawnControl
 {
-    // Hey git hub copilot, are you there?
+    
     public class Mod_SimpleNonHumanlikePawnControl : Mod
     {
         public override string SettingsCategory()
@@ -63,13 +63,11 @@ namespace emitbreaker.PawnControl
 
             y += spacing;
 
-            List<ThingDef> allNonHAR = DefDatabase<ThingDef>.AllDefsListForReading
-                .Where(def => def.race != null && !Utility_HARCompatibility.IsHARRace(def) && !def.race.Humanlike)
-                .ToList();
+            List<ThingDef> raceDefs = Utility_CacheManager.GetEligibleNonHumanlikeRaces();
 
-            int injected = allNonHAR.Count(def => def.modExtensions?.OfType<NonHumanlikePawnControlExtension>().Any() == true) + allNonHAR.Count(def => def.modExtensions?.OfType<VirtualNonHumanlikePawnControlExtension>().Any() == true);
+            int injected = raceDefs.Count(def => def.modExtensions?.OfType<NonHumanlikePawnControlExtension>().Any() == true) + raceDefs.Count(def => def.modExtensions?.OfType<VirtualNonHumanlikePawnControlExtension>().Any() == true);
 
-            Widgets.Label(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_AutoInjectSummary".Translate(injected, allNonHAR.Count));
+            Widgets.Label(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_AutoInjectSummary".Translate(injected, raceDefs.Count));
             y += spacing;
 
             // Inject button: inject virtual -> physical if no physical modExtension exists
