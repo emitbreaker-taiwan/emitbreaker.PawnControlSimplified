@@ -62,14 +62,15 @@ namespace emitbreaker.PawnControl
             top += titleRect.height + spacing;
             Text.Font = GameFont.Small;
 
+            //// === Scrollable list of races ===
+            //Rect scrollOutRect = new Rect(inRect.x, top, inRect.width, inRect.height - top - spacing);
+            //float viewHeight = 9999f;
+            //Rect scrollViewRect = new Rect(0f, 0f, scrollOutRect.width - 16f, viewHeight);
+
             // === Scrollable list of races ===
             Rect scrollOutRect = new Rect(inRect.x, top, inRect.width, inRect.height - top - spacing);
-            float viewHeight = 9999f;
-            Rect scrollViewRect = new Rect(0f, 0f, scrollOutRect.width - 16f, viewHeight);
 
-            Widgets.BeginScrollView(scrollOutRect, ref scrollPosition, scrollViewRect);
-            float curY = 0f;
-
+            // Calculate total height for all race rows
             IEnumerable<ThingDef> raceDefs = DefDatabase<ThingDef>.AllDefsListForReading
                 .Where(def =>
                     Utility_NonHumanlikePawnControl.IsValidRaceCandidate(def) &&
@@ -77,10 +78,20 @@ namespace emitbreaker.PawnControl
                 )
                 .OrderBy(def => def.label);
 
+            // Height of each row
+            float rowHeight = 36f;
+            // Total height of all rows
+            float totalHeight = raceDefs.Count() * rowHeight;
+
+            // Scroll view height
+            Rect scrollViewRect = new Rect(0f, 0f, scrollOutRect.width - 16f, totalHeight);
+
+            Widgets.BeginScrollView(scrollOutRect, ref scrollPosition, scrollViewRect);
+            float curY = 0f;
             foreach (ThingDef def in raceDefs)
             {
                 bool hasPhysical = Utility_ModExtensionResolver.HasPhysicalModExtension(def);
-                bool hasVirtual = VirtualTagStorageService.Instance.HasVirtualTags(def);
+                bool hasVirtual = Utility_ModExtensionResolver.HasVirtualModExtension(def);
                 string label = hasPhysical ? $"[★] {def.label}" : hasVirtual ? $"[V] {def.label}" : def.label;
 
                 Rect row = new Rect(0f, curY, scrollViewRect.width, 32f);

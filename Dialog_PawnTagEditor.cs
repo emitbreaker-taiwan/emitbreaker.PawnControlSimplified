@@ -288,6 +288,15 @@ namespace emitbreaker.PawnControl
             //    }
             //}
 
+            if (SelectedModExtension == null)
+            {
+                if (Utility_NonHumanlikePawnControl.DebugMode())
+                {
+                    Messages.Message($"[PawnControl] No modExtension detected.", MessageTypeDefOf.TaskCompletion);
+                }
+                return;
+            }
+
             // === Layout Rects ===
             Rect topArea = new Rect(inRect.x, inRect.y, inRect.width, topSectionHeight);
             float topX = topArea.x + margin;

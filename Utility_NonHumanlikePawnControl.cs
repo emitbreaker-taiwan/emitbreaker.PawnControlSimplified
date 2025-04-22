@@ -45,30 +45,94 @@ namespace emitbreaker.PawnControl
             return modExtension;
         }
 
-        public static void InjectVirtualExtensionsForEligibleRaces()
+        public static bool DebugMode()
         {
+            return LoadedModManager.GetMod<Mod_SimpleNonHumanlikePawnControl>().GetSettings<ModSettings_SimpleNonHumanlikePawnControl>().debugMode;
+        }
+
+        /// <summary>
+        /// Inject virtual extensions to all non-HAR, non-humanlike races.
+        /// Skips those with existing physical or virtual unless `force` is true.
+        /// </summary>
+        public static void InjectVirtualExtensions(bool force = false, bool showMessage = false)
+        {
+            int injectedCount = 0;
+
             foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
-                if (def.race == null) continue;
-                if (def.race.Humanlike) continue;
+                if (def.race == null || def.race.Humanlike) continue;
+                if (Utility_HARCompatibility.IsHARRace(def)) continue;
+
                 if (def.modExtensions == null)
                 {
                     def.modExtensions = new List<DefModExtension>();
                 }
 
-                // Skip HAR races (optional, depending on compatibility)
-                if (def.thingClass?.Namespace?.Contains("AlienRace") == true) continue;
+                bool hasPhysical = def.modExtensions.OfType<NonHumanlikePawnControlExtension>().Any();
+                bool hasVirtual = def.modExtensions.OfType<VirtualNonHumanlikePawnControlExtension>().Any();
+
+                if (hasPhysical)
+                {
+                    continue;
+                }
+
+                if (!force && hasVirtual)
+                {
+                    continue;
+                }
+
+                def.modExtensions.Add(new VirtualNonHumanlikePawnControlExtension());
+
+                var virtualModExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+                virtualModExtension.tags = new List<string>();
+
+                injectedCount++;
+            }
+
+            if (showMessage)
+            {
+                Messages.Message($"[PawnControl] Injected control extension to {injectedCount} races.", MessageTypeDefOf.TaskCompletion);
+            }
+        }
+
+        public static void InjectVirtualExtensionsForEligibleRaces() => InjectVirtualExtensions(false, DebugMode());
+
+        public static void InjectExtensionsToAllNonHAR() => InjectVirtualExtensions(true, DebugMode());
+
+        public static void RemoveVirtualExtensions(bool force = false, bool showMessage = false)
+        {
+            int removedCount = 0;
+
+            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
+            {
+                if (def.race == null || def.race.Humanlike) continue;
+                if (Utility_HARCompatibility.IsHARRace(def)) continue;
+
+                if (def.modExtensions == null) continue;
 
                 bool hasPhysical = def.modExtensions.OfType<NonHumanlikePawnControlExtension>().Any();
                 bool hasVirtual = def.modExtensions.OfType<VirtualNonHumanlikePawnControlExtension>().Any();
 
-                if (!hasPhysical && !hasVirtual)
+                if (!force && (!hasPhysical && !hasVirtual)) continue;
+
+                // Remove the VirtualNonHumanlikePawnControlExtension if it exists
+                var virtualExtension = def.modExtensions.OfType<VirtualNonHumanlikePawnControlExtension>().FirstOrDefault();
+                if (virtualExtension != null)
                 {
-                    def.modExtensions.Add(new VirtualNonHumanlikePawnControlExtension());
-                    Log.Message($"[PawnControl] Auto-injected VirtualExtension to: {def.defName}");
+                    def.modExtensions.Remove(virtualExtension);
+                    removedCount++;
                 }
             }
+
+            if (showMessage)
+            {
+                Messages.Message($"[PawnControl] Removed control extension from {removedCount} races.", MessageTypeDefOf.TaskCompletion);
+            }
         }
+        public static void RemoveVirtualExtensionsForEligibleRaces() => RemoveVirtualExtensions(false, DebugMode());
+
+        public static void RemoveExtensionsToAllNonHAR() => RemoveVirtualExtensions(true, DebugMode());
+
 
         public static bool HasTag(ThingDef def, string tag)
         {
@@ -293,57 +357,6 @@ namespace emitbreaker.PawnControl
         public static bool ShouldAllowAllWork(Pawn pawn)
         {
             return Utility_CacheManager.Tags.Get(pawn.def).Contains("AllowAllWork");
-        }
-
-        public static void InjectExtensionsToAllNonHAR()
-        {
-            int injectedCount = 0;
-
-            foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
-            {
-                if (def.race == null) continue;
-                if (Utility_HARCompatibility.IsHARRace(def)) continue;
-
-                if (def.modExtensions != null && def.modExtensions.OfType<NonHumanlikePawnControlExtension>().Any())
-                    continue;
-
-                if (def.modExtensions == null)
-                    def.modExtensions = new List<DefModExtension>();
-
-                def.modExtensions.Add(new VirtualNonHumanlikePawnControlExtension());
-                injectedCount++;
-            }
-
-            Messages.Message($"[PawnControl] Injected control extension to {injectedCount} races.", MessageTypeDefOf.TaskCompletion);
-        }
-
-        public static bool TryInjectVirtualAsPhysical(ThingDef def)
-        {
-            if (def == null)
-            {
-                return false;
-            }
-
-            // 🛑 Only inject if physical modExtension exists
-            if (def.GetModExtension<NonHumanlikePawnControlExtension>() != null)
-            {
-                return false;
-            }
-
-            var modExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
-
-            if (modExtension == null)
-            {
-                modExtension = new VirtualNonHumanlikePawnControlExtension();
-            }
-
-            def.modExtensions.Add(modExtension);
-
-            modExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
-
-            modExtension.tags = new List<string>(VirtualTagStorage.Instance.Get(def));
-
-            return true;
         }
 
         public static List<string> EnsureModExtensionTagList(NonHumanlikePawnControlExtension modExtension)

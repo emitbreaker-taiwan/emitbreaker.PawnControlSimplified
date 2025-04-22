@@ -13,6 +13,7 @@ namespace emitbreaker.PawnControl
         public bool harmonyPatchAll = true;
         public Dictionary<string, List<string>> virtualTagsSerialized = new Dictionary<string, List<string>>();
         public bool debugMode = false; // ✅ New setting
+        public bool autoInjectVirtual = true; // New setting
 
         public override void ExposeData()
         {
@@ -23,6 +24,7 @@ namespace emitbreaker.PawnControl
                 virtualTagsSerialized = new Dictionary<string, List<string>>();
             }
             Scribe_Values.Look(ref debugMode, "debugMode", false);
+            Scribe_Values.Look(ref autoInjectVirtual, "autoInjectVirtual", true); // Save/load new setting
         }
     }
 }

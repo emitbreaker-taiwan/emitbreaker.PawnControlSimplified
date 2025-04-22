@@ -12,6 +12,7 @@ using Verse.AI;
 using System.Reflection;
 using static emitbreaker.PawnControl.HarmonyPatches;
 using UnityEngine;
+using System.Security.Cryptography;
 
 namespace emitbreaker.PawnControl
 {
@@ -52,45 +53,41 @@ namespace emitbreaker.PawnControl
 
             y += spacing;
 
+            // === Debug Mode Toggle ===
+            Widgets.CheckboxLabeled(
+                new Rect(inRect.x, y, inRect.width, 30f),
+                "PawnControl_ModSetting_EnableDebug".Translate(),
+                ref GetSettings<ModSettings_SimpleNonHumanlikePawnControl>().debugMode
+            );
+
+            y += spacing;
+
             List<ThingDef> allNonHAR = DefDatabase<ThingDef>.AllDefsListForReading
                 .Where(def => def.race != null && !Utility_HARCompatibility.IsHARRace(def))
                 .ToList();
 
-            int injected = allNonHAR.Count(def => Utility_ModExtensionResolver.HasPhysicalModExtension(def));
+            int injected = allNonHAR.Count(def => Utility_ModExtensionResolver.HasPhysicalModExtension(def)) + allNonHAR.Count(def => Utility_ModExtensionResolver.HasVirtualModExtension(def));
 
-            Widgets.Label(new Rect(inRect.x, y, inRect.width, 30f),
-                "PawnControl_ModSettings_AutoInjectSummary".Translate(injected, allNonHAR.Count));
+            Widgets.Label(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_AutoInjectSummary".Translate(injected, allNonHAR.Count));
             y += spacing;
 
             // Inject button: inject virtual -> physical if no physical modExtension exists
             if (Widgets.ButtonText(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_InjectNow".Translate()))
             {
-                int count = 0;
-                foreach (var def in allNonHAR)
-                {
-                    if (Utility_NonHumanlikePawnControl.TryInjectVirtualAsPhysical(def))
-                        count++;
-                }
-                Messages.Message($"[PawnControl] Injected to {count} races.", MessageTypeDefOf.TaskCompletion);
+                Utility_NonHumanlikePawnControl.InjectVirtualExtensionsForEligibleRaces();
+                // Force a refresh after injecting.
+                // No need to call a new dialog, just update the window.
+                // Trigger UI to update the settings
+                DoSettingsWindowContents(inRect); // Refresh the settings window content
             }
             y += spacing;
 
             // Remove button: removes only runtime-injected modExtensions
             if (Widgets.ButtonText(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_RemoveInjected".Translate()))
             {
-                int removed = 0;
-                foreach (var def in allNonHAR)
-                {
-                    if (def.modExtensions != null)
-                    {
-                        int before = def.modExtensions.Count;
-                        def.modExtensions.RemoveAll(ext =>
-                            ext is NonHumanlikePawnControlExtension physical &&
-                            physical.isRuntimeInjected);
-                        if (def.modExtensions.Count < before) removed++;
-                    }
-                }
-                Messages.Message("PawnControl_ModSettings_DeinjectedDone".Translate(removed), MessageTypeDefOf.NeutralEvent);
+                Utility_NonHumanlikePawnControl.RemoveVirtualExtensionsForEligibleRaces();
+                // Force a refresh of the mod settings window to update the injected count.
+                DoSettingsWindowContents(inRect); // Refresh the settings window content
             }
             y += spacing;
 
@@ -101,32 +98,32 @@ namespace emitbreaker.PawnControl
             }
             y += spacing;
 
-            Widgets.Label(new Rect(inRect.x, y, 420f, 26f), "PawnControl_ModSettings_ApplyPresetToActive".Translate());
-            y += 30f;
+            //Widgets.Label(new Rect(inRect.x, y, 420f, 26f), "PawnControl_ModSettings_ApplyPresetToActive".Translate());
+            //y += 30f;
 
-            // Preset dropdown
-            IEnumerable<Widgets.DropdownMenuElement<PawnTagPreset>> PresetOptions()
-            {
-                foreach (var preset in PawnTagPresetManager.LoadAllPresets())
-                {
-                    yield return new Widgets.DropdownMenuElement<PawnTagPreset>
-                    {
-                        option = new FloatMenuOption(preset.name, () =>
-                        {
-                            Utility_NonHumanlikePawnControl.TryApplyPresetToActiveTagEditor(preset);
-                        }),
-                        payload = preset
-                    };
-                }
-            }
+            //// Preset dropdown
+            //IEnumerable<Widgets.DropdownMenuElement<PawnTagPreset>> PresetOptions()
+            //{
+            //    foreach (var preset in PawnTagPresetManager.LoadAllPresets())
+            //    {
+            //        yield return new Widgets.DropdownMenuElement<PawnTagPreset>
+            //        {
+            //            option = new FloatMenuOption(preset.name, () =>
+            //            {
+            //                Utility_NonHumanlikePawnControl.TryApplyPresetToActiveTagEditor(preset);
+            //            }),
+            //            payload = preset
+            //        };
+            //    }
+            //}
 
-            Widgets.Dropdown<object, PawnTagPreset>(
-                new Rect(inRect.x, y, 420f, 30f),
-                null,
-                _ => null,
-                _ => PresetOptions(),
-                "PawnControl_SelectPreset".Translate()
-            );
+            //Widgets.Dropdown<object, PawnTagPreset>(
+            //    new Rect(inRect.x, y, 420f, 30f),
+            //    null,
+            //    _ => null,
+            //    _ => PresetOptions(),
+            //    "PawnControl_SelectPreset".Translate()
+            //);
         }
 
         private void PatchLordToilIfExists(Harmony harmony, string typeName, float radius)
