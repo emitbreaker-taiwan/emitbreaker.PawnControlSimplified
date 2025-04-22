@@ -24,10 +24,10 @@ namespace emitbreaker.PawnControl
         public static HashSet<string> allKnownTagNames = new HashSet<string>();
         private static readonly Dictionary<ThingDef, List<PawnTagDef>> suggestedTagCache = new Dictionary<ThingDef, List<PawnTagDef>>();
         private static readonly Dictionary<SkillDef, SkillRecord> simulatedSkillCache = new Dictionary<SkillDef, SkillRecord>();
-        private static readonly Pawn dummyPawnForSkills = CreateDummyPawnForSkills();
+        private static readonly Lazy<Pawn> lazyDummyPawnForSkills = new Lazy<Pawn>(CreateDummyPawnForSkills);
+        private static Pawn dummyPawnForSkills => lazyDummyPawnForSkills.Value;
         private static readonly Dictionary<string, string> resolvedTagCache = new Dictionary<string, string>();
         private static List<ThingDef> cachedRaceDefs;
-        private static int lastCacheTick;
 
         private static readonly Dictionary<string, string> fallbackTagToTreeMain = new Dictionary<string, string>
             {
@@ -776,41 +776,110 @@ namespace emitbreaker.PawnControl
 
         public static List<ThingDef> GetEligibleNonHumanlikeRaces(string searchText = null, Func<ThingDef, bool> additionalFilter = null)
         {
-            if (cachedRaceDefs == null || Find.TickManager.TicksGame - lastCacheTick > 600) // Refresh every 10 seconds
+            try
             {
-                cachedRaceDefs = DefDatabase<ThingDef>.AllDefsListForReading
-                    .Where(def => def.race != null
-                                  && !Utility_HARCompatibility.IsHARRace(def)
-                                  && !def.race.Humanlike
-                                  && def.GetModExtension<NonHumanlikePawnControlExtension>() == null)
-                    .OrderBy(def => def.label)
-                    .ToList();
-                lastCacheTick = Find.TickManager.TicksGame;
+                // Refresh the cache if it is null
+                if (cachedRaceDefs == null)
+                {
+                    Log.Message("[PawnControl] Refreshing cachedRaceDefs...");
+
+                    // Fetch the eligible non-humanlike races from DefDatabase
+                    cachedRaceDefs = DefDatabase<ThingDef>.AllDefsListForReading
+                        .Where(def =>
+                            def.race != null &&
+                            def.label != null &&
+                            !Utility_HARCompatibility.IsHARRace(def) &&
+                            !def.race.Humanlike &&
+                            def.GetModExtension<NonHumanlikePawnControlExtension>() == null)
+                        .OrderBy(def => def.label)
+                        .ToList();
+                }
+
+                // Apply the search text filter if provided
+                IEnumerable<ThingDef> filteredDefs = cachedRaceDefs;
+
+                if (!string.IsNullOrEmpty(searchText))
+                {
+                    if (Utility_NonHumanlikePawnControl.DebugMode())
+                    {
+                        Log.Message($"[PawnControl] Filtering by searchText: {searchText}");
+                    }
+
+                    filteredDefs = filteredDefs.Where(def => def.label != null && def.label.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0);
+                }
+
+                // Apply additional custom filter if provided
+                if (additionalFilter != null)
+                {
+                    if (Utility_NonHumanlikePawnControl.DebugMode())
+                    {
+                        Log.Message("[PawnControl] Applying additional filter...");
+                    }
+                    filteredDefs = filteredDefs.Where(additionalFilter);
+                }
+
+                return filteredDefs.ToList();
             }
-
-            // Apply additional filtering if provided
-            IEnumerable<ThingDef> filteredDefs = cachedRaceDefs;
-
-            if (!string.IsNullOrEmpty(searchText))
+            catch (Exception ex)
             {
-                filteredDefs = filteredDefs.Where(def => def.label.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0);
+                Log.Error($"[PawnControl] Exception in GetEligibleNonHumanlikeRaces: {ex}");
+                return new List<ThingDef>();
             }
+        }
 
-            if (additionalFilter != null)
+        public static void RefreshEligibleNonHumanlikeRacesCache()
+        {
+            try
             {
-                filteredDefs = filteredDefs.Where(additionalFilter);
-            }
+                // Only refresh if the cache is null or outdated
+                if (cachedRaceDefs == null || cachedRaceDefs.Count == 0)
+                {
+                    if (Utility_NonHumanlikePawnControl.DebugMode())
+                    {
+                        Log.Message("[PawnControl] Refreshing cachedRaceDefs...");
+                    }
 
-            return filteredDefs.ToList();
+                    // Fetch the eligible non-humanlike races from DefDatabase
+                    cachedRaceDefs = DefDatabase<ThingDef>.AllDefsListForReading
+                        .Where(def =>
+                            def.race != null &&
+                            def.label != null &&
+                            !Utility_HARCompatibility.IsHARRace(def) &&
+                            !def.race.Humanlike &&
+                            def.GetModExtension<NonHumanlikePawnControlExtension>() == null)
+                        .OrderBy(def => def.label)
+                        .ToList();
+                    if (Utility_NonHumanlikePawnControl.DebugMode())
+                    {
+                        Log.Message($"[PawnControl] Cached {cachedRaceDefs.Count} eligible non-humanlike races.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[PawnControl] Exception while refreshing cachedRaceDefs: {ex}");
+                cachedRaceDefs = new List<ThingDef>(); // Reset the cache to avoid further issues
+            }
         }
 
         private static Pawn CreateDummyPawnForSkills()
         {
-            Pawn dummy = (Pawn)Activator.CreateInstance(typeof(Pawn));
-            dummy.def = ThingDefOf.Human; // use generic humanlike for compatibility
-            dummy.story = new Pawn_StoryTracker(dummy);
-            dummy.skills = new Pawn_SkillTracker(dummy);
-            return dummy;
+            try
+            {
+                // Ensure DefOf types are initialized
+                DefOfHelper.EnsureInitializedInCtor(typeof(ThingDefOf));
+
+                Pawn dummy = (Pawn)Activator.CreateInstance(typeof(Pawn));
+                dummy.def = ThingDefOf.Human; // Use generic humanlike for compatibility
+                dummy.story = new Pawn_StoryTracker(dummy);
+                dummy.skills = new Pawn_SkillTracker(dummy);
+                return dummy;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[PawnControl] Failed to create dummy pawn for skills: {ex}");
+                return null;
+            }
         }
 
         public static void ClearSimulatedSkillCache()

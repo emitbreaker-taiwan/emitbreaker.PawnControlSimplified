@@ -19,20 +19,27 @@ namespace emitbreaker.PawnControl
     
     public class Mod_SimpleNonHumanlikePawnControl : Mod
     {
+        ModSettings_SimpleNonHumanlikePawnControl settings;
+
         public override string SettingsCategory()
         {
             return "PawnControl_ModName".Translate();
         }
 
+        private List<ThingDef> raceDefs = new List<ThingDef>();
         public Mod_SimpleNonHumanlikePawnControl(ModContentPack content) : base(content)
         {
+            settings = GetSettings<ModSettings_SimpleNonHumanlikePawnControl>();
             var harmony = new Harmony("emitbreaker.PawnControl");
 
-            if (GetSettings<ModSettings_SimpleNonHumanlikePawnControl>().harmonyPatchAll)
+            if (settings.harmonyPatchAll)
             {
                 harmony.PatchAll();
                 PatchVFEAIJobGiver(harmony);
             }
+
+            Utility_CacheManager.RefreshEligibleNonHumanlikeRacesCache(); // Refresh cache during mod initialization
+            raceDefs = Utility_CacheManager.GetEligibleNonHumanlikeRaces();
 
             // Optional LordToil patches
             PatchLordToilIfExists(harmony, "LordToil_DefendAndExpand", 28f);
@@ -58,14 +65,17 @@ namespace emitbreaker.PawnControl
             Widgets.CheckboxLabeled(
                 new Rect(inRect.x, y, inRect.width, 30f),
                 "PawnControl_ModSetting_EnableDebug".Translate(),
-                ref GetSettings<ModSettings_SimpleNonHumanlikePawnControl>().debugMode
+                ref settings.debugMode
             );
 
             y += spacing;
 
-            List<ThingDef> raceDefs = Utility_CacheManager.GetEligibleNonHumanlikeRaces();
+            if (raceDefs.NullOrEmpty())
+            {
+                raceDefs = Utility_CacheManager.GetEligibleNonHumanlikeRaces();
+            }
 
-            int injected = raceDefs.Count(def => def.modExtensions?.OfType<NonHumanlikePawnControlExtension>().Any() == true) + raceDefs.Count(def => def.modExtensions?.OfType<VirtualNonHumanlikePawnControlExtension>().Any() == true);
+            int injected = raceDefs.Count(def => def.modExtensions?.OfType<VirtualNonHumanlikePawnControlExtension>().Any() == true);
 
             Widgets.Label(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_AutoInjectSummary".Translate(injected, raceDefs.Count));
             y += spacing;
@@ -73,6 +83,7 @@ namespace emitbreaker.PawnControl
             // Inject button: inject virtual -> physical if no physical modExtension exists
             if (Widgets.ButtonText(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_InjectNow".Translate()))
             {
+                Utility_CacheManager.RefreshEligibleNonHumanlikeRacesCache();
                 Utility_NonHumanlikePawnControl.InjectVirtualExtensionsForEligibleRaces();
             }
             y += spacing;
@@ -81,6 +92,7 @@ namespace emitbreaker.PawnControl
             if (Widgets.ButtonText(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_RemoveInjected".Translate()))
             {
                 Utility_NonHumanlikePawnControl.RemoveVirtualExtensionsForEligibleRaces();
+                Utility_CacheManager.RefreshEligibleNonHumanlikeRacesCache();
             }
             y += spacing;
 
@@ -143,7 +155,10 @@ namespace emitbreaker.PawnControl
                 if (updateAllDuties != null && postfix != null)
                 {
                     harmony.Patch(updateAllDuties, postfix: new HarmonyMethod(postfix));
-                    Log.Message("[PawnControl] Patched MechClusterDefend.UpdateAllDuties");
+                    if (settings.debugMode)
+                    {
+                        Log.Message("[PawnControl] Patched MechClusterDefend.UpdateAllDuties");
+                    }
                 }
             }
         }
@@ -162,20 +177,29 @@ namespace emitbreaker.PawnControl
                 if (target != null && postfix != null)
                 {
                     harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-                    Log.Message("[PawnControl] Patched PawnApparelGenerator.GenerateStartingApparelFor");
+                    if (settings.debugMode)
+                    {
+                        Log.Message("[PawnControl] Patched PawnApparelGenerator.GenerateStartingApparelFor" + postfix);
+                    }
                 }
                 else
                 {
-                    Log.Warning("[PawnControl] Could not find method to patch: PawnApparelGenerator.GenerateStartingApparelFor");
+                    if (settings.debugMode)
+                    {
+                        Log.Warning("[PawnControl] Could not find method to patch: PawnApparelGenerator.GenerateStartingApparelFor");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Log.Error("[PawnControl] Exception during apparel patch: " + ex);
+                if (settings.debugMode)
+                {
+                    Log.Error("[PawnControl] Exception during apparel patch: " + ex);
+                }
             }
         }
 
-        public static void PatchVFEAIJobGiver(Harmony harmony)
+        public void PatchVFEAIJobGiver(Harmony harmony)
         {
             var vfeJobGiverType = AccessTools.TypeByName("VFECore.JobGiver_WorkVFE");
             if (vfeJobGiverType != null)
@@ -183,25 +207,33 @@ namespace emitbreaker.PawnControl
                 var method = AccessTools.Method(vfeJobGiverType, "TryGiveJob", new Type[] { typeof(Pawn) });
                 if (method != null)
                 {
-                    harmony.Patch(method,
-                        prefix: new HarmonyMethod(typeof(Patch_VFEAI_TryGiveJob), nameof(Patch_VFEAI_TryGiveJob.Prefix)));
-                    Log.Message("[PawnControl] Patched VFECore.JobGiver_WorkVFE.TryGiveJob");
+                    harmony.Patch(method, prefix: new HarmonyMethod(typeof(Patch_VFEAI_TryGiveJob), nameof(Patch_VFEAI_TryGiveJob.Prefix)));
+                    if (settings.debugMode)
+                    {
+                        Log.Message("[PawnControl] Patched VFECore.JobGiver_WorkVFE.TryGiveJob");
+                    }
                 }
                 else
                 {
-                    Log.Warning("[PawnControl] Method TryGiveJob not found in VFECore.JobGiver_WorkVFE");
+                    if (settings.debugMode)
+                    {
+                        Log.Warning("[PawnControl] Method TryGiveJob not found in VFECore.JobGiver_WorkVFE");
+                    }
                 }
             }
             else
             {
-                Log.Warning("[PawnControl] Type VFECore.JobGiver_WorkVFE not found");
+                if(settings.debugMode)
+                {
+                    Log.Warning("[PawnControl] Type VFECore.JobGiver_WorkVFE not found");
+                }               
             }
         }
     }
 
-    public static class PatchImpl_MechClusterDefend
+    public class PatchImpl_MechClusterDefend
     {
-        public static void Postfix(object __instance)
+        public void Postfix(object __instance)
         {
             if (!ModsConfig.BiotechActive || __instance == null) return;
 

@@ -17,6 +17,8 @@ namespace emitbreaker.PawnControl
         public override void PreOpen()
         {
             base.PreOpen();
+            // Refresh the cache when the tab is opened
+            Utility_CacheManager.RefreshEligibleNonHumanlikeRacesCache();
             raceDefs = Utility_CacheManager.GetEligibleNonHumanlikeRaces();
         }
 

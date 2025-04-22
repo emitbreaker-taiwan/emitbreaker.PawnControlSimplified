@@ -22,6 +22,9 @@ namespace emitbreaker.PawnControl
             doCloseX = true;
             closeOnClickedOutside = true;
             absorbInputAroundWindow = true;
+            
+            // Refresh the cache when the dialog is created
+            Utility_CacheManager.RefreshEligibleNonHumanlikeRacesCache();
         }
 
         public override void DoWindowContents(Rect inRect)
