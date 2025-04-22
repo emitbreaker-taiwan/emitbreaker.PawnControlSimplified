@@ -1,0 +1,10 @@
+﻿Creative Commons Attribution-NonCommercial 4.0 International
+
+This license lets others remix, tweak, and build upon your work non-commercially. 
+Although their new works must also acknowledge you and be non-commercial, 
+they don’t have to license their derivative works on the same terms.
+
+To read the full license, visit: https://creativecommons.org/licenses/by-nc/4.0/
+
+You may NOT use this software for commercial purposes.
+If you wish to use it commercially, please contact [your email or GitHub username].

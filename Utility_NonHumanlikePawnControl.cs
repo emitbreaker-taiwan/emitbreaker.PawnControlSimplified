@@ -45,6 +45,31 @@ namespace emitbreaker.PawnControl
             return modExtension;
         }
 
+        public static void InjectVirtualExtensionsForEligibleRaces()
+        {
+            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
+            {
+                if (def.race == null) continue;
+                if (def.race.Humanlike) continue;
+                if (def.modExtensions == null)
+                {
+                    def.modExtensions = new List<DefModExtension>();
+                }
+
+                // Skip HAR races (optional, depending on compatibility)
+                if (def.thingClass?.Namespace?.Contains("AlienRace") == true) continue;
+
+                bool hasPhysical = def.modExtensions.OfType<NonHumanlikePawnControlExtension>().Any();
+                bool hasVirtual = def.modExtensions.OfType<VirtualNonHumanlikePawnControlExtension>().Any();
+
+                if (!hasPhysical && !hasVirtual)
+                {
+                    def.modExtensions.Add(new VirtualNonHumanlikePawnControlExtension());
+                    Log.Message($"[PawnControl] Auto-injected VirtualExtension to: {def.defName}");
+                }
+            }
+        }
+
         public static bool HasTag(ThingDef def, string tag)
         {
             return Utility_CacheManager.Tags.HasTag(def, tag);

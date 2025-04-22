@@ -12,12 +12,17 @@ namespace emitbreaker.PawnControl
     {
         public bool harmonyPatchAll = true;
         public Dictionary<string, List<string>> virtualTagsSerialized = new Dictionary<string, List<string>>();
+        public bool debugMode = false; // ✅ New setting
+
         public override void ExposeData()
         {
             base.ExposeData();
             Scribe_Collections.Look(ref virtualTagsSerialized, "virtualTagsSerialized", LookMode.Value, LookMode.Value);
             if (virtualTagsSerialized == null)
+            {
                 virtualTagsSerialized = new Dictionary<string, List<string>>();
+            }
+            Scribe_Values.Look(ref debugMode, "debugMode", false);
         }
     }
 }

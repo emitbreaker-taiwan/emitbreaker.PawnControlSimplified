@@ -242,43 +242,51 @@ namespace emitbreaker.PawnControl
             inRect.yMin += 45f;
 
             // Virtual preview banner
-            if (!Utility_ModExtensionResolver.HasPhysicalModExtension(def))
-            {
-                if (!Utility_ModExtensionResolver.HasVirtualModExtension(def))
-                {
-                    Rect banner = new Rect(inRect.x, inRect.y, inRect.width, 32f);
-                    Widgets.DrawBoxSolid(banner, new Color(0.3f, 0.3f, 0.05f, 0.25f));
-                    Widgets.Label(banner, "PawnControl_VirtualPreviewLabel".Translate());
-                    inRect.yMin += 36f;
+            //if (!Utility_ModExtensionResolver.HasPhysicalModExtension(def))
+            //{
+            //    if (!Utility_ModExtensionResolver.HasVirtualModExtension(def))
+            //    {
+            //        Rect banner = new Rect(inRect.x, inRect.y, inRect.width, 32f);
+            //        Widgets.DrawBoxSolid(banner, new Color(0.3f, 0.3f, 0.05f, 0.25f));
+            //        Widgets.Label(banner, "PawnControl_VirtualPreviewLabel".Translate());
+            //        inRect.yMin += 36f;
 
-                    Rect injectButton = new Rect(banner.x + 520f, banner.y + 4f, 200f, 24f);
-                    if (Widgets.ButtonText(injectButton, "PawnControl_InjectThisRaceNow".Translate()))
-                    {
-                        // Inject mod extension and tag storage first
-                        var modExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+            //        Rect injectButton = new Rect(banner.x + 520f, banner.y + 4f, 200f, 24f);
+            //        if (Widgets.ButtonText(injectButton, "PawnControl_InjectThisRaceNow".Translate()))
+            //        {
+            //            // Immediately inject before confirmation (to update UI right away)
+            //            if (def.modExtensions == null)
+            //            {
+            //                def.modExtensions = new List<DefModExtension>();
+            //            }
 
-                        if (modExtension == null)
-                        {
-                            modExtension = new VirtualNonHumanlikePawnControlExtension();
-                        }
+            //            if (!def.modExtensions.OfType<VirtualNonHumanlikePawnControlExtension>().Any())
+            //            {
+            //                var modExtension = new VirtualNonHumanlikePawnControlExtension();
+            //                def.modExtensions.Add(modExtension);
+            //            }
 
-                        List<string> list;
+            //            // Then show confirmation (does not undo the above — you could revert if needed)
+            //            List<string> list;
+            //            Find.WindowStack.Add(Dialog_MessageBox.CreateConfirmation(
+            //                "PawnControl_InjectThisRaceNow".Translate(def.label),
+            //                () =>
+            //                {
+            //                    list = Utility_ModExtensionResolver.GetEffectiveTags(def);
+            //                    VirtualTagStorageService.Instance.Set(def, list);
 
-                        Find.WindowStack.Add(Dialog_MessageBox.CreateConfirmation(
-                            "PawnControl_InjectThisRaceNow".Translate(def.label),
-                            () =>
-                            {
-                                list = Utility_ModExtensionResolver.GetEffectiveTags(def);
-                                VirtualTagStorageService.Instance.Set(def, list);
+            //                    Messages.Message("PawnControl_ThisRaceNowInjected".Translate(def.label), MessageTypeDefOf.TaskCompletion);
 
-                                Messages.Message("PawnControl_ThisRaceNowInjected".Translate(def.label), MessageTypeDefOf.TaskCompletion);
-
-                                Close();
-                                Find.WindowStack.Add(new Dialog_PawnTagEditor(def)); // No isVirtualPreview needed
-                            }));
-                    }
-                }
-            }
+            //                    // Now rebuild the UI with updated virtual state
+            //                    LongEventHandler.ExecuteWhenFinished(() =>
+            //                    {
+            //                        Close();
+            //                        Find.WindowStack.Add(new Dialog_PawnTagEditor(def));
+            //                    });
+            //                }));
+            //        }
+            //    }
+            //}
 
             // === Layout Rects ===
             Rect topArea = new Rect(inRect.x, inRect.y, inRect.width, topSectionHeight);
@@ -714,18 +722,23 @@ namespace emitbreaker.PawnControl
                 Messages.Message("PawnControl_TagChange_RequiresRestart".Translate(), MessageTypeDefOf.NeutralEvent);
             }
 
-            // === Third Row: Import/Export Buttons ===
+            // === Horizontal Row: Import / Export / Export CE Patch ===
             x = rect.x + 20f;
-            y += lineH + spacing * 2;
+            y += lineH + spacing * 2; // only advance once for the row
 
-            if (Widgets.ButtonText(new Rect(x, y, 200f, 30f), "PawnControl_ImportVirtualTags".Translate()))
+            float buttonWidth = 200f;
+            float buttonHeight = 30f;
+            float spacingH = 10f; // horizontal spacing between buttons
+
+            // Import
+            if (Widgets.ButtonText(new Rect(x, y, buttonWidth, buttonHeight), "PawnControl_ImportVirtualTags".Translate()))
             {
                 string path = Path.Combine(GenFilePaths.SaveDataFolderPath, "ExportedPawnTags.xml");
                 if (File.Exists(path))
                 {
                     emitbreaker.PawnControl.VirtualTagStorage.Instance.LoadFromXmlFile(path);
                     Messages.Message("PawnControl_ImportedVirtualTags".Translate(path), MessageTypeDefOf.TaskCompletion);
-                    Messages.Message("PawnControl_TagChange_RequiresRestart".Translate(), MessageTypeDefOf.NeutralEvent); // ✅ Restart prompt
+                    Messages.Message("PawnControl_TagChange_RequiresRestart".Translate(), MessageTypeDefOf.NeutralEvent);
                 }
                 else
                 {
@@ -733,33 +746,24 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            x += 210f;
+            x += buttonWidth + spacingH;
 
-            if (Widgets.ButtonText(new Rect(x, y, 200f, 30f), "PawnControl_ExportVirtualTags".Translate()))
+            // Export
+            if (Widgets.ButtonText(new Rect(x, y, buttonWidth, buttonHeight), "PawnControl_ExportVirtualTags".Translate()))
             {
                 string path = Path.Combine(GenFilePaths.SaveDataFolderPath, "ExportedPawnTags.xml");
                 emitbreaker.PawnControl.VirtualTagStorage.Instance.SaveToXmlFile(path);
                 Messages.Message("PawnControl_ExportedTo".Translate(path), MessageTypeDefOf.TaskCompletion);
             }
 
-            // === Fourth Row: Export CE Patch XML ===
-            x = rect.x + 20f;
-            y += lineH + spacing;
+            x += buttonWidth + spacingH;
 
-            if (Widgets.ButtonText(new Rect(x, y, 200f, 30f), "PawnControl_ExportCEPatch".Translate()))
+            // Export CE Patch
+            if (Widgets.ButtonText(new Rect(x, y, buttonWidth, buttonHeight), "PawnControl_ExportCEPatch".Translate()))
             {
                 string path = Path.Combine(GenFilePaths.SaveDataFolderPath, "PawnControl_CE_Patch.xml");
                 Utility_CEPatchExporter.ExportToCEPatchFormat(def, Utility_ModExtensionResolver.GetEffectiveTags(def).ToList(), path);
                 Messages.Message("PawnControl_ExportedTo".Translate(path), MessageTypeDefOf.TaskCompletion);
-            }
-
-            // === Final Row: Clear Virtual Tag Cache ===
-            x = rect.x + 20f;
-            y += lineH + spacing;
-
-            if (Widgets.ButtonText(new Rect(x, y, 200f, 30f), "PawnControl_ClearVirtualTagsButton".Translate()))
-            {
-                emitbreaker.PawnControl.VirtualTagStorage.Instance.Clear();
             }
         }
 

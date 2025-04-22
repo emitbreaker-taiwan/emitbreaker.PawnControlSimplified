@@ -23,40 +23,26 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static bool HasPhysicalModExtension(ThingDef def)
         {
-            var modExtension = new NonHumanlikePawnControlExtension();
-            if (HasPhysicalModExtension(def, out modExtension) != null)
+            var modExtension = Utility_NonHumanlikePawnControl.GetExtension(def);
+
+            if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
             {
                 return true;
             }
 
             return false;
-        }
-
-        public static NonHumanlikePawnControlExtension HasPhysicalModExtension(ThingDef def, out NonHumanlikePawnControlExtension modExtension)
-        {
-            return modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
         }
 
         public static bool HasVirtualModExtension(ThingDef def)
         {
-            var physicalModExtension = new NonHumanlikePawnControlExtension();
-            if (HasPhysicalModExtension(def, out physicalModExtension) != null)
-            {
-                return false;
-            }
+            var modExtension = Utility_NonHumanlikePawnControl.GetExtension(def);
 
-            var modExtension = new VirtualNonHumanlikePawnControlExtension();
-            if (HasVirtualModExtension(def, out modExtension) != null)
+            if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
             {
                 return true;
             }
 
             return false;
-        }
-
-        public static VirtualNonHumanlikePawnControlExtension HasVirtualModExtension(ThingDef def, out VirtualNonHumanlikePawnControlExtension modExtension)
-        {
-            return modExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
         }
 
         /// <summary>
@@ -65,14 +51,14 @@ namespace emitbreaker.PawnControl
         public static List<string> GetEffectiveTags(ThingDef def)
         {
             List<string> rawTags;
-            var physicalModExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
-            var virtualModExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
 
-            if (HasPhysicalModExtension(def, out physicalModExtension) != null)
+            var modExtension = Utility_NonHumanlikePawnControl.GetExtension(def);
+
+            if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
             {
                 rawTags = physicalModExtension.tags;
             }
-            else if (HasVirtualModExtension(def, out virtualModExtension) != null)
+            else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
             {
                 rawTags = virtualModExtension.tags;
             }
@@ -90,22 +76,6 @@ namespace emitbreaker.PawnControl
                 .ToList();
 
             return resolvedTags ?? new List<string>();
-        }
-
-        /// <summary>
-        /// Returns true if the ThingDef only uses virtual storage.
-        /// </summary>
-        public static bool IsVirtualOnly(ThingDef def)
-        {
-            return !HasPhysicalModExtension(def);
-        }
-
-        /// <summary>
-        /// Returns true if the provided tag list is from virtual storage.
-        /// </summary>
-        public static bool IsVirtualSource(ThingDef def, List<string> tagList)
-        {
-            return IsVirtualOnly(def) && ReferenceEquals(tagList, Virtual?.Get(def));
         }
 
         /// <summary>
