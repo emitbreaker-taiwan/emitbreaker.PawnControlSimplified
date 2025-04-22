@@ -63,10 +63,10 @@ namespace emitbreaker.PawnControl
             y += spacing;
 
             List<ThingDef> allNonHAR = DefDatabase<ThingDef>.AllDefsListForReading
-                .Where(def => def.race != null && !Utility_HARCompatibility.IsHARRace(def))
+                .Where(def => def.race != null && !Utility_HARCompatibility.IsHARRace(def) && !def.race.Humanlike)
                 .ToList();
 
-            int injected = allNonHAR.Count(def => Utility_ModExtensionResolver.HasPhysicalModExtension(def)) + allNonHAR.Count(def => Utility_ModExtensionResolver.HasVirtualModExtension(def));
+            int injected = allNonHAR.Count(def => def.modExtensions?.OfType<NonHumanlikePawnControlExtension>().Any() == true) + allNonHAR.Count(def => def.modExtensions?.OfType<VirtualNonHumanlikePawnControlExtension>().Any() == true);
 
             Widgets.Label(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_AutoInjectSummary".Translate(injected, allNonHAR.Count));
             y += spacing;
@@ -75,10 +75,6 @@ namespace emitbreaker.PawnControl
             if (Widgets.ButtonText(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_InjectNow".Translate()))
             {
                 Utility_NonHumanlikePawnControl.InjectVirtualExtensionsForEligibleRaces();
-                // Force a refresh after injecting.
-                // No need to call a new dialog, just update the window.
-                // Trigger UI to update the settings
-                DoSettingsWindowContents(inRect); // Refresh the settings window content
             }
             y += spacing;
 
@@ -86,8 +82,6 @@ namespace emitbreaker.PawnControl
             if (Widgets.ButtonText(new Rect(inRect.x, y, 420f, 30f), "PawnControl_ModSettings_RemoveInjected".Translate()))
             {
                 Utility_NonHumanlikePawnControl.RemoveVirtualExtensionsForEligibleRaces();
-                // Force a refresh of the mod settings window to update the injected count.
-                DoSettingsWindowContents(inRect); // Refresh the settings window content
             }
             y += spacing;
 

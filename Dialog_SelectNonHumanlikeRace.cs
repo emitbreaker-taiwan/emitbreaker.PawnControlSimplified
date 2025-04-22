@@ -74,7 +74,8 @@ namespace emitbreaker.PawnControl
             IEnumerable<ThingDef> raceDefs = DefDatabase<ThingDef>.AllDefsListForReading
                 .Where(def =>
                     Utility_NonHumanlikePawnControl.IsValidRaceCandidate(def) &&
-                    (string.IsNullOrEmpty(searchText) || def.label.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0)
+                    (string.IsNullOrEmpty(searchText) || def.label.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0) && 
+                    !def.race.Humanlike
                 )
                 .OrderBy(def => def.label);
 

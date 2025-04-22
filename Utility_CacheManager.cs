@@ -278,13 +278,16 @@ namespace emitbreaker.PawnControl
                 return result;
             }
 
-            var modExtension = Utility_NonHumanlikePawnControl.GetExtension(pawn.def);
+            var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
 
-            if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
+            if (physicalModExtension != null)
             {
                 GetCachedMainThinkTreeInner(pawn, physicalModExtension, out result);
             }
-            else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
+
+            var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+
+            if (virtualModExtension != null)
             {
                 GetCachedMainThinkTreeInner(pawn, virtualModExtension, out result);
             }
@@ -356,13 +359,16 @@ namespace emitbreaker.PawnControl
             if (cachedConstantTrees.TryGetValue(pawn.def, out result))
                 return result;
 
-            var modExtension = Utility_NonHumanlikePawnControl.GetExtension(pawn.def);
+            var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
 
-            if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
+            if (physicalModExtension != null)
             {
                 GetCachedConstantThinkTreeInner(pawn, physicalModExtension, out result);
             }
-            else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
+
+            var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+
+            if (virtualModExtension != null)
             {
                 GetCachedConstantThinkTreeInner(pawn, virtualModExtension, out result);
             }
@@ -433,13 +439,16 @@ namespace emitbreaker.PawnControl
             bool result;
             if (!cachedApparelRestriction.TryGetValue(pawn.def, out result))
             {
-                var modExtension = Utility_NonHumanlikePawnControl.GetExtension(pawn.def);
+                var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
 
-                if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
+                if (physicalModExtension != null)
                 {
                     result = physicalModExtension != null && physicalModExtension.restrictApparelByBodyType;
                 }
-                else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
+
+                var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+
+                if (virtualModExtension != null)
                 {
                     result = virtualModExtension != null && virtualModExtension.restrictApparelByBodyType;
                 }

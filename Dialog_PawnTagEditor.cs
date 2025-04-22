@@ -47,7 +47,9 @@ namespace emitbreaker.PawnControl
             get
             {
                 if (_cachedPhysicalModExtension == null)
+                {
                     _cachedPhysicalModExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
+                }
                 return _cachedPhysicalModExtension;
             }
         }
@@ -57,7 +59,9 @@ namespace emitbreaker.PawnControl
             get
             {
                 if (_cachedVirtualModExtension == null)
+                {
                     _cachedVirtualModExtension = def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+                }
                 return _cachedVirtualModExtension;
             }
         }
@@ -287,16 +291,6 @@ namespace emitbreaker.PawnControl
             //        }
             //    }
             //}
-
-            if (SelectedModExtension == null)
-            {
-                if (Utility_NonHumanlikePawnControl.DebugMode())
-                {
-                    Messages.Message($"[PawnControl] No modExtension detected.", MessageTypeDefOf.TaskCompletion);
-                }
-                return;
-            }
-
             // === Layout Rects ===
             Rect topArea = new Rect(inRect.x, inRect.y, inRect.width, topSectionHeight);
             float topX = topArea.x + margin;
@@ -306,6 +300,20 @@ namespace emitbreaker.PawnControl
             Rect centerPane = new Rect(leftPane.xMax + margin, topY, centerPaneWidth, topSectionHeight - margin);
             Rect rightPane = new Rect(centerPane.xMax + margin, topY, rightPaneWidth, topSectionHeight - margin);
             Rect bottomPane = new Rect(inRect.x + margin, topArea.yMax + margin, inRect.width - margin * 2, bottomPaneHeight - margin);
+
+            if (SelectedModExtension == null)
+            {
+                if (Utility_NonHumanlikePawnControl.DebugMode())
+                {
+                    Messages.Message($"[PawnControl] No modExtension detected.", MessageTypeDefOf.TaskCompletion);
+                }
+                return;
+            }
+            else if (SelectedModExtension == PhysicalModExtension && PhysicalModExtension != null)
+            {
+                Widgets.Label(topArea.ContractedBy(4f), "PawnControl_CannotEditPhysical".Translate());
+                return;
+            }
 
             // === Draw Panels ===
             DrawTagListScrollView(leftPane);

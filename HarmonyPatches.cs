@@ -530,14 +530,10 @@ namespace emitbreaker.PawnControl
                 return;
             }
 
-            var modExtension = Utility_NonHumanlikePawnControl.GetExtension(pawn.def);
+            var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
+            var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
 
-            if (modExtension == null)
-            {
-                return;
-            }
-
-            if (modExtension is NonHumanlikePawnControlExtension physicalModExtension)
+            if (physicalModExtension != null)
             {
                 if (!physicalModExtension.restrictApparelByBodyType)
                 {
@@ -549,7 +545,7 @@ namespace emitbreaker.PawnControl
                     pawn.apparel.WornApparel.Clear();
                 }
             }
-            else if (modExtension is VirtualNonHumanlikePawnControlExtension virtualModExtension)
+            else if (virtualModExtension != null)
             {
                 if (!virtualModExtension.restrictApparelByBodyType)
                 {

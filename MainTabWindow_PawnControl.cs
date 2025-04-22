@@ -18,7 +18,7 @@ namespace emitbreaker.PawnControl
         {
             base.PreOpen();
             raceDefs = DefDatabase<ThingDef>.AllDefsListForReading
-                .Where(t => Utility_ModExtensionResolver.HasVirtualModExtension(t))
+                .Where(t => t.GetModExtension<VirtualNonHumanlikePawnControlExtension>() != null && !t.race.Humanlike && t.GetModExtension<NonHumanlikePawnControlExtension>() == null)
                 .OrderBy(t => t.label)
                 .ToList();
         }
