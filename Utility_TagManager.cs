@@ -47,6 +47,11 @@ namespace emitbreaker.PawnControl
 
         public static HashSet<string> GetTags(ThingDef def)
         {
+            if (def == null)
+            {
+                return new HashSet<string>();
+            }
+
             if (!Utility_CacheManager.tagCache.TryGetValue(def, out var set))
             {
                 set = BuildTags(def);
@@ -96,6 +101,22 @@ namespace emitbreaker.PawnControl
             if (set.Contains(ManagedTags.ForceWork)) set.Add(ManagedTags.ForceWork);
 
             return set;
+        }
+
+        public static bool HasAnyTagWithPrefix(ThingDef def, string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix) || def == null)
+            {
+                return false;
+            }
+
+            if (!HasTagSet(def))
+            {
+                return false;
+            }
+
+            var tagSet = GetTags(def);
+            return tagSet.Any(t => t != null && t.StartsWith(prefix));
         }
     }
 }
