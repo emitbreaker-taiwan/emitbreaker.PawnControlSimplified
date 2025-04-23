@@ -66,44 +66,24 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="CacheInvalidationHandler.cs" />
     <Compile Include="LordDutyMapping.cs" />
-    <Compile Include="VirtualNonHumanlikePawnControlExtension.cs" />
-    <Compile Include="Utility_ModExtensionResolver.cs" />
-    <Compile Include="VirtualTagStorage.cs" />
-    <Compile Include="VirtualTagStorageService.cs" />
-    <Compile Include="IVirtualTagStorage.cs" />
-    <Compile Include="PawnControl_StartupHook.cs" />
-    <Compile Include="Utility_CEPatchExporter.cs" />
-    <Compile Include="Dialog_SelectNonHumanlikeRace.cs" />
-    <Compile Include="Utility_TagCatalog.cs" />
-    <Compile Include="Dialog_PresetManager.cs" />
-    <Compile Include="Dialog_RenamePreset.cs" />
-    <Compile Include="PawnTagPreset.cs" />
-    <Compile Include="PawnTagPresetManager.cs" />
-    <Compile Include="PawnTagDef.cs" />
-    <Compile Include="PawnEnumTags.cs" />
-    <Compile Include="DebugActions_PawnControl.cs" />
-    <Compile Include="NonHumanlikePawnControlTagGroups.cs" />
     <Compile Include="Utility_CacheManager.cs" />
-    <Compile Include="Utility_VehicleFramework.cs" />
-    <Compile Include="Utility_VFECompatibility.cs" />
-    <Compile Include="Utility_LordDutyResolver.cs" />
-    <Compile Include="Utility_DraftSupport.cs" />
-    <Compile Include="Utility_HARCompatibility.cs" />
-    <Compile Include="Utility_CECompatibility.cs" />
-    <Compile Include="CompCEWeaponRestriction.cs" />
-    <Compile Include="CompProperties_CEWeaponRestriction.cs" />
-    <Compile Include="MainTabWindow_PawnControl.cs" />
-    <Compile Include="Dialog_PawnTagEditor.cs" />
-    <Compile Include="NonHumanlikePawnRolePresets.cs" />
+    <Compile Include="Utility_LordDutyManager.cs" />
+    <Compile Include="Utility_TagManager.cs" />
+    <Compile Include="Utility_Common.cs" />
+    <Compile Include="HarmonyInitializer.cs" />
+    <Compile Include="PawnEnumTags.cs" />
+    <Compile Include="PawnTagDef.cs" />
     <Compile Include="ManagedTags.cs" />
-    <Compile Include="GameComponent_SimpleNonHumanlikePawnControl.cs" />
-    <Compile Include="Utility_NonHumanlikePawnControl.cs" />
     <Compile Include="NonHumanlikePawnControlExtension.cs" />
-    <Compile Include="ModSettings_SimpleNonHumanlikePawnControl.cs" />
-    <Compile Include="Mod_SimpleNonHumanlikePawnControl.cs" />
     <Compile Include="HarmonyPatches.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Utility_CECompatibility.cs" />
+    <Compile Include="Utility_DrafterManager.cs" />
+    <Compile Include="Utility_HARCompatibility.cs" />
+    <Compile Include="Utility_VehicleFramework.cs" />
+    <Compile Include="Utility_VFECompatibility.cs" />
   </ItemGroup>
   <ItemGroup>
     <WCFMetadata Include="Connected Services\" />

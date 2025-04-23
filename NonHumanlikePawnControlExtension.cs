@@ -21,11 +21,11 @@ namespace emitbreaker.PawnControl
         public List<PawnTagDef> pawnTagDefs;
 
         // === Capability flags ===
-        public bool? forceAnimal;
-        public bool? forceDraftable;
-        public bool? forceWork;
-        public bool? forceTrainerTab;
-        public bool autoDraftInject;
+        public bool forceAnimal = false;
+        public bool forceDraftable = false;
+        public bool forceWork = false;
+        public bool forceTrainerTab = false;
+        public bool autoDraftInject = false;
 
         // === CE / Mech tag compatibility ===
         [NoTranslate]

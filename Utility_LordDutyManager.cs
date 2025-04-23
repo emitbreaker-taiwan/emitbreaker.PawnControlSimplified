@@ -10,24 +10,24 @@ using static System.Net.Mime.MediaTypeNames;
 
 namespace emitbreaker.PawnControl
 {
-    public static class Utility_LordDutyResolver
+    public static class Utility_LordDutyManager
     {
         public static bool TryGetDutyOverride(Pawn pawn, LordToil lordToil, out PawnDuty duty)
         {
             duty = null;
 
-            var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
+            var modExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
 
-            if (physicalModExtension != null)
+            if (modExtension != null)
             {
-                if (physicalModExtension?.lordDutyMappings == null)
+                if (modExtension?.lordDutyMappings == null)
                 {
                     return false;
                 }
 
                 string toilClassName = lordToil.GetType().Name;
 
-                foreach (var mapping in physicalModExtension.lordDutyMappings)
+                foreach (var mapping in modExtension.lordDutyMappings)
                 {
                     if (mapping.lordToilClass == toilClassName)
                     {
@@ -72,10 +72,16 @@ namespace emitbreaker.PawnControl
 
         public static void TryAssignLordDuty(Pawn pawn, LordToil lordToil, DutyDef fallbackDuty, IntVec3 flagLoc, float fallbackRadius = -1f)
         {
-            if (!Utility_NonHumanlikePawnControl.PawnChecker(pawn)) return;
+            if (!Utility_Common.PawnChecker(pawn))
+            {
+                return;
+            }
 
             // Use enum-safe check for tag
-            if (!Utility_CacheManager.Tags.HasEnumTag(pawn.def, PawnEnumTags.AutoDraftInjection)) return;
+            if (!Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection))
+            {
+                return;
+            }
 
             // Prefer XML override
             if (TryGetDutyOverride(pawn, lordToil, out var dutyFromXml))

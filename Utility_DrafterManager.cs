@@ -12,29 +12,37 @@ using Verse.AI.Group;
 
 namespace emitbreaker.PawnControl
 {
-    public static class Utility_DraftSupport
+    public static class Utility_DrafterManager
     {
         public static bool ShouldInjectDrafter(Pawn pawn)
         {
-            return Utility_NonHumanlikePawnControl.PawnChecker(pawn) &&
-                   pawn.drafter == null &&
-                   Utility_NonHumanlikePawnControl.HasTag(pawn.def, ManagedTags.AutoDraftInjection);
+            if (pawn == null || pawn.def == null || pawn.RaceProps == null || pawn.drafter != null)
+            {
+                return false; // Invalid pawn or missing definitions
+            }
+
+            // Drafter should be injected if the pawn is valid, has no drafter, and has the AutoDraftInjection tag
+            return Utility_Common.PawnChecker(pawn) && Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection);
         }
 
         public static DutyDef ResolveSiegeDuty(Pawn p)
         {
-            if (Utility_CacheManager.Tags.HasTag(p.def, "Siege_HoldFire"))
+            if (Utility_TagManager.HasTag(p.def, "Siege_HoldFire"))
             {
                 var holdFire = Utility_CacheManager.GetDuty("HoldFire");
                 if (holdFire != null)
+                {
                     return holdFire;
+                }
             }
 
-            if (Utility_CacheManager.Tags.HasTag(p.def, "Siege_ManTurret"))
+            if (Utility_TagManager.HasTag(p.def, "Siege_ManTurret"))
             {
                 var manTurrets = Utility_CacheManager.GetDuty("ManTurrets");
                 if (manTurrets != null)
+                {
                     return manTurrets;
+                }
             }
 
             return DutyDefOf.Defend;
