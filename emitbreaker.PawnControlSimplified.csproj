@@ -67,7 +67,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CacheInvalidationHandler.cs" />
+    <Compile Include="Utility_Compatibility.cs" />
+    <Compile Include="GameComponent_LateInjection.cs" />
     <Compile Include="LordDutyMapping.cs" />
+    <Compile Include="Mod_SimpleNonHumanlikePawnControl.cs" />
     <Compile Include="Utility_CacheManager.cs" />
     <Compile Include="Utility_LordDutyManager.cs" />
     <Compile Include="Utility_TagManager.cs" />

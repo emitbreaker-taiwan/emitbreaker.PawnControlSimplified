@@ -23,6 +23,8 @@ namespace emitbreaker.PawnControl
         public const string VFECore_Combat = "VFECore_Combat"; // For VFE Compatibility
         public const string Mech_DefendBeacon = "Mech_DefendBeacon"; // For Mech_DefendBeacon
         public const string Mech_EscortCommander = "Mech_EscortCommander"; // For Mech_EscortCommander
+        public const string VFESkipWorkJobGiver = "VFESkipWorkJobGiver"; // Tags for specific job control behavior
+        public const string DisableVFEAIJobs = "DisableVFEAIJobs"; // Tags for specific job control behavior
     }
 }
 

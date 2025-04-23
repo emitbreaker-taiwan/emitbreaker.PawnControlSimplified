@@ -37,6 +37,23 @@ namespace emitbreaker.PawnControl
         //}
 
         // Vanilla
+        // Change Non Humanlike to Humanlike under specific condition
+        [HarmonyPatch(typeof(RaceProperties), nameof(RaceProperties.Humanlike), MethodType.Getter)]
+        public static class Patch_Humanlike_ForWorkTagsOnly
+        {
+            public static void Postfix(RaceProperties __instance, ref bool __result)
+            {
+                if (__result) return;
+
+                ThingDef def;
+                if (Utility_CacheManager.TryGetDefFromRace(__instance, out def) &&
+                    Utility_CacheManager.ShouldTreatAsHumanlikeForWork(def))
+                {
+                    __result = true;
+                }
+            }
+        }
+
         // Change ToolUser to Animal
         [HarmonyPatch(typeof(RaceProperties), nameof(RaceProperties.Animal), MethodType.Getter)]
         public static class Patch_RaceProperties_Animal
@@ -199,7 +216,6 @@ namespace emitbreaker.PawnControl
             }
         }
 
-
         // Inject training tab for non-humanlike pawns
         [HarmonyPatch]
         public static class Patch_ThingWithComps_GetInspectTabs
@@ -294,7 +310,6 @@ namespace emitbreaker.PawnControl
             }
         }
 
-
         //Ensure drafter is injected on existing pawns
         [HarmonyPatch(typeof(Map), nameof(Map.FinalizeInit))]
         public static class Patch_Map_FinalizeInit
@@ -303,7 +318,30 @@ namespace emitbreaker.PawnControl
             {
                 foreach (Pawn pawn in __instance.mapPawns.AllPawns)
                 {
-                    if (!Utility_VehicleFramework.IsVehiclePawn(pawn) && Utility_DrafterManager.ShouldInjectDrafter(pawn))
+                    // === Safeguard against null or incomplete pawns ===
+                    if (pawn == null || pawn.Dead || pawn.Destroyed || pawn.def == null || pawn.Faction == null)
+                    {
+                        continue;
+                    }
+
+                    // === Prevent early injection on corpses, animals, or hostile NPCs ===
+                    if (!pawn.Spawned || !pawn.RaceProps.IsFlesh || !pawn.RaceProps.Humanlike)
+                    {
+                        continue;
+                    }
+
+                    // === Your intended mod logic ===
+                    if (!Utility_DrafterManager.ShouldInjectDrafter(pawn))
+                    {
+                        continue;
+                    }
+
+                    if (!Utility_DrafterManager.ShouldInjectDrafter(pawn))
+                    {
+                        continue;
+                    }
+
+                    if (!Utility_VehicleFramework.IsVehiclePawn(pawn))
                     {
                         pawn.drafter = new Pawn_DraftController(pawn);
                     }
@@ -441,6 +479,169 @@ namespace emitbreaker.PawnControl
             }
         }
 
+        public static class Patch_LordToil_Additional
+        {
+            public static void PatchLordToilIfExists(Harmony harmony, string typeName, float radius)
+            {
+                var type = AccessTools.TypeByName(typeName);
+                if (type != null)
+                {
+                    var method = AccessTools.Method(type, "UpdateAllDuties");
+                    if (method != null)
+                    {
+                        harmony.Patch(method, postfix: new HarmonyMethod(typeof(HarmonyPatches), nameof(AssignGenericDefendDuty)));
+                    }
+                }
+            }
+
+            private static void AssignGenericDefendDuty(LordToil __instance)
+            {
+                foreach (Pawn p in __instance.lord.ownedPawns)
+                {
+                    Utility_LordDutyManager.TryAssignLordDuty(p, __instance, DutyDefOf.Defend, __instance.FlagLoc, 28f);
+                }
+            }
+
+            public static void PatchBiotechMechClusterDefend(Harmony harmony)
+            {
+                Type mechToilType = AccessTools.TypeByName("RimWorld.LordToil_MechClusterDefend");
+                if (mechToilType != null)
+                {
+                    MethodInfo updateAllDuties = AccessTools.Method(mechToilType, "UpdateAllDuties");
+                    MethodInfo postfix = typeof(PatchImpl_MechClusterDefend).GetMethod(nameof(PatchImpl_MechClusterDefend.Postfix));
+
+                    if (updateAllDuties != null && postfix != null)
+                    {
+                        harmony.Patch(updateAllDuties, postfix: new HarmonyMethod(postfix));
+                        Log.Message("[PawnControl] Patched MechClusterDefend.UpdateAllDuties");
+                    }
+                }
+            }
+
+            public static void TryPatchApparelFilter(Harmony harmony)
+            {
+                try
+                {
+                    var target = AccessTools.Method(
+                        typeof(PawnApparelGenerator),
+                        nameof(PawnApparelGenerator.GenerateStartingApparelFor),
+                        new Type[] { typeof(Pawn), typeof(PawnGenerationRequest) });
+
+                    var postfix = AccessTools.Method(typeof(HarmonyPatches), "Postfix_PawnApparelGenerator");
+
+                    if (target != null && postfix != null)
+                    {
+                        harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+                        Log.Message("[PawnControl] Patched PawnApparelGenerator.GenerateStartingApparelFor");
+                    }
+                    else
+                    {
+                        Log.Warning("[PawnControl] Could not find method to patch: PawnApparelGenerator.GenerateStartingApparelFor");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("[PawnControl] Exception during apparel patch: " + ex);
+                }
+            }
+        }
+
+        public static class Patch_VFEAI_TryGiveJob
+        {
+            // Prefix: Suppress job if tag exists
+            public static bool Prefix(Pawn pawn)
+            {
+                if (pawn == null || pawn.def == null)
+                    return true;
+
+                var ext = Utility_CacheManager.GetModExtension(pawn.def);
+                if (ext == null || ext.tags == null)
+                    return true;
+
+                // 🔸 Replace this with your real tag key
+                if (ext.tags.Contains(ManagedTags.VFESkipWorkJobGiver))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            public static void PatchVFEAIJobGiver(Harmony harmony)
+            {
+                var vfeJobGiverType = AccessTools.TypeByName("VFECore.JobGiver_WorkVFE");
+                if (vfeJobGiverType != null)
+                {
+                    var method = AccessTools.Method(vfeJobGiverType, "TryGiveJob", new Type[] { typeof(Pawn) });
+                    if (method != null)
+                    {
+                        harmony.Patch(method,
+                            prefix: new HarmonyMethod(typeof(Patch_VFEAI_TryGiveJob), nameof(Prefix)));
+                        Log.Message("[PawnControl] Patched VFECore.JobGiver_WorkVFE.TryGiveJob");
+                    }
+                    else
+                    {
+                        Log.Warning("[PawnControl] Method TryGiveJob not found in VFECore.JobGiver_WorkVFE");
+                    }
+                }
+                else
+                {
+                    Log.Warning("[PawnControl] Type VFECore.JobGiver_WorkVFE not found");
+                }
+            }
+
+            // === VFE ===
+            // Disable VFE-AI Work ThinkTree Jobs on incompatible pawns
+            public static bool Prefix(Pawn pawn, ref Job __result)
+            {
+                if (!Utility_VFECompatibility.VFEActive)
+                    return true;
+
+                if (!Utility_Common.PawnChecker(pawn))
+                    return true;
+
+                if (pawn.Drafted && Utility_CECompatibility.IsCECombatBusy(pawn))
+                {
+                    __result = null;
+                    return false;
+                }
+
+                if (Utility_TagManager.HasTag(pawn.def, ManagedTags.DisableVFEAIJobs))
+                {
+                    __result = null;
+                    return false;
+                }
+
+                return true; // continue with original TryGiveJob
+            }
+        }
+
+        public static class PatchImpl_MechClusterDefend
+        {
+            public static void Postfix(object __instance)
+            {
+                if (!ModsConfig.BiotechActive || __instance == null) return;
+
+                LordToil toil = __instance as LordToil;
+                if (toil?.lord == null) return;
+
+                var beaconDuty = Utility_CacheManager.GetDuty("MechDefendBeacon");
+                var escortDuty = Utility_CacheManager.GetDuty("EscortCommander");
+
+                foreach (var pawn in toil.lord.ownedPawns)
+                {
+                    if (!Utility_Common.PawnChecker(pawn)) continue;
+                    if (!Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection)) continue;
+
+                    if (Utility_TagManager.HasTag(pawn.def, ManagedTags.Mech_DefendBeacon) && beaconDuty != null)
+                        pawn.mindState.duty = new PawnDuty(beaconDuty, toil.FlagLoc, 18f);
+                    else if (Utility_TagManager.HasTag(pawn.def, ManagedTags.Mech_EscortCommander) && escortDuty != null)
+                        pawn.mindState.duty = new PawnDuty(escortDuty, toil.FlagLoc, 22f);
+                    else
+                        pawn.mindState.duty = new PawnDuty(DutyDefOf.Defend, toil.FlagLoc, 20f);
+                }
+            }
+        }
 
         [HarmonyPatch(typeof(Pawn_SkillTracker), nameof(Pawn_SkillTracker.GetSkill))]
         public static class Patch_Pawn_SkillTracker_GetSkill
@@ -533,119 +734,82 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        //// === CE ===
-        //// Drafted Fallback Job Injection (Hold Position)
-        //[HarmonyPatch(typeof(Pawn), nameof(Pawn.Tick))]
-        //public static class Patch_Pawn_Tick_HoldCombat
-        //{
-        //    public static void Postfix(Pawn __instance)
-        //    {
-        //        if (!Utility_CECompatibility.CEActive || !Utility_NonHumanlikePawnControl.PawnChecker(__instance))
-        //            return;
+        // === CE ===
+        // Drafted Fallback Job Injection (Hold Position)
+        [HarmonyPatch(typeof(Pawn), nameof(Pawn.Tick))]
+        public static class Patch_Pawn_Tick_HoldCombat
+        {
+            public static void Postfix(Pawn __instance)
+            {
+                if (!Utility_CECompatibility.CEActive || !Utility_Common.PawnChecker(__instance))
+                    return;
 
-        //        if (__instance.Drafted && __instance.jobs?.curJob == null &&
-        //            __instance.mindState?.duty == null &&
-        //            __instance.mindState?.lastJobTag != JobTag.MiscWork)
-        //        {
-        //            Job holdJob = JobMaker.MakeJob(JobDefOf.Wait_Combat, __instance.Position);
-        //            holdJob.expiryInterval = 120;
-        //            holdJob.checkOverrideOnExpire = true;
-        //            __instance.jobs.StartJob(holdJob, JobCondition.InterruptForced, null, false);
-        //        }
-        //    }
-        //}
+                if (__instance.Drafted && __instance.jobs?.curJob == null &&
+                    __instance.mindState?.duty == null &&
+                    __instance.mindState?.lastJobTag != JobTag.MiscWork)
+                {
+                    Job holdJob = JobMaker.MakeJob(JobDefOf.Wait_Combat, __instance.Position);
+                    holdJob.expiryInterval = 120;
+                    holdJob.checkOverrideOnExpire = true;
+                    __instance.jobs.StartJob(holdJob, JobCondition.InterruptForced, null, false);
+                }
+            }
+        }
 
-        //// Drafted AI JobTree Override (CE fallback)
-        //[HarmonyPatch(typeof(ThinkNode_Priority), nameof(ThinkNode_Priority.TryIssueJobPackage))]
-        //public static class Patch_ThinkNodePriority_DraftedOverride
-        //{
-        //    public static bool Prefix(Pawn pawn, JobIssueParams jobParams, ref ThinkResult __result, ThinkNode_Priority __instance)
-        //    {
-        //        if (!Utility_CECompatibility.CEActive || !pawn.Drafted || pawn.mindState == null)
-        //            return true;
+        // Drafted AI JobTree Override (CE fallback)
+        [HarmonyPatch(typeof(ThinkNode_Priority), nameof(ThinkNode_Priority.TryIssueJobPackage))]
+        public static class Patch_ThinkNodePriority_DraftedOverride
+        {
+            public static bool Prefix(Pawn pawn, JobIssueParams jobParams, ref ThinkResult __result, ThinkNode_Priority __instance)
+            {
+                if (!Utility_CECompatibility.CEActive || !pawn.Drafted || pawn.mindState == null)
+                    return true;
 
-        //        if (!Utility_NonHumanlikePawnControl.HasTag(pawn.def, ManagedTags.AutoDraftInjection))
-        //            return true;
+                if (!Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection))
+                    return true;
 
-        //        if (pawn.mindState.duty == null &&
-        //            (pawn.jobs?.curJob == null || pawn.jobs.curJob.def == JobDefOf.Wait_Combat))
-        //        {
-        //            Job hold = JobMaker.MakeJob(JobDefOf.Wait_Combat, pawn.Position);
-        //            hold.expiryInterval = 240;
-        //            hold.checkOverrideOnExpire = true;
-        //            __result = new ThinkResult(hold, __instance, JobTag.Misc);
-        //            return false;
-        //        }
+                if (pawn.mindState.duty == null &&
+                    (pawn.jobs?.curJob == null || pawn.jobs.curJob.def == JobDefOf.Wait_Combat))
+                {
+                    Job hold = JobMaker.MakeJob(JobDefOf.Wait_Combat, pawn.Position);
+                    hold.expiryInterval = 240;
+                    hold.checkOverrideOnExpire = true;
+                    __result = new ThinkResult(hold, __instance, JobTag.Misc);
+                    return false;
+                }
 
-        //        return true;
-        //    }
-        //}
+                return true;
+            }
+        }
 
-        //// === HAR ===
-        //// Restrict Apparel by BodyType (used in PawnApparelGenerator Patch)
-        //public static void Postfix_PawnApparelGenerator(Pawn pawn, PawnGenerationRequest request)
-        //{
-        //    if (pawn == null || pawn.apparel == null || pawn.apparel.WornApparel == null)
-        //    {
-        //        return;
-        //    }
+        // === HAR ===
+        // Restrict Apparel by BodyType (used in PawnApparelGenerator Patch)
+        public static void Postfix_PawnApparelGenerator(Pawn pawn, PawnGenerationRequest request)
+        {
+            if (pawn == null || pawn.apparel == null || pawn.apparel.WornApparel == null)
+            {
+                return;
+            }
 
-        //    if (!Utility_CacheManager.IsApparelRestricted(pawn))
-        //    {
-        //        return;
-        //    }
+            if (!Utility_CacheManager.IsApparelRestricted(pawn))
+            {
+                return;
+            }
 
-        //    var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
-        //    var virtualModExtension = pawn.def.GetModExtension<VirtualNonHumanlikePawnControlExtension>();
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
 
-        //    if (physicalModExtension != null)
-        //    {
-        //        if (!physicalModExtension.restrictApparelByBodyType)
-        //        {
-        //            return;
-        //        }
+            if (modExtension != null)
+            {
+                if (!modExtension.restrictApparelByBodyType)
+                {
+                    return;
+                }
 
-        //        if (!Utility_HARCompatibility.IsAllowedBodyType(pawn, physicalModExtension.allowedBodyTypes))
-        //        {
-        //            pawn.apparel.WornApparel.Clear();
-        //        }
-        //    }
-        //}
-
-        //public static void AssignGenericDefendDuty(LordToil __instance)
-        //{
-        //    foreach (Pawn p in __instance.lord.ownedPawns)
-        //    {
-        //        Utility_LordDutyResolver.TryAssignLordDuty(p, __instance, DutyDefOf.Defend, __instance.FlagLoc, 28f);
-        //    }
-        //}
-
-        //// === VFE ===
-        //// Disable VFE-AI Work ThinkTree Jobs on incompatible pawns
-        //public static class Patch_VFEAI_TryGiveJob
-        //{
-        //    public static bool Prefix(Pawn pawn, ref Job __result)
-        //    {
-        //        if (!Utility_VFECompatibility.VFEActive)
-        //            return true;
-
-        //        if (!Utility_NonHumanlikePawnControl.PawnChecker(pawn))
-        //            return true;
-
-        //        if (pawn.Drafted && Utility_CECompatibility.IsCECombatBusy(pawn))
-        //        {
-        //            __result = null;
-        //            return false;
-        //        }
-
-        //        if (Utility_CacheManager.Tags.HasTag(pawn.def, "DisableVFEAIJobs"))
-        //        {
-        //            __result = null;
-        //            return false;
-        //        }
-
-        //        return true; // continue with original TryGiveJob
-        //    }
-        //}
+                if (!Utility_HARCompatibility.IsAllowedBodyType(pawn, modExtension.allowedBodyTypes))
+                {
+                    pawn.apparel.WornApparel.Clear();
+                }
+            }
+        }
     }
 }

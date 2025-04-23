@@ -21,8 +21,15 @@ namespace emitbreaker.PawnControl
                 return false; // Invalid pawn or missing definitions
             }
 
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+
+            if (modExtension == null)
+            {
+                return false; // No mod extension found
+            }
+
             // Drafter should be injected if the pawn is valid, has no drafter, and has the AutoDraftInjection tag
-            return Utility_Common.PawnChecker(pawn) && Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection);
+            return Utility_Common.PawnChecker(pawn) && (Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection) || modExtension.forceDraftable);
         }
 
         public static DutyDef ResolveSiegeDuty(Pawn p)

@@ -14,7 +14,21 @@ namespace emitbreaker.PawnControl
         static HarmonyInitializer()
         {
             var harmony = new Harmony("com.emitbreaker.PawnControl");
-            harmony.PatchAll(); // Automatically applies all Harmony patches in the project
+
+            // Automatically applies all Harmony patches in the project
+            harmony.PatchAll(); // This will apply all patches within the HarmonyPatches.cs file.
+
+            //Apply additional patches that need custom logic(like LordToil or VFE)
+            ApplyApparelPatch(harmony);
+        }
+
+        // Apparel patch applied after all def databases are loaded
+        private static void ApplyApparelPatch(Harmony harmony)
+        {
+            LongEventHandler.ExecuteWhenFinished(() =>
+            {
+                HarmonyPatches.Patch_LordToil_Additional.TryPatchApparelFilter(harmony);
+            });
         }
     }
 }

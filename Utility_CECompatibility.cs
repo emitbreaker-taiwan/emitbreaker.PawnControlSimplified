@@ -100,8 +100,7 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            compAmmoUser = weapon.AllComps.FirstOrDefault(c =>
-                CompAmmoUserType.IsInstanceOfType(c));
+            compAmmoUser = weapon.AllComps.FirstOrDefault(c => CompAmmoUserType.IsInstanceOfType(c));
 
             return compAmmoUser != null;
         }
