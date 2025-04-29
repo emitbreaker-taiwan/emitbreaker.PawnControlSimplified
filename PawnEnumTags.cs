@@ -12,6 +12,7 @@ namespace emitbreaker.PawnControl
         ForceDraftable,
         ForceWork,
         AllowAllWork,
+        AllowWork_Art,
         AllowWork_Mining,
         AllowWork_Growing,
         AllowWork_Construction,
@@ -26,9 +27,12 @@ namespace emitbreaker.PawnControl
         AllowWork_Research,
         AllowWork_PlantCutting,
         AllowWork_Smithing,
+        AllowWork_Tailoring,
+        AllowWork_Cooking,
         AllowWork_Childcare, // 🔒 Biotech-only
         AllowWork_DarkStudy, // 🔒 Royalty-only
         BlockAllWork,
+        BlockWork_Art,
         BlockWork_Mining,
         BlockWork_Growing,
         BlockWork_Construction,
@@ -43,6 +47,8 @@ namespace emitbreaker.PawnControl
         BlockWork_Research,
         BlockWork_PlantCutting,
         BlockWork_Smithing,
+        BlockWork_Tailoring,
+        BlockWork_Cooking,
         BlockWork_Childcare, // 🔒 Biotech-only
         BlockWork_DarkStudy, // 🔒 Royalty-only
         ForceTrainerTab,

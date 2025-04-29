@@ -1,18 +1,5 @@
-﻿using HarmonyLib;
-using RimWorld;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime;
-using System.Text;
-using System.Threading.Tasks;
+﻿using RimWorld;
 using Verse;
-using Verse.AI.Group;
-using Verse.AI;
-using System.Reflection;
-using static emitbreaker.PawnControl.HarmonyPatches;
-using UnityEngine;
-using System.Security.Cryptography;
 
 namespace emitbreaker.PawnControl
 {
@@ -26,9 +13,6 @@ namespace emitbreaker.PawnControl
 
         public Mod_SimpleNonHumanlikePawnControl(ModContentPack content) : base(content)
         {
-            // Preload work + draftable humanlike override cache
-            Utility_CacheManager.PreloadWorkHumanlikeCache();
-            Utility_CacheManager.BuildRaceReverseMap();
         }
     }
 }

@@ -42,7 +42,71 @@ namespace emitbreaker.PawnControl
             var tagSet = GetTags(def);
 
             // Check if the tag exists in the set
-            return tagSet.Contains(tag);
+            bool hasTag = tagSet.Contains(tag);
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.TagManager_HasTag_HasTag(def, tag, hasTag);
+            }
+            return hasTag;
+        }
+
+        public static bool WorkDisabled(ThingDef def, string tag)
+        {
+            if (def == null || string.IsNullOrEmpty(tag))
+            {
+                return false; // Invalid input
+            }
+
+            var key = new ValueTuple<ThingDef, string>(def, "disabled_" + tag);
+
+            // Try to get from cache first
+            if (Utility_CacheManager.workDisabledCache.TryGetValue(key, out bool result))
+            {
+                return result;
+            }
+
+            // Compute result
+            result = (!HasTag(def, ManagedTags.AllowAllWork) && HasTag(def, ManagedTags.BlockAllWork))
+                    || (!HasTag(def, ManagedTags.BlockAllWork) &&
+                        HasTag(def, (ManagedTags.BlockWorkPrefix + tag)) &&
+                        !HasTag(def, (ManagedTags.AllowWorkPrefix + tag)));
+
+            // Store in cache
+            Utility_CacheManager.workDisabledCache[key] = result;
+
+            return result;
+        }
+
+        public static bool WorkEnabled(ThingDef def, string tag)
+        {
+            if (def == null || string.IsNullOrEmpty(tag))
+            {
+                return false; // Invalid input
+            }
+
+            var key = new ValueTuple<ThingDef, string>(def, tag);
+
+            // Try to get from cache first
+            if (Utility_CacheManager.workEnabledCache.TryGetValue(key, out bool result))
+            {
+                return result;
+            }
+
+            // Compute result
+            result = HasTag(def, ManagedTags.AllowAllWork) ||
+                     HasTag(def, (ManagedTags.AllowWorkPrefix + tag));
+
+            // Store in cache
+            Utility_CacheManager.workEnabledCache[key] = result;
+
+            return result;
+        }
+
+        // Add a method to clear both caches
+        public static void ClearWorkStatusCache()
+        {
+            Utility_CacheManager.workEnabledCache.Clear();
+            Utility_CacheManager.workDisabledCache.Clear();
         }
 
         public static HashSet<string> GetTags(ThingDef def)
@@ -66,22 +130,16 @@ namespace emitbreaker.PawnControl
 
             var modExtension = Utility_CacheManager.GetModExtension(def);
 
-            if (modExtension?.tags == null && modExtension?.pawnTagDefs == null)
+            if (modExtension?.tags == null)
             {
                 return set;
             }
                         
-            List<string> effectiveTags = modExtension.tags;
+            List<string> effectiveTags = null;
 
-            if (modExtension.pawnTagDefs != null)
+            if (modExtension.tags != null)
             {
-                foreach (var tagDef in modExtension.pawnTagDefs)
-                {
-                    if (tagDef != null)
-                    {
-                        effectiveTags.Add(tagDef.defName);
-                    }
-                }
+                effectiveTags = new List<string>(modExtension.tags);
             }
 
             if (effectiveTags == null || effectiveTags.Count == 0)
@@ -116,7 +174,16 @@ namespace emitbreaker.PawnControl
             }
 
             var tagSet = GetTags(def);
-            return tagSet.Any(t => t != null && t.StartsWith(prefix));
+
+            foreach (string t in tagSet)
+            {
+                if (t != null && t.StartsWith(prefix))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

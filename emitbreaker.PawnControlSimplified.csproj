@@ -66,7 +66,43 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="CacheInvalidationHandler.cs" />
+    <Compile Include="ManagedThinkTreeBlocklist.cs" />
+    <Compile Include="Startup_ThinkTreeInjector.cs" />
+    <Compile Include="ForcedIdentityType.cs" />
+    <Compile Include="SkillPassionEntry.cs" />
+    <Compile Include="SkillLevelEntry.cs" />
+    <Compile Include="Utility_JobManager.cs" />
+    <Compile Include="PawnControl_JobGiver_Work.cs" />
+    <Compile Include="Utility_DebugManager.cs" />
+    <Compile Include="Utility_WorkSettingsManager.cs" />
+    <Compile Include="Utility_ThinkTreeManager.cs" />
+    <Compile Include="PawnControl_JobDriver_PlantHarvest_Designated.cs" />
+    <Compile Include="PawnControl_JobDriver_PlantWork.cs" />
+    <Compile Include="PawnControl_JobDriver_PlantSeed.cs" />
+    <Compile Include="PawnControl_JobDriver_PlantCut_Designated.cs" />
+    <Compile Include="PawnControl_JobDriver_PlantCut.cs" />
+    <Compile Include="PawnControl_JobDriver_PlantHarvest.cs" />
+    <Compile Include="PawnControl_JobDriver_PlantSow.cs" />
+    <Compile Include="PawnControl_WorkGiver_GrowerSow.cs" />
+    <Compile Include="PawnControl_WorkGiver_GrowerHarvest.cs" />
+    <Compile Include="PawnControl_WorkGiver_PlantSeed.cs" />
+    <Compile Include="PawnControl_WorkGiver_PlantsCut.cs" />
+    <Compile Include="Startup_IdentityPreloader.cs" />
+    <Compile Include="Utility_IdentityManager_IsAnimalLikeScopedContext.cs" />
+    <Compile Include="Utility_IdentityManager_IsMutantScopedContext.cs" />
+    <Compile Include="Utility_IdentityManager_IsMechanoidScopedContext.cs" />
+    <Compile Include="Utility_IdentityManager_IsWildManScopedContext.cs" />
+    <Compile Include="Utility_IdentityManager_IsQuestLodgerScopedContext.cs" />
+    <Compile Include="FlagScopeTarget.cs" />
+    <Compile Include="Utility_IdentityManager_IsGuestScopedContext.cs" />
+    <Compile Include="Utility_IdentityManager_IsSlaveScopedContext.cs" />
+    <Compile Include="PawnIdentityFlags.cs" />
+    <Compile Include="ScopedFlagContextBase.cs" />
+    <Compile Include="Utility_IdentityManager_IsPrisonerScopedContext.cs" />
+    <Compile Include="Utility_IdentityManager_ScopedFlagContext.cs" />
+    <Compile Include="Utility_IdentityManager_IsColonistScopedContext.cs" />
+    <Compile Include="Utility_SkillManager.cs" />
+    <Compile Include="Utility_IdentityManager.cs" />
     <Compile Include="Utility_Compatibility.cs" />
     <Compile Include="GameComponent_LateInjection.cs" />
     <Compile Include="LordDutyMapping.cs" />
@@ -92,7 +128,14 @@
     <WCFMetadata Include="Connected Services\" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Defs\GameComponentDefs\GameComponent_LateInjection.xml" />
+    <Content Include="Defs\JobDefs\Jobs_Work.xml" />
+    <Content Include="Defs\ThinkTreeDefs\SubTrees_Misc.xml" />
+    <Content Include="Defs\WorkGiverDefs\WorkGivers.xml" />
     <Content Include="LICENSE.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Defs\MainButtonDef\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

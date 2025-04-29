@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<Defs>
+
+	<!--============= Main colonist behavior core ============-->
+  
+	<ThinkTreeDef>
+		<defName>PawnControl_AnimalWork_CutPlant</defName>
+		<thinkRoot Class="emitbreaker.PawnControl.ThinkNode_Conditional_PawnControlWorkEnabled">
+			<subNodes>
+				<li Class="ThinkNode_ChancePerHour_Constant">
+					<mtbHours>1.5</mtbHours>
+					<subNodes>
+						<li Class="ThinkNode_ConditionalRequireCapacities">
+							<requiredCapacities>
+								<li>Manipulation</li>
+							</requiredCapacities>
+							<subNodes>
+								<li Class="JobGiver_Work" />
+							</subNodes>
+						</li>
+					</subNodes>
+				</li>
+			</subNodes>
+		</thinkRoot>
+	</ThinkTreeDef>
+
+</Defs>

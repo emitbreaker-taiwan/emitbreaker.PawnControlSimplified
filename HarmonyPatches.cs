@@ -5,59 +5,25 @@ using Verse.AI;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-using static System.Net.Mime.MediaTypeNames;
-using System.Reflection.Emit;
+using UnityEngine;
+using Verse.Sound;
 using System.Reflection;
 using Verse.AI.Group;
-using static emitbreaker.PawnControl.ManagedTags;
-using System.Security.Cryptography;
 
 namespace emitbreaker.PawnControl
 {
     public class HarmonyPatches
     {
-        //// === Utility Methods ===
-        //public static void EnsureDrafterInjected(Pawn p)
-        //{
-        //    if (Utility_DraftSupport.ShouldInjectDrafter(p) && p.drafter == null)
-        //    {
-        //        p.drafter = new Pawn_DraftController(p);
-        //    }
-        //}
-
-        //public static void ApplyLordDutyForGroup(IEnumerable<Pawn> pawns, LordToil toil, DutyDef fallback, float defaultRadius)
-        //{
-        //    foreach (var p in pawns)
-        //    {
-        //        Utility_LordDutyResolver.TryAssignLordDuty(p, toil, fallback, toil.FlagLoc, defaultRadius);
-        //    }
-        //}
-
-        // Vanilla
-        // Change Non Humanlike to Humanlike under specific condition
-        [HarmonyPatch(typeof(RaceProperties), nameof(RaceProperties.Humanlike), MethodType.Getter)]
-        public static class Patch_Humanlike_ForWorkTagsOnly
-        {
-            public static void Postfix(RaceProperties __instance, ref bool __result)
-            {
-                if (__result) return;
-
-                ThingDef def;
-                if (Utility_CacheManager.TryGetDefFromRace(__instance, out def) &&
-                    Utility_CacheManager.ShouldTreatAsHumanlikeForWork(def))
-                {
-                    __result = true;
-                }
-            }
-        }
-
-        // Change ToolUser to Animal
+        /// <summary>
+        /// Patch #1 Step 1. Animal Race replacement by using cache.
+        /// This class contains Harmony patches for modifying and extending the behavior of RimWorld's core systems.
+        /// It includes patches for race properties, work tab injection, job assignment, and other advanced pawn control features.
+        /// </summary>
         [HarmonyPatch(typeof(RaceProperties), nameof(RaceProperties.Animal), MethodType.Getter)]
         public static class Patch_RaceProperties_Animal
         {
+            private static readonly Dictionary<ThingDef, bool> forcedAnimalCache = new Dictionary<ThingDef, bool>();
+
             public static void Postfix(RaceProperties __instance, ref bool __result)
             {
                 if (__result)
@@ -65,751 +31,1043 @@ namespace emitbreaker.PawnControl
                     return;
                 }
 
-                // Early exit if race is null
-                var race = __instance.AnyPawnKind?.race;
-                if (race == null)
+                PawnKindDef pawnKind = __instance.AnyPawnKind;
+                if (pawnKind == null)
                 {
                     return;
                 }
 
-                // Try to get the mod extension once
-                var modExtension = Utility_CacheManager.GetModExtension(race);
-                if (modExtension == null)
+                ThingDef raceDef = pawnKind.race;
+                if (raceDef == null)
                 {
                     return;
                 }
 
-                // Use a local variable for better readability and to avoid multiple Contains checks
-                bool isForceAnimalTagPresent = modExtension.tags?.Contains(ManagedTags.ForceAnimal) == true;
-
-                // Combine checks for forceAnimal and the tag
-                if (modExtension.forceAnimal == true || isForceAnimalTagPresent)
+                // ✅ Try fast cache lookup
+                if (forcedAnimalCache.TryGetValue(raceDef, out bool isForcedAnimal))
                 {
+                    __result = isForcedAnimal;
+                    return;
+                }
+
+                // ✅ Cache miss, check mod extension
+                isForcedAnimal = Utility_CacheManager.GetModExtension(raceDef)?.forceIdentity == ForcedIdentityType.ForceAnimal;
+                forcedAnimalCache[raceDef] = isForcedAnimal;
+
+                if (isForcedAnimal)
+                {
+                    __result = true;
+                    // Optional: Debug log
+                    // if (Prefs.DevMode)
+                    // {
+                    //     Log.Message($"[PawnControl] ForceAnimal override applied: {raceDef.defName}");
+                    // }
+                }
+            }
+
+            private static void CodeBackupOriginal(RaceProperties __instance, ref bool __result)
+            {
+                if (__result) return; // Already animal, no debug needed
+
+                PawnKindDef pawnKind = __instance.AnyPawnKind;
+                if (pawnKind == null)
+                {
+                    return;
+                }
+
+                ThingDef raceDef = pawnKind.race;
+                if (raceDef == null)
+                {
+                    return;
+                }
+
+                if (Utility_IdentityManager.IsForcedAnimal(raceDef))
+                {
+                    if (Prefs.DevMode)
+                    {
+                        Log.Message($"[PawnControl] ForceAnimal override applied: Race '{raceDef.defName}' was treated as Animal.");
+                    }
                     __result = true;
                 }
             }
         }
 
-        //Work tag override logic
-        [HarmonyPatch(typeof(Pawn), nameof(Pawn.WorkTypeIsDisabled))]
-        public static class Patch_Pawn_WorkTypeIsDisabled
-        {
-            public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
-            {
-                var code = new List<CodeInstruction>(instructions);
-                for (int i = 0; i < code.Count; i++)
-                {
-                    yield return code[i];
+        /// <summary>
+        /// Patch #1 Step 2. Humanlike Race replacement by using cache.
+        /// This file contains Harmony patches for modifying and extending the behavior of RimWorld's core systems.
+        /// It includes patches for race properties, work tab injection, job assignment, and other advanced pawn control features.
+        /// These patches enable enhanced control over non-humanlike pawns, including work prioritization, think tree overrides, and identity-based behavior customization.
+        /// </summary>
+        //[HarmonyPatch(typeof(RaceProperties), nameof(RaceProperties.Humanlike), MethodType.Getter)]
+        //public static class Patch_RaceProperties_Humanlike
+        //{
+        //    private static readonly Dictionary<ThingDef, bool> forcedHumanlikeCache = new Dictionary<ThingDef, bool>();
 
-                    if (code[i].opcode == OpCodes.Ret)
-                    {
-                        // Inject: if (IsWorkTypeAllowed(this.def, workType)) return false;
+        //    public static void Postfix(RaceProperties __instance, ref bool __result)
+        //    {
+        //        if (__result)
+        //        {
+        //            return; // ✅ Already humanlike
+        //        }
 
-                        yield return new CodeInstruction(OpCodes.Ldarg_0); // this (Pawn)
-                        yield return new CodeInstruction(OpCodes.Ldfld, AccessTools.Field(typeof(Pawn), nameof(Pawn.def))); // this.def
-                        yield return new CodeInstruction(OpCodes.Ldarg_1); // WorkTypeDef
-                        yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(Patch_Pawn_WorkTypeIsDisabled), nameof(IsWorkTypeAllowed))); // call IsWorkTypeAllowed
+        //        PawnKindDef pawnKind = __instance.AnyPawnKind;
+        //        if (pawnKind == null)
+        //        {
+        //            return; // ✅ No pawnKind
+        //        }
 
-                        Label skip = code[i].labels.FirstOrDefault(); // preserve any label on the original return
-                        yield return new CodeInstruction(OpCodes.Brfalse_S, skip); // if false, continue original return
-                        yield return new CodeInstruction(OpCodes.Ldc_I4_0); // return false
-                        yield return new CodeInstruction(OpCodes.Ret);
-                    }
-                }
-            }
+        //        ThingDef raceDef = pawnKind.race;
+        //        if (raceDef == null)
+        //        {
+        //            return; // ✅ No raceDef
+        //        }
 
-            private static bool IsWorkTypeAllowed(ThingDef def, WorkTypeDef workType)
-            {
-                if (def == null || def.race?.Humanlike == true)
-                    return true;
+        //        if (forcedHumanlikeCache.TryGetValue(raceDef, out bool isForcedHumanlike))
+        //        {
+        //            __result = isForcedHumanlike;
+        //            return;
+        //        }
 
-                var modExtension = Utility_CacheManager.GetModExtension(def);
-                if (modExtension == null)
-                    return false;
+        //        isForcedHumanlike = Utility_CacheManager.GetModExtension(raceDef)?.forceHumanlike == true;
+        //        forcedHumanlikeCache[raceDef] = isForcedHumanlike;
 
-                // Check if the work type is allowed based on tags
-                string workTag = ManagedTags.AllowWorkPrefix + workType.defName;
-                return modExtension.tags?.Contains(workTag) == true || modExtension.tags?.Contains(ManagedTags.AllowAllWork) == true;
-            }
-        }
+        //        if (isForcedHumanlike)
+        //        {
+        //            __result = true;
+        //        }
+        //    }
+        //}
 
-        [HarmonyPatch(typeof(Pawn_WorkSettings), nameof(Pawn_WorkSettings.EnableAndInitialize))]
-        public static class Patch_Pawn_WorkSettings_EnableAndInitialize
-        {
-            // Cache private field: private Pawn pawn;
-            private static readonly FieldInfo pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+        /// <summary>  
+        /// Patch #1 Step 3. Mechanoid Race replacement by using cache.
+        /// Patch for RaceProperties.IsMechanoid to allow dynamic mechanoid behavior based on mod extensions.  
+        /// </summary>
+        //[HarmonyPatch(typeof(RaceProperties), nameof(RaceProperties.IsMechanoid), MethodType.Getter)]
+        //public static class Patch_RaceProperties_IsMechanoid
+        //{
+        //    private static readonly Dictionary<ThingDef, bool> forcedMechanoidCache = new Dictionary<ThingDef, bool>();
 
-            // Cache internal method: EnableAndInitializeIfNotAlreadyInitialized
-            private static readonly MethodInfo initMethod = AccessTools.Method(typeof(Pawn_WorkSettings), "EnableAndInitializeIfNotAlreadyInitialized");
+        //    public static void Postfix(RaceProperties __instance, ref bool __result)
+        //    {
+        //        if (__result)
+        //        {
+        //            return; // ✅ Already mechanoid
+        //        }
 
-            public static bool Prefix(object __instance)
-            {
-                if (__instance == null || pawnField == null || initMethod == null)
-                {
-                    Log.Warning("[PawnControl] EnableAndInitialize patch skipped due to missing reflection targets.");
-                    return true;
-                }
+        //        PawnKindDef pawnKind = __instance.AnyPawnKind;
+        //        if (pawnKind == null)
+        //        {
+        //            return; // ✅ No pawnKind
+        //        }
 
-                Pawn pawn = pawnField.GetValue(__instance) as Pawn;
-                if (pawn == null) return true;
+        //        ThingDef raceDef = pawnKind.race;
+        //        if (raceDef == null)
+        //        {
+        //            return; // ✅ No raceDef
+        //        }
 
-                if (pawn.RaceProps.Humanlike)
-                    return true; // use vanilla logic
+        //        if (forcedMechanoidCache.TryGetValue(raceDef, out bool isForcedMechanoid))
+        //        {
+        //            __result = isForcedMechanoid;
+        //            return;
+        //        }
 
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension == null || modExtension.tags == null || !modExtension.tags.Contains(ManagedTags.AllowAllWork))
-                    return true;
+        //        isForcedMechanoid = Utility_CacheManager.GetModExtension(raceDef)?.forceMechanoid == true;
+        //        forcedMechanoidCache[raceDef] = isForcedMechanoid;
 
-                // Initialize work settings
-                initMethod.Invoke(__instance, null);
+        //        if (isForcedMechanoid)
+        //        {
+        //            __result = true;
+        //        }
+        //    }
+        //}
 
-                // Assign work priorities based on tags
-                foreach (var workType in DefDatabase<WorkTypeDef>.AllDefsListForReading)
-                {
-                    string workTag = ManagedTags.AllowWorkPrefix + workType.defName;
-                    if (modExtension.tags.Contains(workTag) || modExtension.tags.Contains(ManagedTags.AllowAllWork))
-                    {
-                        if (!pawn.WorkTypeIsDisabled(workType))
-                        {
-                            pawn.workSettings.SetPriority(workType, 3); // Default priority
-                        }
-                    }
-                }
-
-                return false; // Skip vanilla logic
-            }
-        }
-
-        // Show non-humanlike if tagged
+        /// <summary>
+        /// Patch #2 Work Tab Injection
+        /// Step 1: Inject Work Tab (with Scoped IsColonist Override)
+        /// </summary>
         [HarmonyPatch(typeof(MainTabWindow_Work), "Pawns", MethodType.Getter)]
         public static class Patch_MainTabWindow_Work_Pawns
         {
-            public static void Postfix(ref IEnumerable<Pawn> __result)
+            public static bool Prefix(ref IEnumerable<Pawn> __result)
             {
-                // Filter the pawns to include only those that should appear in the work tab
-                __result = __result.Where(ShouldAppearInWorkTab);
-            }
-
-            private static bool ShouldAppearInWorkTab(Pawn pawn)
-            {
-                if (pawn == null || pawn.def == null)
+                using (new Utility_IdentityManager_ScopedFlagContext(FlagScopeTarget.IsColonist))
                 {
-                    return false;
-                }
+                    var taggedPawns = Utility_CacheManager.GetEffectiveColonistLikePawns(Find.CurrentMap);
 
-                // Humanlike pawns always appear in the work tab
-                if (pawn.RaceProps.Humanlike)
-                {
-                    return true;
-                }
+                    // If all are vanilla humanlike and have no mod extension — fully fallback to vanilla
+                    bool isPureVanillaHumanlike = taggedPawns.All(p => p.RaceProps.Humanlike && Utility_CacheManager.GetModExtension(p.def) == null);
 
-                // Check if the pawn has the required mod extension
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension == null)
-                {
-                    return false;
-                }
-
-                // Check if the pawn is tagged to appear in the work tab
-                return modExtension.tags?.Contains(ManagedTags.AllowAllWork) == true ||
-                       modExtension.tags?.Any(tag => tag.StartsWith(ManagedTags.AllowWorkPrefix)) == true;
-            }
-        }
-
-        // Inject training tab for non-humanlike pawns
-        [HarmonyPatch]
-        public static class Patch_ThingWithComps_GetInspectTabs
-        {
-            public static MethodBase TargetMethod()
-            {
-                // Manually resolve method from base type
-                return AccessTools.Method(typeof(Thing), "GetInspectTabs");
-            }
-
-            public static void Postfix(Thing __instance, ref IEnumerable<InspectTabBase> __result)
-            {
-                // Only apply to pawns
-                if (!(__instance is Pawn pawn)) return;
-
-                // Check if the pawn's ThingDef has the required mod extension and tag
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension == null || modExtension.tags == null || !modExtension.tags.Contains(ManagedTags.ForceTrainerTab))
-                    return;
-
-                // Ensure the pawn has a training tracker
-                if (pawn.training == null)
-                    pawn.training = new Pawn_TrainingTracker(pawn);
-
-                // Add the training tab if it doesn't already exist
-                var tabs = __result?.ToList() ?? new List<InspectTabBase>();
-                if (!tabs.Any(t => t is ITab_Pawn_Training))
-                    tabs.Add(InspectTabManager.GetSharedInstance(typeof(ITab_Pawn_Training)));
-
-                __result = tabs;
-            }
-        }
-
-        [HarmonyPatch(typeof(Pawn), nameof(Pawn.SpawnSetup))]
-        public static class Patch_Pawn_SpawnSetup
-        {
-            public static void Postfix(Pawn __instance, Map map, bool respawningAfterLoad)
-            {
-                if (__instance == null || !__instance.Spawned)
-                {
-                    //Log.Warning("[PawnControl] SpawnSetup skipped: Pawn is null or not spawned.");
-                    return;
-                }
-
-                // Check if the pawn is a vehicle
-                if (Utility_VehicleFramework.IsVehiclePawn(__instance))
-                {
-                    //Log.Message($"[PawnControl] SpawnSetup skipped: {__instance.LabelShort} is a vehicle.");
-                    return;
-                }
-
-                // Inject Pawn_DraftController
-                if (Utility_DrafterManager.ShouldInjectDrafter(__instance))
-                {
-                    //Log.Message($"[PawnControl] Injecting Pawn_DraftController for {__instance.LabelShort}.");
-                    __instance.drafter = new Pawn_DraftController(__instance);
-                }
-
-                // Apply ThinkTree overrides
-                try
-                {
-                    ThinkTreeDef mainTree = null;
-                    ThinkTreeDef constTree = null;
-
-                    // Retrieve ThinkTree overrides from the pawn's def
-                    if (__instance.def != null)
+                    if (isPureVanillaHumanlike)
                     {
-                        var modExtension = __instance.def.GetModExtension<NonHumanlikePawnControlExtension>();
-                        if (modExtension != null)
+                        return true; // ✅ Let vanilla logic handle both pawn list and columns
+                    }
+
+                    // Otherwise, use injected pawn list
+                    foreach (var pawn in taggedPawns)
+                    {
+                        if (pawn != null && pawn.guest == null)
                         {
-                            mainTree = modExtension.overrideThinkTreeMain;
-                            constTree = modExtension.overrideThinkTreeConstant;
+                            pawn.guest = new Pawn_GuestTracker(pawn);
+                        }
+
+                    }
+
+                    __result = taggedPawns;
+
+                    var workTableDef = DefDatabase<PawnTableDef>.GetNamedSilentFail("Work");
+                    if (workTableDef != null)
+                    {
+
+                        workTableDef.columns = workTableDef.columns
+                            .Where(col => IsWorkColumnSupported(col, taggedPawns))
+                            .ToList();
+                    }
+
+                    return false; // ✅ Skip vanilla only when we injected __result
+                }
+            }
+
+            private static bool IsWorkColumnSupported(PawnColumnDef col, IEnumerable<Pawn> taggedPawns)
+            {
+                if (col == null || col.workType == null)
+                {
+                    return true; // ✅ Allow non-work columns always
+                }
+
+                string tag = ManagedTags.AllowWorkPrefix + col.workType.defName;
+                bool columnEnabled = false;
+
+                foreach (Pawn pawn in taggedPawns)
+                {
+                    if (pawn == null || pawn.def == null || pawn.def.race == null)
+                    {
+                        continue;
+                    }
+
+                    if (pawn.workSettings?.WorkIsActive(col.workType) == true)
+                    {
+                        columnEnabled = true;
+                    }
+
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension != null)
+                    {
+                        if (pawn.workSettings == null || !pawn.workSettings.EverWork)
+                        {
+                            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
+                            columnEnabled = true;
                         }
                     }
-
-                    if (mainTree != null)
-                    {
-                        //Log.Message($"[PawnControl] Applying main ThinkTree override for {__instance.LabelShort}.");
-                        Traverse.Create(__instance.kindDef).Property("thinkTreeMain").SetValue(mainTree);
-                    }
-
-                    if (constTree != null)
-                    {
-                        //Log.Message($"[PawnControl] Applying constant ThinkTree override for {__instance.LabelShort}.");
-                        Traverse.Create(__instance.kindDef).Property("thinkTreeConstant").SetValue(constTree);
-                    }
                 }
-                catch (Exception ex)
-                {
-                    Log.Error($"[PawnControl] Error applying ThinkTree overrides for {__instance.LabelShort}: {ex.Message}");
-                }
+
+                return columnEnabled;
             }
         }
 
-        //Ensure drafter is injected on existing pawns
-        [HarmonyPatch(typeof(Map), nameof(Map.FinalizeInit))]
-        public static class Patch_Map_FinalizeInit
+        // Step 2: Hook WrokTypeIsDisabled since modded pawn does not have actual skill.
+        [HarmonyPatch(typeof(Pawn), nameof(Pawn.WorkTypeIsDisabled))]
+        public static class Patch_Pawn_WorkTypeIsDisabled
         {
-            public static void Postfix(Map __instance)
+            [HarmonyPrefix]
+            public static bool Prefix(Pawn __instance, WorkTypeDef w, ref bool __result)
             {
-                foreach (Pawn pawn in __instance.mapPawns.AllPawns)
+                var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                if (modExtension != null)
                 {
-                    // === Safeguard against null or incomplete pawns ===
-                    if (pawn == null || pawn.Dead || pawn.Destroyed || pawn.def == null || pawn.Faction == null)
-                    {
-                        continue;
-                    }
+                    var allowed = Utility_TagManager.WorkEnabled(__instance.def, w.defName.ToString());
 
-                    // === Prevent early injection on corpses, animals, or hostile NPCs ===
-                    if (!pawn.Spawned || !pawn.RaceProps.IsFlesh || !pawn.RaceProps.Humanlike)
-                    {
-                        continue;
-                    }
-
-                    // === Your intended mod logic ===
-                    if (!Utility_DrafterManager.ShouldInjectDrafter(pawn))
-                    {
-                        continue;
-                    }
-
-                    if (!Utility_DrafterManager.ShouldInjectDrafter(pawn))
-                    {
-                        continue;
-                    }
-
-                    if (!Utility_VehicleFramework.IsVehiclePawn(pawn))
-                    {
-                        pawn.drafter = new Pawn_DraftController(pawn);
-                    }
+                    __result = !allowed;
+                    return false; // ⛔ Skip vanilla logic
                 }
+
+                return true; // ✅ Use vanilla fallback
             }
         }
 
-        // Add draft toggle for injected non-humanlike pawns
-        [HarmonyPatch(typeof(Pawn), nameof(Pawn.GetGizmos))]
-        public static class Patch_Pawn_GetGizmos
+        // Step 3: Hook IsIncapableOfWholeWorkType since modded pawn has no capabilities.
+        [HarmonyPatch(typeof(PawnColumnWorker_WorkPriority), "IsIncapableOfWholeWorkType")]
+        public static class Patch_IsIncapableOfWholeWorkType_ByTag
         {
-            public static IEnumerable<Gizmo> Postfix(IEnumerable<Gizmo> __result, Pawn __instance)
+            public static bool Prefix(Pawn p, WorkTypeDef work, ref bool __result)
             {
-                if (Utility_VehicleFramework.IsVehiclePawn(__instance)) yield break;
+                if (p == null || work == null) return true;
 
-                foreach (var g in __result) yield return g;
+                // ✅ Respect identity system
+                if (!Utility_IdentityManager.MatchesIdentityFlags(p, PawnIdentityFlags.IsColonist))
+                    return true;
 
-                if (!Utility_DrafterManager.ShouldInjectDrafter(__instance)) yield break;
-
-                if (Utility_CECompatibility.CEActive && Utility_CECompatibility.IsCECombatBusy(__instance))
+                // ✅ If work is allowed via tags, override incapability
+                var modExtension = Utility_CacheManager.GetModExtension(p.def);
+                if (modExtension != null)
                 {
-                    var cmd = new Command_Action
+                    string tag = ManagedTags.AllowWorkPrefix + work.defName;
+                    if (Utility_TagManager.WorkEnabled(p.def, tag))
                     {
-                        defaultLabel = "Busy",
-                        defaultDesc = "This unit is currently engaged in combat.",
-                        icon = TexCommand.Draft,
-                        action = () => { }
-                    };
-                    cmd.Disable("In Combat");
-                    yield return cmd;
-                    yield break;
-                }
-
-                yield return new Command_Toggle
-                {
-                    defaultLabel = __instance.Drafted ? "Undraft" : "Draft",
-                    defaultDesc = "Toggles draft status.",
-                    isActive = () => __instance.Drafted,
-                    toggleAction = () => __instance.drafter.Drafted = !__instance.Drafted,
-                    icon = TexCommand.Draft
-                };
-            }
-        }
-
-        // Setter – Interrupt job on undraft
-        [HarmonyPatch(typeof(Pawn_DraftController), nameof(Pawn_DraftController.Drafted), MethodType.Setter)]
-        public static class Patch_Pawn_DraftController_Drafted
-        {
-            public static void Postfix(Pawn_DraftController __instance, bool value)
-            {
-                if (!value)
-                {
-                    __instance.pawn.jobs?.EndCurrentJob(JobCondition.InterruptForced);
-                }
-            }
-        }
-
-        //Fallback CE combat behavior
-        [HarmonyPatch(typeof(ThinkNode_Priority), nameof(ThinkNode_Priority.TryIssueJobPackage))]
-        public static class Patch_ThinkNodePriority_TryIssueJob
-        {
-            public static bool Prefix(Pawn pawn, JobIssueParams jobParams, ref ThinkResult __result, ThinkNode_Priority __instance)
-            {
-                if (!Utility_CECompatibility.CEActive) return true;
-                if (!Utility_Common.PawnChecker(pawn) || !pawn.Drafted || pawn.mindState == null) return true;
-
-                if (Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection))
-                {
-                    if (pawn.mindState.duty == null && (pawn.jobs?.curJob == null || pawn.jobs.curJob.def == JobDefOf.Wait_Combat))
-                    {
-                        Job hold = JobMaker.MakeJob(JobDefOf.Wait_Combat, pawn.Position);
-                        hold.expiryInterval = 240;
-                        hold.checkOverrideOnExpire = true;
-                        __result = new ThinkResult(hold, __instance, JobTag.Misc);
+                        __result = false; // ✅ Not incapable
                         return false;
                     }
                 }
 
-                return true;
+                return true; // Fall back to vanilla check
             }
         }
 
-        // Inject duty for drafted AI pawns
-        [HarmonyPatch(typeof(LordToil_AssaultColony), nameof(LordToil_AssaultColony.UpdateAllDuties))]
-        public static class Patch_LordToil_AssaultColony
+        // Step 5: Unified safe rendering + sorting + initialization
+        [HarmonyPatch(typeof(PawnColumnWorker_WorkPriority))]
+        public static class Patch_PawnColumnWorker_WorkPriority_SafeAccess
         {
-            public static void Postfix(LordToil_AssaultColony __instance)
+            // Patch 1: Safe DoCell for non-humanlike pawns
+            [HarmonyPrefix]
+            [HarmonyPatch(nameof(PawnColumnWorker_WorkPriority.DoCell))]
+            public static bool DoCell_Prefix(PawnColumnWorker_WorkPriority __instance, Rect rect, Pawn pawn, PawnTable table)
             {
-                foreach (var p in __instance.lord.ownedPawns)
+                if (pawn == null || pawn.def?.race == null)
                 {
-                    Utility_LordDutyManager.TryAssignLordDuty(p, __instance, DutyDefOf.AssaultColony, IntVec3.Invalid);
+                    return true; // ✅ Not a modded colonist-like pawn, proceed vanilla
                 }
+
+                if (!Utility_IdentityManager.MatchesIdentityFlags(pawn, PawnIdentityFlags.IsColonist))
+                {
+                    return true; // ✅ Not eligible
+                }
+
+                if (!pawn.Spawned || pawn.Dead)
+                {
+                    return true; // ✅ Skip dead or unspawned pawns
+                }
+
+                // ✅ Full safe initialization, including ThinkTree and WorkSettings
+                Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
+
+                return true; // ✅ Allow vanilla to continue drawing priority box
             }
+
+            //// Patch 2: Safe Compare
+            //[HarmonyPrefix]
+            //[HarmonyPatch(nameof(PawnColumnWorker_WorkPriority.Compare))]
+            //public static bool Compare_Prefix(PawnColumnWorker_WorkPriority __instance, Pawn a, Pawn b, ref int __result)
+            //{
+            //    var modExtensionPawnA = Utility_CacheManager.GetModExtension(a.def);
+            //    var modExtensionPawnB = Utility_CacheManager.GetModExtension(b.def);
+
+            //    if (modExtensionPawnA == null && modExtensionPawnB == null)
+            //    {
+            //        return true;
+            //    }
+
+            //    float valA = Utility_SkillManager.GetWorkPrioritySortingValue(a, __instance.def.workType);
+            //    float valB = Utility_SkillManager.GetWorkPrioritySortingValue(b, __instance.def.workType);
+            //    __result = valA.CompareTo(valB);
+            //    return false;
+            //}
         }
 
-        [HarmonyPatch(typeof(LordToil_DefendPoint), nameof(LordToil_DefendPoint.UpdateAllDuties))]
-        public static class Patch_LordToil_DefendPoint
+        //// Step 6: Force render image if pawn is not pure Humanlike
+        //[HarmonyPatch(typeof(WidgetsWork), "DrawWorkBoxBackground")]
+        //public static class Patch_WidgetsWork_DrawWorkBoxBackground
+        //{
+        //    public static bool Prefix(Rect rect, Pawn p, WorkTypeDef workDef)
+        //    {
+        //        if (p == null || workDef == null)
+        //        {
+        //            return true;
+        //        }
+
+        //        float skillAvg = Utility_SkillManager.SafeAverageOfRelevantSkillsFor(p, workDef);
+
+        //        // === Background interpolation
+        //        Texture2D baseTex;
+        //        Texture2D blendTex;
+        //        float blendFactor;
+
+        //        if (skillAvg < 4f)
+        //        {
+        //            baseTex = WidgetsWork.WorkBoxBGTex_Awful;
+        //            blendTex = WidgetsWork.WorkBoxBGTex_Bad;
+        //            blendFactor = skillAvg / 4f;
+        //        }
+        //        else if (skillAvg <= 14f)
+        //        {
+        //            baseTex = WidgetsWork.WorkBoxBGTex_Bad;
+        //            blendTex = WidgetsWork.WorkBoxBGTex_Mid;
+        //            blendFactor = (skillAvg - 4f) / 10f;
+        //        }
+        //        else
+        //        {
+        //            baseTex = WidgetsWork.WorkBoxBGTex_Mid;
+        //            blendTex = WidgetsWork.WorkBoxBGTex_Excellent;
+        //            blendFactor = (skillAvg - 14f) / 6f;
+        //        }
+
+        //        GUI.DrawTexture(rect, baseTex);
+        //        GUI.color = new Color(1f, 1f, 1f, blendFactor);
+        //        GUI.DrawTexture(rect, blendTex);
+
+        //        // === Dangerous work warning (only for Humanlike pawns with Ideo)
+        //        if (p.RaceProps != null && p.RaceProps.Humanlike && p.Ideo != null && p.Ideo.IsWorkTypeConsideredDangerous(workDef))
+        //        {
+        //            GUI.color = Color.white;
+        //            GUI.DrawTexture(rect, WidgetsWork.WorkBoxOverlay_PreceptWarning);
+        //        }
+
+        //        // === Incompetent skill warning (if active but skill is low)
+        //        if (workDef.relevantSkills != null && workDef.relevantSkills.Count > 0 && skillAvg <= 2f)
+        //        {
+        //            if (p.workSettings != null && p.workSettings.WorkIsActive(workDef))
+        //            {
+        //                GUI.color = Color.white;
+        //                GUI.DrawTexture(rect.ContractedBy(2f), WidgetsWork.WorkBoxOverlay_Warning);
+        //            }
+        //        }
+
+        //        // === Passion icon
+        //        Passion passion = Passion.None;
+
+        //        if (p.skills != null)
+        //        {
+        //            passion = p.skills.MaxPassionOfRelevantSkillsFor(workDef);
+        //        }
+        //        else
+        //        {
+        //            SkillDef skill = null;
+        //            if (workDef.relevantSkills != null && workDef.relevantSkills.Count > 0)
+        //            {
+        //                skill = workDef.relevantSkills[0]; // no LINQ FirstOrDefault
+        //            }
+        //            passion = Utility_SkillManager.SetInjectedPassion(p.def, skill);
+        //        }
+
+        //        if ((int)passion > 0)
+        //        {
+        //            GUI.color = new Color(1f, 1f, 1f, 0.4f);
+        //            Rect passionRect = rect;
+        //            passionRect.xMin = rect.center.x;
+        //            passionRect.yMin = rect.center.y;
+
+        //            if (passion == Passion.Minor)
+        //            {
+        //                GUI.DrawTexture(passionRect, WidgetsWork.PassionWorkboxMinorIcon);
+        //            }
+        //            else if (passion == Passion.Major)
+        //            {
+        //                GUI.DrawTexture(passionRect, WidgetsWork.PassionWorkboxMajorIcon);
+        //            }
+        //        }
+
+        //        GUI.color = Color.white;
+        //        return false; // Skip original
+        //    }
+        //}
+
+        //[HarmonyPatch(typeof(WidgetsWork), nameof(WidgetsWork.DrawWorkBoxFor))]
+        //public static class Patch_WidgetsWork_DrawWorkBoxFor
+        //{
+        //    public static bool Prefix(float x, float y, Pawn p, WorkTypeDef wType, bool incapableBecauseOfCapacities)
+        //    {
+        //        if (p == null || p.def == null || p.def.race == null)
+        //        {
+        //            return true; // Allow vanilla drawing if invalid
+        //        }
+
+        //        if (!Utility_ThinkTreeManager.HasAllowWorkTag(p.def))
+        //        {
+        //            return true; // Allow vanilla drawing if not PawnControl target
+        //        }
+
+        //        // ✅ Always rescue pawn's workSettings before any access
+        //        Utility_WorkSettingsManager.SafeEnsurePawnReadyForWork(p);
+
+        //        if (p.WorkTypeIsDisabled(wType))
+        //        {
+        //            if (p.IsWorkTypeDisabledByAge(wType, out var minAgeRequired))
+        //            {
+        //                Rect rect = new Rect(x, y, 25f, 25f);
+        //                if (Event.current.type == EventType.MouseDown && Mouse.IsOver(rect))
+        //                {
+        //                    Messages.Message("MessageWorkTypeDisabledAge".Translate(p, p.ageTracker.AgeBiologicalYears, wType.labelShort, minAgeRequired), p, MessageTypeDefOf.RejectInput, historical: false);
+        //                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
+        //                }
+        //                GUI.DrawTexture(rect, ContentFinder<Texture2D>.Get("UI/Widgets/WorkBoxBG_AgeDisabled"));
+        //            }
+        //            return false;
+        //        }
+
+        //        Rect rect2 = new Rect(x, y, 25f, 25f);
+        //        if (incapableBecauseOfCapacities)
+        //        {
+        //            GUI.color = new Color(1f, 0.3f, 0.3f);
+        //        }
+
+        //        var method = AccessTools.Method(typeof(WidgetsWork), "DrawWorkBoxBackground");
+        //        method.Invoke(null, new object[] { rect2, p, wType });
+        //        GUI.color = Color.white;
+
+        //        if (Find.PlaySettings.useWorkPriorities)
+        //        {
+        //            int priority = p.workSettings.GetPriority(wType);
+        //            if (priority > 0)
+        //            {
+        //                Text.Anchor = TextAnchor.MiddleCenter;
+        //                GUI.color = WidgetsWork.ColorOfPriority(priority);
+        //                Widgets.Label(rect2.ContractedBy(-3f), priority.ToStringCached());
+        //                GUI.color = Color.white;
+        //                Text.Anchor = TextAnchor.UpperLeft;
+        //            }
+
+        //            if (Event.current.type == EventType.MouseDown && Mouse.IsOver(rect2))
+        //            {
+        //                int newPriority = priority;
+
+        //                if (Event.current.button == 0) // Left click
+        //                {
+        //                    newPriority = (priority - 1 + 5) % 5;
+        //                }
+        //                else if (Event.current.button == 1) // Right click
+        //                {
+        //                    newPriority = (priority + 1) % 5;
+        //                }
+
+        //                p.workSettings.SetPriority(wType, newPriority);
+        //                SoundDefOf.DragSlider.PlayOneShotOnCamera();
+
+        //                if (newPriority > 0)
+        //                {
+        //                    float avgSkill = Utility_SkillManager.SafeAverageOfRelevantSkillsFor(p, wType);
+        //                    if (wType.relevantSkills.Any() && avgSkill <= 2f)
+        //                    {
+        //                        SoundDefOf.Crunch.PlayOneShotOnCamera();
+        //                    }
+
+        //                    if (p.Ideo != null && p.Ideo.IsWorkTypeConsideredDangerous(wType))
+        //                    {
+        //                        Messages.Message("MessageIdeoOpposedWorkTypeSelected".Translate(p, wType.gerundLabel), p, MessageTypeDefOf.CautionInput, historical: false);
+        //                        SoundDefOf.DislikedWorkTypeActivated.PlayOneShotOnCamera();
+        //                    }
+        //                }
+
+        //                Event.current.Use();
+        //                PlayerKnowledgeDatabase.KnowledgeDemonstrated(ConceptDefOf.WorkTab, KnowledgeAmount.SpecificInteraction);
+        //                PlayerKnowledgeDatabase.KnowledgeDemonstrated(ConceptDefOf.ManualWorkPriorities, KnowledgeAmount.SmallInteraction);
+        //            }
+
+        //            return false;
+        //        }
+
+        //        if (p.workSettings.GetPriority(wType) > 0)
+        //        {
+        //            GUI.DrawTexture(rect2, WidgetsWork.WorkBoxCheckTex);
+        //        }
+
+        //        if (!Widgets.ButtonInvisible(rect2))
+        //        {
+        //            return false;
+        //        }
+
+        //        if (p.workSettings.GetPriority(wType) > 0)
+        //        {
+        //            p.workSettings.SetPriority(wType, 0);
+        //            SoundDefOf.Checkbox_TurnedOff.PlayOneShotOnCamera();
+        //        }
+        //        else
+        //        {
+        //            p.workSettings.SetPriority(wType, 3);
+        //            SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
+        //            if (wType.relevantSkills.Any())
+        //            {
+        //                // Get the simulated average skill for the pawn
+        //                float avgSkill = Utility_SkillManager.SafeAverageOfRelevantSkillsFor(p, wType);
+
+        //                // Check if the simulated skill is below the threshold
+        //                if (avgSkill <= 2f)
+        //                {
+        //                    SoundDefOf.Crunch.PlayOneShotOnCamera();
+        //                }
+        //            }
+
+        //            if (p.Ideo != null && p.Ideo.IsWorkTypeConsideredDangerous(wType))
+        //            {
+        //                Messages.Message("MessageIdeoOpposedWorkTypeSelected".Translate(p, wType.gerundLabel), p, MessageTypeDefOf.CautionInput, historical: false);
+        //                SoundDefOf.DislikedWorkTypeActivated.PlayOneShotOnCamera();
+        //            }
+        //        }
+
+        //        PlayerKnowledgeDatabase.KnowledgeDemonstrated(ConceptDefOf.WorkTab, KnowledgeAmount.SpecificInteraction);
+
+        //        return false; // Fully replace
+        //    }
+        //}
+
+        // Step 7: Think Tree Injection patches
+        [HarmonyPatch(typeof(Map), nameof(Map.FinalizeInit))]
+        public static class Patch_Map_FinalizeInit_FullInitialize
         {
-            public static void Postfix(LordToil_DefendPoint __instance)
+            // Outline: Ensure FullInitializeAllEligiblePawns runs once after each map finishes initializing
+            [HarmonyPostfix]
+            public static void Postfix(Map __instance)
             {
-                foreach (var p in __instance.lord.ownedPawns)
+                if (__instance == null)
                 {
-                    Utility_LordDutyManager.TryAssignLordDuty(p, __instance, DutyDefOf.Defend, __instance.FlagLoc, -1f);
+                    return;
                 }
-            }
-        }
 
-        [HarmonyPatch(typeof(LordToil_DefendBase), nameof(LordToil_DefendBase.UpdateAllDuties))]
-        public static class Patch_LordToil_DefendBase
-        {
-            public static void Postfix(LordToil_DefendBase __instance)
-            {
-                foreach (var p in __instance.lord.ownedPawns)
+                // 🔥 Force rebuild identity flags if somehow not yet preloaded
+                if (!Utility_IdentityManager.IsIdentityFlagsPreloaded)
                 {
-                    Utility_LordDutyManager.TryAssignLordDuty(p, __instance, DutyDefOf.DefendBase, __instance.FlagLoc, 25f);
+                    Utility_IdentityManager.BuildIdentityFlagCache(true);
                 }
-            }
-        }
 
-        [HarmonyPatch(typeof(LordToil_Siege), nameof(LordToil_Siege.UpdateAllDuties))]
-        public static class Patch_LordToil_Siege
-        {
-            public static void Postfix(LordToil_Siege __instance)
-            {
-                foreach (var p in __instance.lord.ownedPawns)
+                // ✅ Safe-guard: Only if identity flags were already preloaded
+                if (Utility_IdentityManager.IsIdentityFlagsPreloaded)
                 {
-                    if (!Utility_Common.PawnChecker(p)) continue;
+                    Utility_WorkSettingsManager.FullInitializeAllEligiblePawns(__instance, forceLock: true);
 
-                    if (Utility_TagManager.HasTag(p.def, ManagedTags.AutoDraftInjection))
+                    if (Prefs.DevMode)
                     {
-                        var dutyDef = Utility_DrafterManager.ResolveSiegeDuty(p);
-                        Utility_LordDutyManager.TryAssignLordDuty(p, __instance, dutyDef, __instance.FlagLoc, 34f);
-                    }
-                }
-            }
-        }
-
-        public static class Patch_LordToil_Additional
-        {
-            public static void PatchLordToilIfExists(Harmony harmony, string typeName, float radius)
-            {
-                var type = AccessTools.TypeByName(typeName);
-                if (type != null)
-                {
-                    var method = AccessTools.Method(type, "UpdateAllDuties");
-                    if (method != null)
-                    {
-                        harmony.Patch(method, postfix: new HarmonyMethod(typeof(HarmonyPatches), nameof(AssignGenericDefendDuty)));
-                    }
-                }
-            }
-
-            private static void AssignGenericDefendDuty(LordToil __instance)
-            {
-                foreach (Pawn p in __instance.lord.ownedPawns)
-                {
-                    Utility_LordDutyManager.TryAssignLordDuty(p, __instance, DutyDefOf.Defend, __instance.FlagLoc, 28f);
-                }
-            }
-
-            public static void PatchBiotechMechClusterDefend(Harmony harmony)
-            {
-                Type mechToilType = AccessTools.TypeByName("RimWorld.LordToil_MechClusterDefend");
-                if (mechToilType != null)
-                {
-                    MethodInfo updateAllDuties = AccessTools.Method(mechToilType, "UpdateAllDuties");
-                    MethodInfo postfix = typeof(PatchImpl_MechClusterDefend).GetMethod(nameof(PatchImpl_MechClusterDefend.Postfix));
-
-                    if (updateAllDuties != null && postfix != null)
-                    {
-                        harmony.Patch(updateAllDuties, postfix: new HarmonyMethod(postfix));
-                        Log.Message("[PawnControl] Patched MechClusterDefend.UpdateAllDuties");
-                    }
-                }
-            }
-
-            public static void TryPatchApparelFilter(Harmony harmony)
-            {
-                try
-                {
-                    var target = AccessTools.Method(
-                        typeof(PawnApparelGenerator),
-                        nameof(PawnApparelGenerator.GenerateStartingApparelFor),
-                        new Type[] { typeof(Pawn), typeof(PawnGenerationRequest) });
-
-                    var postfix = AccessTools.Method(typeof(HarmonyPatches), "Postfix_PawnApparelGenerator");
-
-                    if (target != null && postfix != null)
-                    {
-                        harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-                        Log.Message("[PawnControl] Patched PawnApparelGenerator.GenerateStartingApparelFor");
-                    }
-                    else
-                    {
-                        Log.Warning("[PawnControl] Could not find method to patch: PawnApparelGenerator.GenerateStartingApparelFor");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Error("[PawnControl] Exception during apparel patch: " + ex);
-                }
-            }
-        }
-
-        public static class Patch_VFEAI_TryGiveJob
-        {
-            // Prefix: Suppress job if tag exists
-            public static bool Prefix(Pawn pawn)
-            {
-                if (pawn == null || pawn.def == null)
-                    return true;
-
-                var ext = Utility_CacheManager.GetModExtension(pawn.def);
-                if (ext == null || ext.tags == null)
-                    return true;
-
-                // 🔸 Replace this with your real tag key
-                if (ext.tags.Contains(ManagedTags.VFESkipWorkJobGiver))
-                {
-                    return false;
-                }
-
-                return true;
-            }
-
-            public static void PatchVFEAIJobGiver(Harmony harmony)
-            {
-                var vfeJobGiverType = AccessTools.TypeByName("VFECore.JobGiver_WorkVFE");
-                if (vfeJobGiverType != null)
-                {
-                    var method = AccessTools.Method(vfeJobGiverType, "TryGiveJob", new Type[] { typeof(Pawn) });
-                    if (method != null)
-                    {
-                        harmony.Patch(method,
-                            prefix: new HarmonyMethod(typeof(Patch_VFEAI_TryGiveJob), nameof(Prefix)));
-                        Log.Message("[PawnControl] Patched VFECore.JobGiver_WorkVFE.TryGiveJob");
-                    }
-                    else
-                    {
-                        Log.Warning("[PawnControl] Method TryGiveJob not found in VFECore.JobGiver_WorkVFE");
+                        Log.Message($"[PawnControl] FullInitializeAllEligiblePawns triggered after FinalizeInit for map '{__instance.uniqueID}'.");
                     }
                 }
                 else
                 {
-                    Log.Warning("[PawnControl] Type VFECore.JobGiver_WorkVFE not found");
-                }
-            }
-
-            // === VFE ===
-            // Disable VFE-AI Work ThinkTree Jobs on incompatible pawns
-            public static bool Prefix(Pawn pawn, ref Job __result)
-            {
-                if (!Utility_VFECompatibility.VFEActive)
-                    return true;
-
-                if (!Utility_Common.PawnChecker(pawn))
-                    return true;
-
-                if (pawn.Drafted && Utility_CECompatibility.IsCECombatBusy(pawn))
-                {
-                    __result = null;
-                    return false;
-                }
-
-                if (Utility_TagManager.HasTag(pawn.def, ManagedTags.DisableVFEAIJobs))
-                {
-                    __result = null;
-                    return false;
-                }
-
-                return true; // continue with original TryGiveJob
-            }
-        }
-
-        public static class PatchImpl_MechClusterDefend
-        {
-            public static void Postfix(object __instance)
-            {
-                if (!ModsConfig.BiotechActive || __instance == null) return;
-
-                LordToil toil = __instance as LordToil;
-                if (toil?.lord == null) return;
-
-                var beaconDuty = Utility_CacheManager.GetDuty("MechDefendBeacon");
-                var escortDuty = Utility_CacheManager.GetDuty("EscortCommander");
-
-                foreach (var pawn in toil.lord.ownedPawns)
-                {
-                    if (!Utility_Common.PawnChecker(pawn)) continue;
-                    if (!Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection)) continue;
-
-                    if (Utility_TagManager.HasTag(pawn.def, ManagedTags.Mech_DefendBeacon) && beaconDuty != null)
-                        pawn.mindState.duty = new PawnDuty(beaconDuty, toil.FlagLoc, 18f);
-                    else if (Utility_TagManager.HasTag(pawn.def, ManagedTags.Mech_EscortCommander) && escortDuty != null)
-                        pawn.mindState.duty = new PawnDuty(escortDuty, toil.FlagLoc, 22f);
-                    else
-                        pawn.mindState.duty = new PawnDuty(DutyDefOf.Defend, toil.FlagLoc, 20f);
-                }
-            }
-        }
-
-        [HarmonyPatch(typeof(Pawn_SkillTracker), nameof(Pawn_SkillTracker.GetSkill))]
-        public static class Patch_Pawn_SkillTracker_GetSkill
-        {
-            private static readonly FieldInfo pawnField = AccessTools.Field(typeof(Pawn_SkillTracker), "pawn");
-
-            public static bool Prefix(Pawn_SkillTracker __instance, SkillDef skillDef, ref SkillRecord __result)
-            {
-                if (__instance == null || skillDef == null) return true;
-
-                Pawn pawn = pawnField.GetValue(__instance) as Pawn;
-                if (pawn == null || pawn.skills == null)
-                    return true;
-
-                // If humanlike, use real skill logic
-                if (pawn.RaceProps?.Humanlike == true)
-                    return true;
-
-                // Otherwise, simulate
-                __result = Utility_CacheManager.GetFakeSkill(pawn, skillDef);
-                return false;
-            }
-        }
-
-        [HarmonyPatch(typeof(WorkGiver_Scanner), nameof(WorkGiver_Scanner.PotentialWorkThingsGlobal))]
-        public static class Patch_WorkGiverScanner_PotentialWorkThingsGlobal
-        {
-            private static HashSet<string> dynamicWhitelist;
-
-            static Patch_WorkGiverScanner_PotentialWorkThingsGlobal()
-            {
-                dynamicWhitelist = new HashSet<string>();
-
-                foreach (WorkGiverDef def in DefDatabase<WorkGiverDef>.AllDefsListForReading)
-                {
-                    if (def?.giverClass == null || def.workType == null) continue;
-
-                    if (typeof(WorkGiver_Scanner).IsAssignableFrom(def.giverClass))
-                    {
-                        var method = AccessTools.Method(def.giverClass, nameof(WorkGiver_Scanner.PotentialWorkThingsGlobal));
-                        if (method != null && method.DeclaringType != typeof(WorkGiver_Scanner))
-                        {
-                            dynamicWhitelist.Add(def.defName);
-                        }
-                    }
-                }
-
-                //Log.Message($"[PawnControl] Auto-whitelisted {dynamicWhitelist.Count} global-scanning WorkGiverDefs.");
-            }
-
-            public static bool Prefix(WorkGiver_Scanner __instance, Pawn pawn, ref IEnumerable<Thing> __result)
-            {
-                if (__instance?.def == null || pawn?.def == null)
-                    return true;
-
-                if (pawn.RaceProps.Humanlike)
-                    return true;
-
-                if (!dynamicWhitelist.Contains(__instance.def.defName))
-                    return true;
-
-                if (!Utility_CacheManager.IsWorkTypeEnabledForPawn(pawn, __instance.def.workType))
-                {
                     if (Prefs.DevMode)
-                        Log.Message($"[PawnControl] Blocked {pawn.def.defName} from {__instance.def.defName} (no work tag)");
+                    {
+                        Log.Warning($"[PawnControl] Identity flags were not preloaded before FinalizeInit of map '{__instance.uniqueID}'. Skipping full initialize.");
+                    }
+                }
+            }
+        }
 
-                    __result = new List<Thing>();
-                    return false;
+        /// <summary>
+        /// Patch to allow non-humanlike pawns with mod extension to bypass WorkGiver restrictions.
+        /// </summary>
+        [HarmonyPatch(typeof(JobGiver_Work), "PawnCanUseWorkGiver")]
+        public static class Patch_JobGiver_Work_PawnCanUseWorkGiver
+        {
+            [HarmonyPrefix]
+            public static bool Prefix(Pawn pawn, WorkGiver giver, ref bool __result)
+            {
+                if (pawn == null || giver == null)
+                {
+                    return true; // fallback to vanilla
                 }
 
-                // 🧠 Check simulated skill if skill requirement exists
-                List<SkillDef> relevantSkills = __instance.def.workType?.relevantSkills;
-                if (relevantSkills != null && relevantSkills.Count > 0)
-                {
-                    foreach (var skillDef in relevantSkills)
-                    {
-                        int simulatedLevel = Utility_CacheManager.GetFakeSkill(pawn, skillDef).levelInt;
-                        if (simulatedLevel < 4)
-                        {
-                            if (Prefs.DevMode)
-                                Log.Message($"[PawnControl] {pawn.def.defName} lacks required skill ({skillDef.defName}={simulatedLevel}) for {__instance.def.defName}");
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
 
-                            __result = new List<Thing>();
-                            return false;
-                        }
+                if (modExtension != null) // Customize field as needed
+                {
+                    if (giver.def != null && Utility_TagManager.WorkEnabled(pawn.def, giver.def.defName))
+                    {
+                        __result = true; // forcibly allow this WorkGiver
+                        return false; // skip original method
                     }
                 }
 
-                return true;
+                return true; // allow vanilla if not extension-controlled
             }
         }
 
-        // === CE ===
-        // Drafted Fallback Job Injection (Hold Position)
-        [HarmonyPatch(typeof(Pawn), nameof(Pawn.Tick))]
-        public static class Patch_Pawn_Tick_HoldCombat
+
+
+        // Debugs for Patch 2 Iterations
+        /// <summary>
+        /// Debug patch for ThinkNode_PrioritySorter's job package creation process.
+        /// This patch adds detailed logging for pawns with work-related tags when they enter the priority sorter.
+        /// It captures the full hierarchy of think nodes being processed and dumps them to the log for debugging purposes.
+        /// Only runs when the pawn has allowed work tags configured via the mod.
+        /// </summary>
+        [HarmonyPatch(typeof(ThinkNode_PrioritySorter), nameof(ThinkNode_PrioritySorter.TryIssueJobPackage))]
+        public static class Patch_ThinkNode_PrioritySorter_DebugJobs
         {
-            public static void Postfix(Pawn __instance)
+            [HarmonyPrefix]
+            public static void Prefix(ThinkNode_PrioritySorter __instance, Pawn pawn)
             {
-                if (!Utility_CECompatibility.CEActive || !Utility_Common.PawnChecker(__instance))
-                    return;
-
-                if (__instance.Drafted && __instance.jobs?.curJob == null &&
-                    __instance.mindState?.duty == null &&
-                    __instance.mindState?.lastJobTag != JobTag.MiscWork)
-                {
-                    Job holdJob = JobMaker.MakeJob(JobDefOf.Wait_Combat, __instance.Position);
-                    holdJob.expiryInterval = 120;
-                    holdJob.checkOverrideOnExpire = true;
-                    __instance.jobs.StartJob(holdJob, JobCondition.InterruptForced, null, false);
-                }
-            }
-        }
-
-        // Drafted AI JobTree Override (CE fallback)
-        [HarmonyPatch(typeof(ThinkNode_Priority), nameof(ThinkNode_Priority.TryIssueJobPackage))]
-        public static class Patch_ThinkNodePriority_DraftedOverride
-        {
-            public static bool Prefix(Pawn pawn, JobIssueParams jobParams, ref ThinkResult __result, ThinkNode_Priority __instance)
-            {
-                if (!Utility_CECompatibility.CEActive || !pawn.Drafted || pawn.mindState == null)
-                    return true;
-
-                if (!Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection))
-                    return true;
-
-                if (pawn.mindState.duty == null &&
-                    (pawn.jobs?.curJob == null || pawn.jobs.curJob.def == JobDefOf.Wait_Combat))
-                {
-                    Job hold = JobMaker.MakeJob(JobDefOf.Wait_Combat, pawn.Position);
-                    hold.expiryInterval = 240;
-                    hold.checkOverrideOnExpire = true;
-                    __result = new ThinkResult(hold, __instance, JobTag.Misc);
-                    return false;
-                }
-
-                return true;
-            }
-        }
-
-        // === HAR ===
-        // Restrict Apparel by BodyType (used in PawnApparelGenerator Patch)
-        public static void Postfix_PawnApparelGenerator(Pawn pawn, PawnGenerationRequest request)
-        {
-            if (pawn == null || pawn.apparel == null || pawn.apparel.WornApparel == null)
-            {
-                return;
-            }
-
-            if (!Utility_CacheManager.IsApparelRestricted(pawn))
-            {
-                return;
-            }
-
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-
-            if (modExtension != null)
-            {
-                if (!modExtension.restrictApparelByBodyType)
+                // Skip if not in dev mode - only dump in development to avoid log spam
+                if (!Prefs.DevMode)
                 {
                     return;
                 }
 
-                if (!Utility_HARCompatibility.IsAllowedBodyType(pawn, modExtension.allowedBodyTypes))
+                if (pawn == null || __instance == null)
                 {
-                    pawn.apparel.WornApparel.Clear();
+                    return;
+                }
+
+                if (!Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def))
+                {
+                    return;
+                }
+
+                Log.Message($"[PawnControl] {pawn.LabelShort} entering PrioritySorter...");
+
+                if (__instance.subNodes != null)
+                {
+                    Utility_DebugManager.SafeExpandAndDump(
+                        __instance,
+                        expandBeforeDump: true,
+                        label: $"{pawn.LabelShort}_PrioritySorterDebug",
+                        showFullDump: true
+                    );
                 }
             }
+        }
+
+        /// <summary>
+        /// Debug patch for JobGiver_Work's PawnCanUseWorkGiver method.
+        /// Logs when an animal or other entity with work tags tries to use a WorkGiver.
+        /// This helps troubleshoot which WorkGivers are being considered for tagged pawns,
+        /// only executing for pawns that have AllowWork or BlockWork tags defined.
+        /// </summary>
+        [HarmonyPatch(typeof(JobGiver_Work), "PawnCanUseWorkGiver")]
+        public static class Patch_JobGiver_Work_PawnCanUseWorkGiver_Debug
+        {
+            [HarmonyPrefix]
+            public static void Prefix(Pawn pawn, WorkGiver giver, ref bool __result)
+            {
+                // Skip if not in dev mode - only dump in development to avoid log spam
+                if (!Prefs.DevMode)
+                {
+                    return;
+                }
+
+                if (pawn == null || giver == null)
+                {
+                    return;
+                }
+
+                if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def))
+                {
+                    return;
+                }
+
+                Log.Message($"[PawnControl] Checking if {pawn.LabelShort} can use WorkGiver: {giver.def.defName}");
+            }
+        }
+
+        /// <summary>
+        /// Patch to dump ThinkTree information when a pawn spawns.
+        /// This patch captures and logs the ThinkTree structure for pawns that have PawnControl tags
+        /// when they spawn in the world. It helps with debugging by showing the complete ThinkNode
+        /// hierarchy for controlled pawns, revealing how job priorities and work capabilities are 
+        /// structured. Only executes in development mode to avoid log spam in normal gameplay.
+        /// </summary>
+        [HarmonyPatch(typeof(Pawn), nameof(Pawn.SpawnSetup))]
+        public static class Patch_Pawn_SpawnSetup_DumpThinkTree
+        {
+            [HarmonyPostfix]
+            public static void Postfix(Pawn __instance, Map map, bool respawningAfterLoad)
+            {
+                // Skip if not in dev mode - only dump in development to avoid log spam
+                if (!Prefs.DevMode)
+                {
+                    return;
+                }
+
+                // Only process pawns that have PawnControl tags
+                if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def))
+                {
+                    return;
+                }
+
+                // Wait for the next tick to ensure thinker is fully initialized
+                LongEventHandler.ExecuteWhenFinished(() =>
+                {
+                    try
+                    {
+                        if (__instance?.thinker?.MainThinkNodeRoot != null)
+                        {
+                            Log.Message($"[PawnControl] Dumping ThinkTree for newly spawned pawn {__instance.LabelShort}");
+                            Utility_DebugManager.DumpPawnThinkTreeDetailed(__instance);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"[PawnControl] Error during ThinkTree dump for {__instance?.LabelShort}: {ex}");
+                    }
+                });
+            }
+        }
+
+        private class ObsolatedMethod
+        {
+                ////Work tag override logic
+                //[HarmonyPatch(typeof(Pawn), nameof(Pawn.WorkTypeIsDisabled))]
+                //public static class Patch_Pawn_WorkTypeIsDisabled
+                //{
+                //    public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+                //    {
+                //        var code = new List<CodeInstruction>(instructions);
+                //        for (int i = 0; i < code.Count; i++)
+                //        {
+                //            yield return code[i];
+
+                //            if (code[i].opcode == OpCodes.Ret)
+                //            {
+                //                // Inject: if (IsWorkTypeAllowed(this.def, workType)) return false;
+
+                //                yield return new CodeInstruction(OpCodes.Ldarg_0); // this (Pawn)
+                //                yield return new CodeInstruction(OpCodes.Ldfld, AccessTools.Field(typeof(Pawn), nameof(Pawn.def))); // this.def
+                //                yield return new CodeInstruction(OpCodes.Ldarg_1); // WorkTypeDef
+                //                yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(Patch_Pawn_WorkTypeIsDisabled), nameof(IsWorkTypeAllowed))); // call IsWorkTypeAllowed
+
+                //                Label skip = code[i].labels.FirstOrDefault(); // preserve any label on the original return
+                //                yield return new CodeInstruction(OpCodes.Brfalse_S, skip); // if false, continue original return
+                //                yield return new CodeInstruction(OpCodes.Ldc_I4_0); // return false
+                //                yield return new CodeInstruction(OpCodes.Ret);
+                //            }
+                //        }
+                //    }
+
+                //    private static bool IsWorkTypeAllowed(ThingDef def, WorkTypeDef workType)
+                //    {
+                //        if (def == null || def.race?.Humanlike == true)
+                //            return true;
+
+                //        var modExtension = Utility_CacheManager.GetModExtension(def);
+                //        if (modExtension == null)
+                //            return false;
+
+                //        // Check if the work type is allowed based on tags
+                //        string workTag = ManagedTags.AllowWorkPrefix + workType.defName;
+                //        return modExtension.tags?.Contains(workTag) == true || modExtension.tags?.Contains(ManagedTags.AllowAllWork) == true;
+                //    }
+                //}
+
+                //[HarmonyPatch(typeof(Pawn_WorkSettings), nameof(Pawn_WorkSettings.EnableAndInitialize))]
+                //public static class Patch_Pawn_WorkSettings_EnableAndInitialize
+                //{
+                //    // Cache private field: private Pawn pawn;
+                //    private static readonly FieldInfo pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+
+                //    // Cache internal method: EnableAndInitializeIfNotAlreadyInitialized
+                //    private static readonly MethodInfo initMethod = AccessTools.Method(typeof(Pawn_WorkSettings), "EnableAndInitializeIfNotAlreadyInitialized");
+
+                //    public static bool Prefix(object __instance)
+                //    {
+                //        if (__instance == null || pawnField == null || initMethod == null)
+                //        {
+                //            Log.Warning("[PawnControl] EnableAndInitialize patch skipped due to missing reflection targets.");
+                //            return true;
+                //        }
+
+                //        Pawn pawn = pawnField.GetValue(__instance) as Pawn;
+                //        if (pawn == null) return true;
+
+                //        if (pawn.RaceProps.Humanlike)
+                //            return true; // use vanilla logic
+
+                //        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                //        if (modExtension == null || modExtension.tags == null || !modExtension.tags.Contains(ManagedTags.AllowAllWork))
+                //            return true;
+
+                //        // Initialize work settings
+                //        initMethod.Invoke(__instance, null);
+
+                //        // Assign work priorities based on tags
+                //        foreach (var workType in DefDatabase<WorkTypeDef>.AllDefsListForReading)
+                //        {
+                //            string workTag = ManagedTags.AllowWorkPrefix + workType.defName;
+                //            if (modExtension.tags.Contains(workTag) || modExtension.tags.Contains(ManagedTags.AllowAllWork))
+                //            {
+                //                if (!pawn.WorkTypeIsDisabled(workType))
+                //                {
+                //                    pawn.workSettings.SetPriority(workType, 3); // Default priority
+                //                }
+                //            }
+                //        }
+
+                //        return false; // Skip vanilla logic
+                //    }
+                //}
+
+                //// Show non-humanlike if tagged
+                //[HarmonyPatch(typeof(MainTabWindow_Work), "Pawns", MethodType.Getter)]
+                //public static class Patch_MainTabWindow_Work_Pawns
+                //{
+                //    public static void Postfix(ref IEnumerable<Pawn> __result)
+                //    {
+                //        // Filter the pawns to include only those that should appear in the work tab
+                //        __result = __result.Where(ShouldAppearInWorkTab);
+                //    }
+
+                //    private static bool ShouldAppearInWorkTab(Pawn pawn)
+                //    {
+                //        if (pawn == null || pawn.def == null)
+                //        {
+                //            return false;
+                //        }
+
+                //        // Humanlike pawns always appear in the work tab
+                //        if (pawn.RaceProps.Humanlike)
+                //        {
+                //            return true;
+                //        }
+
+                //        // Check if the pawn has the required mod extension
+                //        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                //        if (modExtension == null)
+                //        {
+                //            return false;
+                //        }
+
+                //        // Check if the pawn is tagged to appear in the work tab
+                //        return modExtension.tags?.Contains(ManagedTags.AllowAllWork) == true ||
+                //               modExtension.tags?.Any(tag => tag.StartsWith(ManagedTags.AllowWorkPrefix)) == true;
+                //    }
+                //}
+
+                //// Patch #2 Step 7.8: IsPrisoner Hooking with Scoped Mitigation Strategy
+                //[HarmonyPatch(typeof(Pawn), nameof(Pawn.IsPrisoner), MethodType.Getter)]
+                //[HarmonyPriority(Priority.First)]
+                //public static class Patch_Pawn_IsPrisoner
+                //{
+                //    public static void Postfix(Pawn __instance, ref bool __result)
+                //    {
+                //        if (__result) return;
+
+                //        if (__instance == null || __instance.def == null || __instance.def.race == null)
+                //        {
+                //            return;
+                //        }
+
+                //        if (Utility_IdentityManager.IsFlagOverridden(FlagScopeTarget.IsPrisoner) &&
+                //            Utility_IdentityManager.MatchesIdentityFlags(__instance, PawnIdentityFlags.IsPrisoner))
+                //        {
+                //            __result = true;
+                //        }
+                //    }
+                //}
+
+                //// Patch #2 Step 7.9: IsSlave Hooking with Scoped Mitigation Strategy
+                //[HarmonyPatch(typeof(Pawn), nameof(Pawn.IsSlave), MethodType.Getter)]
+                //[HarmonyPriority(Priority.First)]
+                //public static class Patch_Pawn_IsSlave
+                //{
+                //    public static void Postfix(Pawn __instance, ref bool __result)
+                //    {
+                //        if (__result) return;
+
+                //        if (__instance == null || __instance.def == null || __instance.def.race == null)
+                //        {
+                //            return;
+                //        }
+
+                //        if (Utility_IdentityManager.IsFlagOverridden(FlagScopeTarget.IsSlave) &&
+                //            Utility_IdentityManager.MatchesIdentityFlags(__instance, PawnIdentityFlags.IsSlave))
+                //        {
+                //            __result = true;
+                //        }
+                //    }
+                //}
+
+                //// Patch #2 Step 7.10: IsGuest Hooking with Scoped Mitigation Strategy
+                //[HarmonyPatch(typeof(Pawn_GuestTracker), nameof(Pawn_GuestTracker.GuestStatus), MethodType.Getter)]
+                //[HarmonyPriority(Priority.First)]
+                //public static class Patch_Pawn_IsGuest
+                //{
+                //    public static void Postfix(Pawn_GuestTracker __instance, ref GuestStatus __result)
+                //    {
+                //        // Skip if override flag is not active
+                //        if (!Utility_IdentityManager.IsFlagOverridden(FlagScopeTarget.IsGuest))
+                //            return;
+
+                //        // Resolve pawn via reflection
+                //        Pawn pawn = Traverse.Create(__instance).Field("pawn").GetValue<Pawn>();
+                //        if (pawn == null || pawn.def == null || pawn.Faction != Faction.OfPlayer)
+                //            return;
+
+                //        // Centralized identity check
+                //        if (Utility_IdentityManager.MatchesIdentityFlags(pawn, PawnIdentityFlags.IsGuest))
+                //        {
+                //            __result = GuestStatus.Guest;
+                //        }
+                //    }
+                //}
+
+                //// Patch #2 Step 7.11: IsQuestLodger Hooking with Scoped Mitigation Strategy
+                //[HarmonyPatch(typeof(QuestUtility), nameof(QuestUtility.IsQuestLodger))]
+                //[HarmonyPriority(Priority.First)]
+                //public static class Patch_QuestUtility_IsQuestLodger
+                //{
+                //    public static void Postfix(Pawn p, ref bool __result)
+                //    {
+                //        if (__result) return;
+
+                //        if (p == null || p.def == null || p.def.race == null)
+                //        {
+                //            return;
+                //        }
+
+                //        if (Utility_IdentityManager.IsFlagOverridden(FlagScopeTarget.IsQuestLodger) &&
+                //            Utility_IdentityManager.MatchesIdentityFlags(p, PawnIdentityFlags.IsQuestLodger))
+                //        {
+                //            __result = true;
+                //        }
+                //    }
+                //}
+
+                //// Patch #2 Step 7.12: IsWildMan Hooking with Scoped Mitigation Strategy
+                //[HarmonyPatch(typeof(WildManUtility), nameof(WildManUtility.IsWildMan))]
+                //[HarmonyPriority(Priority.First)]
+                //public static class Patch_Pawn_IsWildMan
+                //{
+                //    public static void Postfix(Pawn __instance, ref bool __result)
+                //    {
+                //        if (__result) return;
+
+                //        if (Utility_IdentityManager.IsFlagOverridden(FlagScopeTarget.IsWildMan) &&
+                //            Utility_IdentityManager.MatchesIdentityFlags(__instance, PawnIdentityFlags.IsWildMan))
+                //        {
+                //            __result = true;
+                //        }
+                //    }
+                //}
+
+                //// Patch #2 Step 7.1 & 7.2: IsColonist Hooking with Scoped Mitigation Strategy
+                //[HarmonyPatch(typeof(Pawn), nameof(Pawn.IsColonist), MethodType.Getter)]
+                //[HarmonyPriority(Priority.First)]
+                //public static class Patch_Pawn_IsColonist
+                //{
+                //    public static void Postfix(Pawn __instance, ref bool __result)
+                //    {
+                //        if (__result)
+                //        {
+                //            return;
+                //        }
+
+                //        if (__instance == null || __instance.def == null || __instance.def.race == null)
+                //        {
+                //            return;
+                //        }
+
+                //        if (Utility_IdentityManager.IsFlagOverridden(FlagScopeTarget.IsColonist) &&
+                //            Utility_IdentityManager.MatchesIdentityFlags(__instance, PawnIdentityFlags.IsColonist))
+                //        {
+                //            __result = true;
+                //        }
+                //    }
+                //}
+
+                ///// <summary>
+                ////[HarmonyPatch(typeof(Pawn), nameof(Pawn.IsMutant), MethodType.Getter)]
+                ////[HarmonyPriority(Priority.First)]
+                ////public static class Patch_Pawn_IsMutant
+                ////{
+                ////    public static void Postfix(Pawn __instance, ref bool __result)
+                ////    {
+                ////        if (__result)
+                ////            return;
+
+                ////        if (!Utility_IdentityManager.IsFlagOverridden(FlagScopeTarget.IsMutant))
+                ////            return;
+
+                ////        if (Utility_IdentityManager.MatchesIdentityFlags(__instance, PawnIdentityFlags.IsMutant))
+                ////        {
+                ////            __result = true;
+                ////        }
+                ////    }
+                ////} 
+                ///// </summary>
         }
     }
+
 }

@@ -34,5 +34,15 @@ namespace emitbreaker.PawnControl
 
             return true;
         }
+
+        public static JobDef JobDefNamed(string defName)
+        {
+            return DefDatabase<JobDef>.GetNamed(defName);
+        }
+
+        public static NeedDef NeedDefNamed(string defName)
+        {
+            return DefDatabase<NeedDef>.GetNamed(defName);
+        }
     }
 }

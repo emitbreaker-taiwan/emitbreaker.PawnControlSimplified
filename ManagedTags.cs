@@ -11,6 +11,8 @@ namespace emitbreaker.PawnControl
     public static class ManagedTags
     {
         public const string ForceAnimal = "ForceAnimal"; // Mark pawn forcefully as an Animal
+        public const string ForceMechanoid = "ForceMechanoid"; // Mark pawn forcefully as Mechanoid
+        public const string ForceHumanlike = "ForceHumanlike"; // Mark pawn forcefully as Mechanoid
         public const string ForceDraftable = "ForceDraftable"; // Make pawn forcefully draftable
         public const string ForceWork = "ForceWork"; // Allow pawn forcefully work
         public const string AllowAllWork = "AllowAllWork"; // Allow all works

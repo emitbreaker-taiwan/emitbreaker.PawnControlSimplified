@@ -8,6 +8,7 @@ using Verse;
 
 namespace emitbreaker.PawnControl
 {
+    [Obsolete("Use tags instead")]
     public class PawnTagDef : Def
     {
         [NoTranslate]
