@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<Defs>
+	<HediffDef>
+		<defName>PawnControl_StatStub</defName>
+		<label>Stat Injection</label>
+		<description>This hediff provides stat boosts based on skills.</description>
+		<hediffClass>HediffWithComps</hediffClass>
+		<isBad>false</isBad>
+		<tendable>false</tendable>
+		<scenarioCanAdd>false</scenarioCanAdd>
+		<comps>
+			<li Class="emitbreaker.PawnControl.HediffCompProperties_StatBridge" />
+		</comps>
+		<stages>
+			<li>
+				<label>active</label>
+				<becomeVisible>false</becomeVisible>
+				<statOffsets>
+					<!-- These are placeholders that get replaced by HediffComp_StatBridge -->
+					<PlantWorkSpeed>0</PlantWorkSpeed>
+					<PlantHarvestYield>0</PlantHarvestYield>
+					<DrugHarvestYield>0</DrugHarvestYield>
+					<MiningSpeed>0</MiningSpeed>
+					<DeepDrillingSpeed>0</DeepDrillingSpeed>
+					<SmoothingSpeed>0</SmoothingSpeed>
+					<ConstructionSpeed>0</ConstructionSpeed>
+					<SmoothingSpeed>0</SmoothingSpeed>
+
+					<ButcheryFleshEfficiency>0</ButcheryFleshEfficiency>
+					<WorkSpeedGlobal>0</WorkSpeedGlobal>
+					<GeneralLaborSpeed>0</GeneralLaborSpeed>
+
+					<MedicalTendSpeed>0</MedicalTendSpeed>
+					<SurgerySuccessChanceFactor>0</SurgerySuccessChanceFactor>
+					<AnimalGatherSpeed>0</AnimalGatherSpeed>
+					<TameAnimalChance>0</TameAnimalChance>
+					<ShootingAccuracyPawn>0</ShootingAccuracyPawn>
+					<AimingDelayFactor>0</AimingDelayFactor>
+					<MeleeHitChance>0</MeleeHitChance>
+					<MeleeDPS>0</MeleeDPS>
+				</statOffsets>
+			</li>
+		</stages>
+	</HediffDef>
+</Defs>

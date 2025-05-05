@@ -11,6 +11,8 @@ namespace emitbreaker.PawnControl
     public static class ManagedTags
     {
         public const string ForceAnimal = "ForceAnimal"; // Mark pawn forcefully as an Animal
+        public const string ForceMechanoid = "ForceMechanoid"; // Mark pawn forcefully as Mechanoid
+        public const string ForceHumanlike = "ForceHumanlike"; // Mark pawn forcefully as Mechanoid
         public const string ForceDraftable = "ForceDraftable"; // Make pawn forcefully draftable
         public const string ForceWork = "ForceWork"; // Allow pawn forcefully work
         public const string AllowAllWork = "AllowAllWork"; // Allow all works
@@ -23,6 +25,8 @@ namespace emitbreaker.PawnControl
         public const string VFECore_Combat = "VFECore_Combat"; // For VFE Compatibility
         public const string Mech_DefendBeacon = "Mech_DefendBeacon"; // For Mech_DefendBeacon
         public const string Mech_EscortCommander = "Mech_EscortCommander"; // For Mech_EscortCommander
+        public const string VFESkipWorkJobGiver = "VFESkipWorkJobGiver"; // Tags for specific job control behavior
+        public const string DisableVFEAIJobs = "DisableVFEAIJobs"; // Tags for specific job control behavior
     }
 }
 
