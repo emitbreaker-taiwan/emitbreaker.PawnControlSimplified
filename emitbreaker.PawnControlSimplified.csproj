@@ -66,27 +66,53 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="JobGiver_CleanFilth_PawnControl.cs" />
+    <Compile Include="JobGiver_ClearSnow_PawnControl.cs" />
+    <Compile Include="JobGiver_EmptyEggBox_PawnControl.cs" />
+    <Compile Include="JobGiver_Merge_PawnControl.cs" />
+    <Compile Include="JobGiver_ConstructDeliverResourcesToBlueprints_PawnControl.cs" />
+    <Compile Include="JobGiver_HaulGeneral_PawnControl.cs" />
+    <Compile Include="JobGiver_Cremate_PawnControl.cs" />
+    <Compile Include="JobGiver_FillFermentingBarrel_PawnControl.cs" />
+    <Compile Include="JobGiver_HaulCampfire_PawnControl.cs" />
+    <Compile Include="JobGiver_HaulCorpses_PawnControl.cs" />
+    <Compile Include="JobGiver_GatherItemsForCaravan_PawnControl.cs" />
+    <Compile Include="JobGiver_ConstructDeliverResourcesToFrames_PawnControl.cs" />
+    <Compile Include="JobGiver_HaulToPortal_PawnControl.cs" />
+    <Compile Include="JobGiver_LoadTransporters_PawnControl.cs" />
+    <Compile Include="JobGiver_Refuel_PawnControl.cs" />
+    <Compile Include="JobGiver_Refuel_Turret_PawnControl.cs" />
+    <Compile Include="JobGiver_GrowerSow_PawnControl.cs" />
+    <Compile Include="JobGiver_GrowerHarvest_PawnControl.cs" />
+    <Compile Include="JobGiver_Strip_PawnControl.cs" />
+    <Compile Include="JobGiver_TakeBeerOutOfBarrel_PawnControl.cs" />
+    <Compile Include="JobGiver_UnloadCarriers_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_Chat_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_DeliverFood_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_Feed_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_TakeToBed_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_ReleasePrisoner_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_ExecuteGuilty_PawnControl.cs" />
+    <Compile Include="JobGiver_PlantsCut_PawnControl.cs" />
+    <Compile Include="HediffCompProperties_StatBridge.cs" />
+    <Compile Include="HediffComp_StatBridge.cs" />
+    <Compile Include="JobGiver_ExtractSkull_PawnControl.cs" />
+    <Compile Include="JobGiver_FightFires_PawnControl.cs" />
+    <Compile Include="JobGiver_Flick_PawnControl.cs" />
+    <Compile Include="JobGiver_Open_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_DoExecution_PawnControl.cs" />
+    <Compile Include="Utility_JobGiverManager.cs" />
+    <Compile Include="Utility_StatManager.cs" />
     <Compile Include="ManagedThinkTreeBlocklist.cs" />
     <Compile Include="Startup_ThinkTreeInjector.cs" />
     <Compile Include="ForcedIdentityType.cs" />
     <Compile Include="SkillPassionEntry.cs" />
     <Compile Include="SkillLevelEntry.cs" />
     <Compile Include="Utility_JobManager.cs" />
-    <Compile Include="PawnControl_JobGiver_Work.cs" />
+    <Compile Include="JobGiver_WorkNonHumanlike.cs" />
     <Compile Include="Utility_DebugManager.cs" />
     <Compile Include="Utility_WorkSettingsManager.cs" />
     <Compile Include="Utility_ThinkTreeManager.cs" />
-    <Compile Include="PawnControl_JobDriver_PlantHarvest_Designated.cs" />
-    <Compile Include="PawnControl_JobDriver_PlantWork.cs" />
-    <Compile Include="PawnControl_JobDriver_PlantSeed.cs" />
-    <Compile Include="PawnControl_JobDriver_PlantCut_Designated.cs" />
-    <Compile Include="PawnControl_JobDriver_PlantCut.cs" />
-    <Compile Include="PawnControl_JobDriver_PlantHarvest.cs" />
-    <Compile Include="PawnControl_JobDriver_PlantSow.cs" />
-    <Compile Include="PawnControl_WorkGiver_GrowerSow.cs" />
-    <Compile Include="PawnControl_WorkGiver_GrowerHarvest.cs" />
-    <Compile Include="PawnControl_WorkGiver_PlantSeed.cs" />
-    <Compile Include="PawnControl_WorkGiver_PlantsCut.cs" />
     <Compile Include="Startup_IdentityPreloader.cs" />
     <Compile Include="Utility_IdentityManager_IsAnimalLikeScopedContext.cs" />
     <Compile Include="Utility_IdentityManager_IsMutantScopedContext.cs" />
@@ -129,13 +155,12 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Defs\GameComponentDefs\GameComponent_LateInjection.xml" />
-    <Content Include="Defs\JobDefs\Jobs_Work.xml" />
+    <Content Include="Defs\Hediffdef\StatInjectorStub.xml" />
+    <Content Include="Defs\ThinkTreeDefs\Animal.xml" />
+    <Content Include="Defs\ThinkTreeDefs\OrkoidAnimal.xml" />
     <Content Include="Defs\ThinkTreeDefs\SubTrees_Misc.xml" />
-    <Content Include="Defs\WorkGiverDefs\WorkGivers.xml" />
     <Content Include="LICENSE.txt" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Defs\MainButtonDef\" />
-  </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

@@ -25,10 +25,6 @@ namespace emitbreaker.PawnControl
 
         /// <summary>Cached reflection access to the ResolveSubnodes method</summary>
         private static readonly MethodInfo resolveMethod = AccessTools.Method(typeof(ThinkNode), "ResolveSubnodes");
-        private static readonly FieldInfo treeDefField = AccessTools.Field(typeof(ThinkNode_Subtree), "treeDef");
-
-        /// <summary>Cached reflection access to the tags field in ThinkNode</summary>
-        private static readonly FieldInfo tagsField = AccessTools.Field(typeof(ThinkNode), "tags");
 
         /// <summary>
         /// Determines if a ThingDef has any allow or block work tags.
@@ -129,16 +125,6 @@ namespace emitbreaker.PawnControl
 
             _blockWorkTagCache[def] = result; // ✅ Cache the computed result
             return result;
-        }
-
-        public static bool PawnWillingToCutPlant_Job(Thing plant, Pawn pawn)
-        {
-            if (pawn.RaceProps.Humanlike && Utility_CacheManager.GetModExtension(pawn.def) == null && plant.def.plant.IsTree && plant.def.plant.treeLoversCareIfChopped)
-            {
-                return new HistoryEvent(HistoryEventDefOf.CutTree, pawn.Named(HistoryEventArgsNames.Doer)).Notify_PawnAboutToDo_Job();
-            }
-
-            return true;
         }
 
         private static ThinkNode_PrioritySorter FindFirstPrioritySorter(ThinkNode root)
@@ -251,198 +237,35 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        /// <summary>
-        /// Try injecting a ThinkTree subtree into a race's Main ThinkTree (ThingDef based).
-        /// Only usable during static startup or Def loading phase.
-        /// </summary>
-        //public static bool TryInjectSubtreeToRace(ThingDef raceDef, string subtreeDefName)
-        //{
-        //    if (raceDef?.race?.thinkTreeMain == null)
-        //        return false;
+        public static void ValidateThinkTree(Pawn pawn)
+        {
+            if (pawn?.thinker?.MainThinkNodeRoot == null)
+                return;
 
-        //    //var mainThinkTree = raceDef.race.thinkTreeMain;
-        //    var thinkTreeDefName = raceDef.race.thinkTreeMain?.defName;
-        //    var mainThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(thinkTreeDefName);
-        //    if (mainThinkTree == null)
-        //    {
-        //        Log.Error($"[PawnControl] Failed to find ThinkTreeDef '{thinkTreeDefName}' for race '{raceDef.defName}'");
-        //        return false;
-        //    }            
-        //    var subtreeDef = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(subtreeDefName);
+            try
+            {
+                // Traverse the think tree
+                bool hasWorkGiver = false;
+                bool hasConditionalColonist = false;
 
-        //    if (subtreeDef == null || subtreeDef.thinkRoot == null)
-        //        return false;
+                foreach (var node in pawn.thinker.MainThinkNodeRoot.ThisAndChildrenRecursive)
+                {
+                    if (node is JobGiver_Work || node is JobGiver_WorkNonHumanlike)
+                        hasWorkGiver = true;
 
-        //    // Already injected?
-        //    if (IsSubtreeAlreadyInjected(mainThinkTree.thinkRoot, subtreeDef.defName))
-        //        return false;
+                    if (node is ThinkNode_ConditionalColonist)
+                        hasConditionalColonist = true;
+                }
 
-        //    // Deep copy
-        //    ThinkNode subtreeCopy = subtreeDef.thinkRoot.DeepCopy();
-        //    CleanSubtree(subtreeCopy); // ✅ Clean it immediately after deep copy
-        //    subtreeCopy.AddThinkTreeTag($"PawnControl_Injected_{subtreeDef.defName}");
-
-        //    // Find PrioritySorter
-        //    var sorter = FindFirstPrioritySorter(mainThinkTree.thinkRoot);
-
-        //    if (sorter != null)
-        //    {
-        //        if (sorter.subNodes == null)
-        //            sorter.subNodes = new List<ThinkNode>();
-
-        //        bool isHumanlike = raceDef?.race?.Humanlike ?? false;
-
-        //        var root = mainThinkTree.thinkRoot;
-
-        //        if (!(root is ThinkNode_Priority))
-        //        {
-        //            Log.Warning($"[PawnControl] Cannot inject: root node of {mainThinkTree.defName} is not ThinkNode_Priority.");
-        //            return false;
-        //        }
-
-        //        ThinkNode_Priority thinkNode_Priority = root as ThinkNode_Priority;
-
-        //        // ✅ Use smart insertion logic
-        //        InsertSubtreeSmart(thinkNode_Priority, subtreeCopy, isHumanlike);
-
-        //        ResolveSubnodesAndRecur(sorter);
-        //    }
-        //    else
-        //    {
-        //        if (mainThinkTree.thinkRoot.subNodes == null)
-        //            mainThinkTree.thinkRoot.subNodes = new List<ThinkNode>();
-
-        //        mainThinkTree.thinkRoot.subNodes.Add(subtreeCopy);
-
-        //        ResolveSubnodesAndRecur(mainThinkTree.thinkRoot);
-        //    }
-            
-        //    FinalizeThinkTreeInjection(raceDef);
-            
-        //    if (Prefs.DevMode)
-        //    {
-        //        Log.Message($"[PawnControl] Fallback: Appended {subtreeDefName} at end of ThinkNode_Priority.");
-        //    }
-
-        //    return true;
-        //}
-
-        //private static bool InsertSubtreeSmart(ThinkNode_Priority thinkNode_Priority, ThinkNode subtreeToInject, bool isHumanlike = false)
-        //{
-        //    if (thinkNode_Priority?.subNodes == null || subtreeToInject == null)
-        //    {
-        //        return false;
-        //    }
-
-        //    // 1. Find ThinkNode_SubtreesByTag
-        //    for (int i = 0; i < thinkNode_Priority.subNodes.Count; i++)
-        //    {
-        //        if (thinkNode_Priority.subNodes[i]?.GetType().Name == "ThinkNode_SubtreesByTag")
-        //        {
-        //            thinkNode_Priority.subNodes.Insert(i, subtreeToInject);
-
-        //            if (Prefs.DevMode)
-        //            {
-        //                Log.Message($"[PawnControl] Inserted {subtreeToInject} before ThinkNode_SubtreesByTag at index {i}.");
-        //            }
-
-        //            return true;
-        //        }
-        //    }
-
-        //    // 2. Find ThinkNode_Subtree with treeDef "SatisfyBasicNeeds"
-        //    for (int i = 0; i < thinkNode_Priority.subNodes.Count; i++)
-        //    {
-        //        if (thinkNode_Priority.subNodes[i] is ThinkNode_Subtree subtree && treeDefField != null)
-        //        {
-        //            var treeDef = treeDefField.GetValue(subtree) as ThinkTreeDef;
-        //            if (treeDef != null && treeDef.defName == "SatisfyBasicNeeds")
-        //            {
-        //                thinkNode_Priority.subNodes.Insert(i, subtreeToInject);
-        //                if (Prefs.DevMode)
-        //                {
-        //                    Log.Message($"[PawnControl] Inserted {subtreeToInject} before SatisfyBasicNeeds at index {i}.");
-        //                }
-        //                return true;
-        //            }
-        //        }
-        //    }
-
-        //    // 3. Special Handling: Humanlike-specific Insert
-        //    if (isHumanlike)
-        //    {
-        //        for (int i = 0; i < thinkNode_Priority.subNodes.Count; i++)
-        //        {
-        //            var node = thinkNode_Priority.subNodes[i];
-
-        //            if (node is ThinkNode_ConditionalColonist colonistNode && colonistNode.subNodes != null)
-        //            {
-        //                for (int j = 0; j < colonistNode.subNodes.Count; j++)
-        //                {
-        //                    if (colonistNode.subNodes[j] is ThinkNode_Subtree subtree && treeDefField != null)
-        //                    {
-        //                        ThinkTreeDef treeDef = treeDefField.GetValue(subtree) as ThinkTreeDef;
-        //                        if (treeDef != null && treeDef.defName == "MainColonistBehaviorCore")
-        //                        {
-        //                            colonistNode.subNodes.Insert(j, subtreeToInject);
-        //                            if (Prefs.DevMode)
-        //                            {
-        //                                Log.Message($"[PawnControl] Inserted {subtreeToInject} before MainColonistBehaviorCore inside ThinkNode_ConditionalColonist at subnode index {j}.");
-        //                            }
-
-        //                            return true;
-        //                        }
-        //                    }
-        //                }
-        //            }
-
-        //            if (node is ThinkNode_ConditionalPawnKind pawnKindNode && pawnKindNode.subNodes != null)
-        //            {
-        //                if (pawnKindNode is ThinkNode_ConditionalPawnKind kindCheck && kindCheck.pawnKind == PawnKindDefOf.WildMan)
-        //                {
-        //                    for (int j = 0; j < pawnKindNode.subNodes.Count; j++)
-        //                    {
-        //                        if (pawnKindNode.subNodes[j] is ThinkNode_Subtree subtree && treeDefField != null)
-        //                        {
-        //                            ThinkTreeDef treeDef = treeDefField.GetValue(subtree) as ThinkTreeDef;
-        //                            if (treeDef != null && treeDef.defName == "MainWildManBehaviorCore")
-        //                            {
-        //                                pawnKindNode.subNodes.Insert(j, subtreeToInject);
-        //                                if (Prefs.DevMode)
-        //                                {
-        //                                    Log.Message($"[PawnControl] Inserted {subtreeToInject} before MainWildManBehaviorCore inside ThinkNode_ConditionalColonist at subnode index {j}.");
-        //                                }
-        //                                return true;
-        //                            }
-        //                        }
-        //                    }
-        //                }
-        //            }
-        //        }
-        //    }
-
-        //    // 4. Find ThinkNode_Subtree with treeDef "LordDuty"
-        //    for (int i = 0; i < thinkNode_Priority.subNodes.Count; i++)
-        //    {
-        //        if (thinkNode_Priority.subNodes[i] is ThinkNode_Subtree subtree && treeDefField != null)
-        //        {
-        //            var treeDef = treeDefField.GetValue(subtree) as ThinkTreeDef;
-        //            if (treeDef != null && treeDef.defName == "LordDuty")
-        //            {
-        //                thinkNode_Priority.subNodes.Insert(i, subtreeToInject);
-        //                if (Prefs.DevMode)
-        //                {
-        //                    Log.Message($"[PawnControl] Inserted {subtreeToInject} before LordDuty at index {i}.");
-        //                }
-        //                return true;
-        //            }
-        //        }
-        //    }
-
-        //    // 5. Fallback: add at the end
-        //    thinkNode_Priority.subNodes.Add(subtreeToInject);
-        //    return false;
-        //}
+                Log.Message($"[PawnControl DEBUG] ThinkTree validation for {pawn.LabelCap}:");
+                Log.Message($"- Has JobGiver_Work: {hasWorkGiver}");
+                Log.Message($"- Has ConditionalColonist: {hasConditionalColonist}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[PawnControl] ThinkTree validation error: {ex}");
+            }
+        }
 
         public static void ResolveSubnodesAndRecur(ThinkNode node)
         {
@@ -465,5 +288,5 @@ namespace emitbreaker.PawnControl
             _blockWorkTagCache.Clear();
             _combinedWorkTagCache.Clear();
         }
-   }
+    }
 }

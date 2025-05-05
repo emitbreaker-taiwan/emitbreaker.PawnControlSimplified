@@ -1,13 +1,14 @@
-﻿using System;
+﻿using RimWorld;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
-using System.Reflection;
-using Verse.AI;
+using UnityEngine;
 using Verse;
-using System.Security.Cryptography;
-using RimWorld;
+using Verse.AI;
 
 namespace emitbreaker.PawnControl
 {
@@ -426,44 +427,221 @@ namespace emitbreaker.PawnControl
             //Log.Message($"[PawnControl] Computed HasAllowOrBlockWorkTag for {def.defName}: {result}");
         }
 
+        public static class StatMutationLogger
+        {
+            private static readonly Dictionary<Pawn, Dictionary<StatDef, float>> pawnStatMutations = new Dictionary<Pawn, Dictionary<StatDef, float>>();
+            private static readonly Dictionary<ThingDef, Dictionary<StatDef, float>> raceStatBaseCache = new Dictionary<ThingDef, Dictionary<StatDef, float>>();
+
+            public static void LogStatMutation(Pawn pawn, StatDef statDef, float value)
+            {
+                if (pawn == null || statDef == null) return;
+
+                if (!pawnStatMutations.TryGetValue(pawn, out var dict))
+                    pawnStatMutations[pawn] = dict = new Dictionary<StatDef, float>();
+
+                dict[statDef] = value;
+
+                if (Prefs.DevMode)
+                    Log.Message($"[PawnControl] Stat mutation: {pawn.LabelShort} -> {statDef.defName} = {value:F2}");
+            }
+
+            public static void LogRaceBase(Pawn pawn)
+            {
+                if (pawn?.def == null || raceStatBaseCache.ContainsKey(pawn.def)) return;
+
+                var dict = new Dictionary<StatDef, float>();
+                foreach (StatDef stat in DefDatabase<StatDef>.AllDefsListForReading)
+                {
+                    try { dict[stat] = pawn.GetStatValue(stat, false); } catch { }
+                }
+                raceStatBaseCache[pawn.def] = dict;
+
+                if (Prefs.DevMode)
+                    Log.Message($"[PawnControl] Cached base stats for race {pawn.def.defName}");
+            }
+
+            public static IReadOnlyDictionary<StatDef, float> GetPawnStats(Pawn pawn)
+                => pawnStatMutations.TryGetValue(pawn, out var dict) ? dict : null;
+
+            public static IReadOnlyDictionary<StatDef, float> GetRaceStats(ThingDef race)
+                => raceStatBaseCache.TryGetValue(race, out var dict) ? dict : null;
+        }
+
+        public static class StatMutationValidator
+        {
+            /// <summary>
+            /// Validates current pawn stats against expected values.
+            /// Filters out stats that do not apply to pawns (e.g., building-only stats).
+            /// </summary>
+            public static void Validate(Pawn pawn)
+            {
+                if (pawn == null || pawn.def == null || pawn.RaceProps == null)
+                {
+                    Log.Warning("[PawnControl] Validation failed: null pawn or pawn.def.");
+                    return;
+                }
+
+                Log.Message($"[PawnControl] === Stat Mutation Validation for {pawn.LabelShort} ({pawn.def.defName}) ===");
+
+                foreach (var stat in DefDatabase<StatDef>.AllDefs)
+                {
+                    // ✅ Skip stats that are clearly not intended for pawns
+                    if (stat.defaultBaseValue < 0 ||
+                            (stat.category != StatCategoryDefOf.PawnWork
+                            && stat.category != StatCategoryDefOf.PawnCombat
+                            && stat.category != StatCategoryDefOf.BasicsPawn
+                            && stat.category != StatCategoryDefOf.PawnSocial) ||
+                        (stat.Worker?.IsDisabledFor(pawn) ?? true)) // skip if disabled or no worker
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        float value = pawn.GetStatValue(stat, applyPostProcess: false);
+                        float raceValue = pawn.def.GetStatValueAbstract(stat, null);
+                        Log.Message($" - {stat.defName}: {value} (Race Base: {raceValue})");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[PawnControl] Stat '{stat.defName}' failed on {pawn.LabelShort}: {ex.Message}");
+                    }
+                }
+
+                Log.Message("[PawnControl] === End of Validation ===");
+            }
+
+
+            public static void ValidateAll()
+            {
+                foreach (Map map in Find.Maps)
+                    foreach (Pawn pawn in map.mapPawns.AllPawnsSpawned)
+                        Validate(pawn);
+            }
+        }
+
+        public static void LogRaceAndPawnStats(Pawn pawn)
+        {
+            if (pawn == null || pawn.def == null || pawn.RaceProps == null)
+            {
+                Log.Warning("[PawnControl] LogRaceAndPawnStats failed: pawn or def is null.");
+                return;
+            }
+
+            Log.Message($"[PawnControl] === Logging Race and Pawn Stat Differences for {pawn.LabelShort} ({pawn.def.defName}) ===");
+
+            foreach (var stat in DefDatabase<StatDef>.AllDefs)
+            {
+                // ✅ Skip clearly incompatible stats
+                if (stat.defaultBaseValue < 0 ||
+                        (stat.category != StatCategoryDefOf.PawnWork 
+                        && stat.category != StatCategoryDefOf.PawnCombat 
+                        && stat.category != StatCategoryDefOf.BasicsPawn
+                        && stat.category != StatCategoryDefOf.PawnSocial) ||
+                    (stat.Worker?.IsDisabledFor(pawn) ?? true)) // skip if disabled or no worker
+                {
+                    continue;
+                }
+
+                try
+                {
+                    float pawnValue = pawn.GetStatValue(stat, applyPostProcess: false);
+                    float raceValue = pawn.def.GetStatValueAbstract(stat, null);
+
+                    if (!Mathf.Approximately(pawnValue, raceValue))
+                    {
+                        Log.Message($" - {stat.defName}: Pawn = {pawnValue}, Race Base = {raceValue}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[PawnControl] Failed reading stat '{stat.defName}' for {pawn.LabelShort}: {ex.Message}");
+                }
+            }
+
+            Log.Message("[PawnControl] === End Log ===");
+        }
+
+        public static void RunStatValidator()
+        {
+            StatMutationValidator.ValidateAll();
+        }
+
         /// <summary>
-        /// Debug messages for PawnControl_WorkGiver_PlantsCut
+        /// Diagnoses WorkGiver initialization issues for a pawn.
+        /// Logs detailed information about WorkGiver lists and related settings to help
+        /// troubleshoot why work scans might not be triggering.
         /// </summary>
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_NotPlant(Thing t)
+        public static void DiagnoseWorkGiversForPawn(Pawn pawn)
         {
-            Log.Message($"[PawnControl] JobOnThing: {t.Label} is not a plant. Skipping.");
+            if (pawn?.workSettings == null || !Prefs.DevMode)
+                return;
+
+            try
+            {
+                // Log WorkGiver status
+                var normalList = pawn.workSettings.WorkGiversInOrderNormal;
+                var emergencyList = pawn.workSettings.WorkGiversInOrderEmergency;
+
+                Log.Message($"[DEBUG] Work scan diagnostic for {pawn.LabelCap}:");
+                Log.Message($"- Initialized: {pawn.workSettings.Initialized}");
+                Log.Message($"- EverWork: {pawn.workSettings.EverWork}");
+                Log.Message($"- Normal list count: {normalList?.Count ?? 0}");
+                Log.Message($"- Emergency list count: {emergencyList?.Count ?? 0}");
+
+                // Check if the pawn has valid mod extension
+                var modExt = Utility_CacheManager.GetModExtension(pawn.def);
+                Log.Message($"- Has mod extension: {modExt != null}");
+
+                // Check if ThinkTree is properly configured
+                Log.Message($"- Main ThinkTree: {pawn.def.race?.thinkTreeMain?.defName}");
+
+                // Verify if HasAllowWorkTag returns the expected value
+                Log.Message($"- HasAllowWorkTag: {Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def)}");
+
+                // Check think tree status
+                Log.Message($"- Pawn thinker: {pawn.thinker != null}");
+                Log.Message($"- Current job: {pawn.jobs?.curJob?.def?.defName ?? "none"}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[ERROR] Diagnostic failed: {ex}");
+            }
         }
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_CannotReverse(Thing t, Pawn pawn)
+
+        // Add to Utility_DebugManager
+        public static void DiagnoseAllPawnSystems(Pawn pawn)
         {
-            Log.Message($"[PawnControl] JobOnThing: {pawn.LabelShort} cannot reserve {t.Label}. Skipping.");
-        }
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_IsForbidden(Thing t, Pawn pawn)
-        {
-            Log.Message($"[PawnControl] JobOnThing: {t.Label} is forbidden for {pawn.LabelShort}. Skipping.");
-        }
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_IsBurning(Thing t)
-        {
-            Log.Message($"[PawnControl] JobOnThing: {t.Label} is burning. Skipping.");
-        }
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_NotWilling(Thing t, Pawn pawn)
-        {
-            Log.Message($"[PawnControl] JobOnThing: {pawn.LabelShort} is not willing to cut {t.Label}. Skipping.");
-        }
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_NotHarvestable(Thing t)
-        {
-            Log.Message($"[PawnControl] JobOnThing: {t.Label} is not harvestable now. Skipping.");
-        }
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_AssignHarvestJob(Thing t, Pawn pawn)
-        {
-            Log.Message($"[PawnControl] JobOnThing: Assigning harvest job for {t.Label} to {pawn.LabelShort}.");
-        }
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_AssignCutJob(Thing t, Pawn pawn)
-        {
-            Log.Message($"[PawnControl] JobOnThing: Assigning harvest job for {t.Label} to {pawn.LabelShort}.");
-        }
-        public static void PawnControl_WorkGiver_PlantsCut_JobOnThing_NoDesignation(Thing t)
-        {
-            Log.Message($"[PawnControl Debug] JobOnThing: No valid designation found for {t.Label}. Skipping.");
+            if (!Prefs.DevMode || pawn == null)
+                return;
+
+            Log.Message($"[PawnControl] Starting comprehensive diagnostic for {pawn.LabelCap}");
+
+            // Log basic pawn info
+            Log.Message($"- Race: {pawn.def.defName}");
+            Log.Message($"- Mod extension: {(Utility_CacheManager.GetModExtension(pawn.def) != null ? "Present" : "Missing")}");
+            Log.Message($"- Work tags: AllowWork={Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def)}, HasBlock={Utility_ThinkTreeManager.HasBlockWorkTag(pawn.def)}");
+
+            // Check WorkSettings
+            if (pawn.workSettings != null)
+            {
+                Log.Message($"- WorkSettings initialized: {pawn.workSettings.Initialized}");
+                Log.Message($"- EverWork: {pawn.workSettings.EverWork}");
+                Log.Message($"- WorkGiversNormal count: {pawn.workSettings.WorkGiversInOrderNormal?.Count ?? 0}");
+            }
+            else
+            {
+                Log.Message("- WorkSettings: NULL");
+            }
+
+            // Validate ThinkTree
+            Utility_ThinkTreeManager.ValidateThinkTree(pawn);
+
+            // Check current job state
+            Log.Message($"- Current job: {pawn.jobs?.curJob?.def?.defName ?? "None"}");
+            Log.Message($"- Job queue: {pawn.jobs?.jobQueue?.Count ?? 0} items");
+
+            Log.Message("[PawnControl] Comprehensive diagnostic complete");
         }
     }
 }

@@ -156,5 +156,13 @@ namespace emitbreaker.PawnControl
                 }
             }
         }
+
+        /// <summary>
+        /// Helper method to determine if this extension is interesting for debugging
+        /// </summary>
+        public bool IsInteresting()
+        {
+            return true; // You can add more specific criteria later if needed
+        }
     }
 }

@@ -16,71 +16,6 @@ namespace emitbreaker.PawnControl
         private static readonly HashSet<Pawn> _workgiverReplacementDone = new HashSet<Pawn>();
 
         /// <summary>
-        /// Safely replaces a pawn's WorkGivers with modded versions if the pawn has proper tags. 
-        /// Uses prefix-based matching (e.g., PawnControl_WorkGiver_XXX).
-        /// </summary>
-        public static void SafeReplaceWorkGiversIfTagged(Pawn pawn, string prefix = "PawnControl_")
-        {
-            if (pawn == null || pawn.def == null || pawn.def.race == null || pawn.workSettings == null)
-                return;
-
-            // ✅ Check tag requirements before proceeding
-            if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def))
-            {
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] Skipped workgiver replacement for {pawn.LabelCap} - No eligible work tags.");
-                }
-                return;
-            }
-
-            // ✅ Ensure work settings have a work giver list
-            var giversField = AccessTools.Field(typeof(Pawn_WorkSettings), "workGiversInOrderNormal");
-            var internalGivers = (List<WorkGiver>)giversField.GetValue(pawn.workSettings);
-
-            if (internalGivers == null)
-            {
-                if (Prefs.DevMode)
-                    Log.Warning($"[PawnControl] WorkGivers list is null for {pawn.LabelCap}, skipping replacement.");
-                return;
-            }
-
-            bool replacedAny = false;
-
-            // ✅ Attempt to replace workgivers
-            for (int i = 0; i < internalGivers.Count; i++)
-            {
-                var original = internalGivers[i];
-                var def = original?.def;
-                if (def?.giverClass == null)
-                    continue;
-
-                string replacementDefName = prefix + def.defName;
-                var replacementDef = DefDatabase<WorkGiverDef>.GetNamedSilentFail(replacementDefName);
-
-                if (replacementDef != null && replacementDef.giverClass != def.giverClass)
-                {
-                    internalGivers[i] = replacementDef.Worker;
-                    replacedAny = true;
-
-                    if (Prefs.DevMode)
-                    {
-                        Log.Message($"[PawnControl] Replaced WorkGiver {def.defName} with {replacementDef.defName} for {pawn.LabelCap}.");
-                    }
-                }
-            }
-
-            // ✅ Always force assign modified list back
-            giversField.SetValue(pawn.workSettings, internalGivers);
-
-            if (Prefs.DevMode && replacedAny)
-            {
-                Log.Message($"[PawnControl] Completed workgiver replacement for {pawn.LabelCap}.");
-                Utility_DebugManager.DumpWorkGiversForPawn(pawn);
-            }
-        }
-
-        /// <summary>
         /// Fully initializes a pawn's work settings, think tree, and workgivers for modded behavior.
         /// - Ensures WorkSettings are created and initialized if missing or invalid.
         /// - Injects a modded think tree subtree for custom behavior.
@@ -114,6 +49,12 @@ namespace emitbreaker.PawnControl
             if (Prefs.DevMode)
             {
                 Log.Message($"[PawnControl] Completed FullInitializePawn for {pawn.LabelShortCap} (forceLock={forceLock})");
+            }
+
+            // Add at the end of the method
+            if (Prefs.DevMode && pawn?.thinker?.MainThinkNodeRoot != null)
+            {
+                Utility_ThinkTreeManager.ValidateThinkTree(pawn);
             }
         }
 
@@ -221,9 +162,6 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            // ✅ Replace WorkGivers (light safe method)
-            SafeReplaceWorkGiversIfTagged(pawn, "PawnControl_");
-
             if (Prefs.DevMode)
             {
                 Log.Message($"[PawnControl] SafeEnsurePawnReadyForWork completed for {pawn.LabelCap}.");
@@ -244,68 +182,77 @@ namespace emitbreaker.PawnControl
             
             try
             {
-                // Use direct property access when available rather than reflection
+                // Check if work lists are empty
                 List<WorkGiver> normalList = pawn.workSettings.WorkGiversInOrderNormal;
                 List<WorkGiver> emergencyList = pawn.workSettings.WorkGiversInOrderEmergency;
                 
                 bool needsRebuild = (normalList == null || normalList.Count == 0 || 
-                                    emergencyList == null || emergencyList.Count == 0);
+                                   emergencyList == null || emergencyList.Count == 0);
                 
                 if (needsRebuild)
                 {
-                    // First ensure base initialization
+                    // First try regular initialization
                     if (!pawn.workSettings.Initialized)
                     {
-                        if (Prefs.DevMode)
-                        {
-                            Log.Message($"[PawnControl] Initializing uninitialized workSettings for {pawn.LabelCap}");
-                        }
+                        Log.Warning($"[PawnControl] WorkSettings not initialized for {pawn.LabelCap}. Initializing...");
                         pawn.workSettings.EnableAndInitialize();
-                        
-                        // Check if initialization fixed it
-                        normalList = pawn.workSettings.WorkGiversInOrderNormal;
-                        emergencyList = pawn.workSettings.WorkGiversInOrderEmergency;
-                        
-                        needsRebuild = (normalList == null || normalList.Count == 0 || 
-                                       emergencyList == null || emergencyList.Count == 0);
                     }
                     
-                    // If still needed, try forcing via reflection
-                    if (needsRebuild)
+                    // If still empty, force rebuild via reflection
+                    normalList = pawn.workSettings.WorkGiversInOrderNormal;
+                    emergencyList = pawn.workSettings.WorkGiversInOrderEmergency;
+                    
+                    if (normalList == null || normalList.Count == 0 || 
+                        emergencyList == null || emergencyList.Count == 0)
                     {
-                        // Use reflection to call the private CacheWorkGiversInOrder method
+                        Log.Warning($"[PawnControl] WorkGiver lists still empty after initialization for {pawn.LabelCap}. Forcing rebuild...");
+                        
+                        // Force rebuild via reflection
                         MethodInfo cacheMethod = AccessTools.Method(typeof(Pawn_WorkSettings), "CacheWorkGiversInOrder");
                         if (cacheMethod != null)
                         {
-                            try 
+                            cacheMethod.Invoke(pawn.workSettings, null);
+                            Log.Message($"[PawnControl] Forced WorkGiver cache rebuild for {pawn.LabelCap}");
+                            
+                            // Add all WorkGivers manually if still empty
+                            normalList = pawn.workSettings.WorkGiversInOrderNormal;
+                            if (normalList == null || normalList.Count == 0)
                             {
-                                cacheMethod.Invoke(pawn.workSettings, null);
+                                Log.Warning($"[PawnControl] Creating new WorkGiver lists for {pawn.LabelCap}");
                                 
-                                if (Prefs.DevMode)
+                                // Create new lists if needed
+                                var normalField = AccessTools.Field(typeof(Pawn_WorkSettings), "workGiversInOrderNormal");
+                                var emergencyField = AccessTools.Field(typeof(Pawn_WorkSettings), "workGiversInOrderEmergency");
+                                
+                                if (normalField != null && emergencyField != null)
                                 {
-                                    // Verify result
-                                    normalList = pawn.workSettings.WorkGiversInOrderNormal;
-                                    emergencyList = pawn.workSettings.WorkGiversInOrderEmergency;
+                                    var newNormalList = new List<WorkGiver>();
+                                    var newEmergencyList = new List<WorkGiver>();
                                     
-                                    Log.Message($"[PawnControl] WorkGiver lists after rebuild for {pawn.LabelCap}: " +
-                                               $"Normal={normalList?.Count ?? 0}, Emergency={emergencyList?.Count ?? 0}");
+                                    // Populate with default work givers
+                                    foreach (WorkGiverDef def in DefDatabase<WorkGiverDef>.AllDefsListForReading)
+                                    {
+                                        if (pawn.workSettings.GetPriority(def.workType) > 0)
+                                        {
+                                            newNormalList.Add(def.Worker);
+                                            if (def.emergency)
+                                                newEmergencyList.Add(def.Worker);
+                                        }
+                                    }
+                                    
+                                    normalField.SetValue(pawn.workSettings, newNormalList);
+                                    emergencyField.SetValue(pawn.workSettings, newEmergencyList);
+                                    
+                                    Log.Message($"[PawnControl] Created new WorkGiver lists with {newNormalList.Count} normal and {newEmergencyList.Count} emergency givers");
                                 }
                             }
-                            catch (Exception ex)
-                            {
-                                Log.Error($"[PawnControl] Failed to rebuild WorkGiver lists for {pawn.LabelCap}: {ex}");
-                            }
-                        }
-                        else
-                        {
-                            Log.Warning($"[PawnControl] Could not find CacheWorkGiversInOrder method via reflection");
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Log.Error($"[PawnControl] Exception in EnsureWorkGiversPopulated for {pawn?.LabelCap ?? "null pawn"}: {ex}");
+                Log.Error($"[PawnControl] Exception in EnsureWorkGiversPopulated: {ex}");
             }
         }
     }

@@ -44,5 +44,20 @@ namespace emitbreaker.PawnControl
         {
             return DefDatabase<NeedDef>.GetNamed(defName);
         }
+
+        public static SkillDef SkillDefNamed(string defName)
+        {
+            return DefDatabase<SkillDef>.GetNamed(defName);
+        }
+
+        public static PreceptDef PreceptDefNamed(string defName)
+        {
+            return DefDatabase<PreceptDef>.GetNamed(defName);
+        }
+
+        public static WorkGiverDef WorkGiverDefNamed(string defName)
+        {
+            return DefDatabase<WorkGiverDef>.GetNamed(defName);
+        }
     }
 }

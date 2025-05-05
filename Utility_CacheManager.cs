@@ -26,6 +26,9 @@ namespace emitbreaker.PawnControl
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> workEnabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> workDisabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
 
+        // Add this static dictionary to cache jobs
+        public static readonly Dictionary<Thing, Job> _cachedJobs = new Dictionary<Thing, Job>();
+
         public static DutyDef GetDuty(string defName)
         {
             DutyDef result;
@@ -213,6 +216,115 @@ namespace emitbreaker.PawnControl
                 cachedApparelRestriction[pawn.def] = result;
             }
             return result;
+        }
+
+        // For JobGiverManager use
+        /// <summary>
+        /// Gets or creates a reachability dictionary for the specified map ID
+        /// </summary>
+        public static Dictionary<T, bool> GetOrNewReachabilityDict<T>(
+            Dictionary<int, Dictionary<T, bool>> reachabilityCache,
+            int mapId)
+        {
+            if (!reachabilityCache.ContainsKey(mapId))
+                reachabilityCache[mapId] = new Dictionary<T, bool>();
+
+            return reachabilityCache[mapId];
+        }
+
+        /// <summary>
+        /// Resets a job giver cache system
+        /// </summary>
+        public static void ResetJobGiverCache<T>(
+            Dictionary<int, List<T>> mainCache,
+            Dictionary<int, Dictionary<T, bool>> reachabilityCache)
+        {
+            if (mainCache != null)
+                mainCache.Clear();
+
+            if (reachabilityCache != null)
+                reachabilityCache.Clear();
+        }
+
+        /// <summary>
+        /// Updates a cached collection of things based on designations
+        /// </summary>
+        public static void UpdateDesignationBasedCache<T>(
+            Map map,
+            ref int lastUpdateTick,
+            int updateInterval,
+            Dictionary<int, List<T>> cache,
+            Dictionary<int, Dictionary<T, bool>> reachabilityCache,
+            DesignationDef designationDef,
+            Func<Designation, T> extractFunc,
+            int maxCacheEntries = 100) where T : Thing
+        {
+            if (map == null) return;
+
+            int currentTick = Find.TickManager.TicksGame;
+            int mapId = map.uniqueID;
+
+            if (currentTick > lastUpdateTick + updateInterval ||
+                !cache.ContainsKey(mapId))
+            {
+                // Clear outdated cache
+                if (cache.ContainsKey(mapId))
+                    cache[mapId].Clear();
+                else
+                    cache[mapId] = new List<T>();
+
+                // Clear reachability cache too
+                if (reachabilityCache.ContainsKey(mapId))
+                    reachabilityCache[mapId].Clear();
+                else
+                    reachabilityCache[mapId] = new Dictionary<T, bool>();
+
+                // Find all things designated for the specified action
+                List<T> validThings = new List<T>();
+                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(designationDef))
+                {
+                    T thing = extractFunc(designation);
+                    if (thing != null && thing.Spawned)
+                    {
+                        validThings.Add(thing);
+                    }
+                }
+
+                // Add items to cache
+                cache[mapId].AddRange(validThings);
+
+                // Limit cache size for memory efficiency
+                if (cache[mapId].Count > maxCacheEntries)
+                {
+                    cache[mapId].RemoveRange(maxCacheEntries, cache[mapId].Count - maxCacheEntries);
+                }
+
+                lastUpdateTick = currentTick;
+            }
+        }
+
+        /// <summary>
+        /// Creates a generic cache system for storing map-specific data
+        /// </summary>
+        public static void UpdateGenericCache<T>(int mapId, Dictionary<int, List<T>> cache, IEnumerable<T> newItems, int maxCacheEntries = 100)
+        {
+            // Clear outdated cache or initialize if needed
+            if (cache.ContainsKey(mapId))
+                cache[mapId].Clear();
+            else
+                cache[mapId] = new List<T>();
+
+            // Add items to cache
+            if (newItems != null)
+            {
+                cache[mapId].AddRange(newItems);
+
+                // Limit cache size for memory efficiency
+                if (cache[mapId].Count > maxCacheEntries)
+                {
+                    cache[mapId].RemoveRange(maxCacheEntries, cache[mapId].Count - maxCacheEntries);
+                }
+            }
         }
     }
 }

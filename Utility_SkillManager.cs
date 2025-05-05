@@ -1,6 +1,7 @@
 ﻿using RimWorld;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,25 +11,21 @@ namespace emitbreaker.PawnControl
 {
     public static class Utility_SkillManager
     {
-        // Scoped fallback for PawnColumnWorker sorting/priority only
-        public static float SafeAverageOfRelevantSkillsFor(Pawn pawn, WorkTypeDef workType)
+        public static bool NeedsStatInjection(Pawn pawn)
         {
-            // First try to attach real skills if missing
-            if (pawn != null && pawn.skills == null)
+            if (pawn == null || pawn.def == null || pawn.health == null || pawn.health.hediffSet == null)
+                return false;
+
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null)
             {
-                ForceAttachSkillTrackerIfMissing(pawn);
+                return false;
             }
 
-            // Now try to use the real skills
-            if (pawn?.skills != null)
-            {
-                return pawn.skills.AverageOfRelevantSkillsFor(workType);
-            }
-
-            return SetInjectedSkillLevel(pawn);
+            // Already injected? Then skip.
+            return !pawn.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub"));
         }
 
-        //Skill level simulation
         /// <summary>
         /// Safely simulate a skill for a non-humanlike pawn.
         /// Uses per-pawn and per-skill caching. Compatible with mod extension overrides.
@@ -42,6 +39,11 @@ namespace emitbreaker.PawnControl
 
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
 
+            if (modExtension == null)
+            {
+                return 0; // No mod extension, no skill level
+            }
+
             if (modExtension != null && modExtension.baseSkillLevelOverride.HasValue)
             {
                 return modExtension.baseSkillLevelOverride.Value;
@@ -53,69 +55,93 @@ namespace emitbreaker.PawnControl
                 return 0;
             }
 
-            if (race.Humanlike && modExtension == null)
+            if (race.Humanlike)
             {
-                return skill != null ? (int)pawn.skills?.GetSkill(skill)?.Level : 0; // fallback to real
+                SkillRecord record = pawn.skills.GetSkill(skill);
+                return CalculateInjectedSkillLevel(pawn, modExtension, skill, record);
             }
 
             if (race.IsMechanoid || race.ToolUser)
             {
-                if (modExtension != null)
+                // Try to attach real skills if missing and it's appropriate
+                if (pawn.skills == null && ShouldHaveSkills(pawn))
                 {
-                    // Try to attach real skills if missing and it's appropriate
-                    if (pawn.skills == null && ShouldHaveSkills(pawn))
-                    {
-                        ForceAttachSkillTrackerIfMissing(pawn);
-
-                        // If skills were attached and requested skill exists, use the real value
-                        if (pawn.skills != null && skill != null)
-                        {
-                            SkillRecord record = pawn.skills.GetSkill(skill);
-                            if (record != null)
-                            {
-                                return (int)record.Level;
-                            }
-                        }
-                    }
+                    ForceAttachSkillTrackerIfMissing(pawn);
+                    SkillRecord record = pawn.skills.GetSkill(skill);
+                    return CalculateInjectedSkillLevel(pawn, modExtension, skill, record);
                 }
-                return 10;
             }
 
             if (race.Animal)
             {
-                if (modExtension != null)
+                // Try to attach real skills if missing and it's appropriate
+                if (pawn.skills == null && ShouldHaveSkills(pawn))
                 {
-                    // Try to attach real skills if missing and it's appropriate
-                    if (pawn.skills == null && ShouldHaveSkills(pawn))
-                    {
-                        ForceAttachSkillTrackerIfMissing(pawn);
-
-                        // If skills were attached and requested skill exists, use the real value
-                        if (pawn.skills != null && skill != null)
-                        {
-                            SkillRecord record = pawn.skills.GetSkill(skill);
-                            if (record != null)
-                            {
-                                return (int)record.Level;
-                            }
-                        }
-                    }
-                }
-                if (race.trainability == TrainabilityDefOf.Advanced)
-                {
-                    return 5;
-                }
-                if (race.trainability == TrainabilityDefOf.Intermediate)
-                {
-                    return 3;
-                }
-                else
-                {
-                    return 1;
+                    ForceAttachSkillTrackerIfMissing(pawn);
+                    SkillRecord record = pawn.skills.GetSkill(skill);
+                    return CalculateInjectedSkillLevel(pawn, modExtension, skill, record);
                 }
             }
 
-            return 1; // Generic fallback
+            return 0; // Generic fallback
+        }
+
+        private static int CalculateInjectedSkillLevel(Pawn pawn, NonHumanlikePawnControlExtension modExtension, SkillDef skill, SkillRecord record)
+        {
+            if (pawn == null || pawn.RaceProps == null || modExtension == null)
+            {
+                return 0;
+            }
+
+            RaceProperties raceProps = pawn.RaceProps;
+
+            if (modExtension?.baseSkillLevelOverride.HasValue == true)
+            {
+                return modExtension.baseSkillLevelOverride.Value;
+            }
+
+            else if (record != null && record.levelInt > 0)
+            {
+                return (int)record.Level;
+            }
+
+            else if (modExtension.injectedSkills.Count > 0)
+            {
+                // Check if the skill is overridden in the mod extension
+                foreach (var entry in modExtension.injectedSkills)
+                {
+                    if (Utility_Common.SkillDefNamed(entry.skill) == skill)
+                    {
+                        return entry.level;
+                    }
+                }
+            }
+
+            else if (raceProps.Humanlike)
+            {
+                return skill != null ? (int)pawn.skills?.GetSkill(skill)?.Level : 0; // fallback to real
+            }
+            else if (raceProps.ToolUser)
+            {
+                return modExtension.skillLevelToolUser > 0 ? modExtension.skillLevelToolUser : 10;
+            }
+            else if (raceProps.Animal)
+            {
+                if (raceProps.trainability == TrainabilityDefOf.Advanced)
+                {
+                    return modExtension.skillLevelAnimalAdvanced > 0 ? modExtension.skillLevelAnimalAdvanced : 5;
+                }
+                if (raceProps.trainability == TrainabilityDefOf.Intermediate)
+                {
+                    return modExtension.skillLevelAnimalIntermediate > 0 ? modExtension.skillLevelAnimalIntermediate : 3;
+                }
+                else
+                {
+                    return modExtension.skillLevelAnimalBasic > 0 ? modExtension.skillLevelAnimalBasic : 3;
+                }
+            }
+
+            return 0; // Fallback to default skill level
         }
 
         public static Passion SetInjectedPassion(ThingDef def, SkillDef skillDef)
@@ -138,34 +164,15 @@ namespace emitbreaker.PawnControl
             return Passion.None;
         }
 
-        public static float GetWorkPrioritySortingValue(Pawn pawn, WorkTypeDef workType)
-        {
-            if (pawn == null || workType == null)
-                return -2f;
-
-            if (pawn.workSettings == null || !pawn.workSettings.EverWork)
-                return -2f;
-
-            if (pawn.WorkTypeIsDisabled(workType))
-                return -1f;
-
-            // Simulate for non-humanlike
-            if (!pawn.RaceProps?.Humanlike ?? true)
-            {
-                return SetInjectedSkillLevel(pawn);
-            }
-
-            // Use real value if available
-            return pawn.skills?.AverageOfRelevantSkillsFor(workType) ?? 0f;
-        }
-
         /// <summary>
         /// Forcibly attaches a real SkillTracker and initializes skills for non-humanlike pawns.
         /// </summary>
         public static void ForceAttachSkillTrackerIfMissing(Pawn pawn)
         {
             if (pawn == null || pawn.skills != null)
+            {
                 return; // Already has skills, no need to modify
+            }
 
             try
             {
@@ -229,6 +236,12 @@ namespace emitbreaker.PawnControl
                     return;
 
                 int attachedCount = 0;
+                int statInjectionCount = 0;
+
+                if (Prefs.DevMode)
+                {
+                    Log.Message($"[PawnControl] Beginning skill and stat injection process...");
+                }
 
                 // Process all pawns in all maps
                 foreach (var map in Current.Game.Maps)
@@ -236,12 +249,13 @@ namespace emitbreaker.PawnControl
                     foreach (var pawn in map.mapPawns.AllPawnsSpawned)
                     {
                         // Skip pawns that already have skills, are dead, or don't need skills
-                        if (pawn == null || pawn.Dead || pawn.Destroyed || pawn.skills != null)
+                        if (pawn == null || pawn.Dead || pawn.Destroyed)
                         {
                             continue;
                         }
 
-                        if (Utility_CacheManager.GetModExtension(pawn.def) == null)
+                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                        if (modExtension == null)
                         {
                             continue; // Skip if no mod extension is found
                         }
@@ -249,8 +263,30 @@ namespace emitbreaker.PawnControl
                         // Attach skill tracker if this pawn should be able to do work
                         if (ShouldHaveSkills(pawn))
                         {
-                            ForceAttachSkillTrackerIfMissing(pawn);
-                            attachedCount++;
+                            // Check if we need to inject skills
+                            if (pawn.skills == null)
+                            {
+                                ForceAttachSkillTrackerIfMissing(pawn);
+                                attachedCount++;
+                            }
+
+                            // Now ensure stats are properly injected (always try, even if skills already exist)
+                            try
+                            {
+                                if (Prefs.DevMode)
+                                {
+                                    Log.Message($"[PawnControl] Attempting stat injection for {pawn.LabelShort} ({pawn.def.defName})");
+                                }
+
+                                ForceAttachSkillTrackerIfMissing(pawn);
+                                Utility_StatManager.InjectConsolidatedStatHediff(pawn);
+                                Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn); // ✅ centralized
+                                statInjectionCount++;
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Error($"[PawnControl] Error during stat injection for {pawn.LabelShort}: {ex}");
+                            }
                         }
                     }
                 }
@@ -261,12 +297,13 @@ namespace emitbreaker.PawnControl
                     foreach (var pawn in Find.WorldPawns.AllPawnsAliveOrDead)
                     {
                         // Skip pawns that already have skills, are dead, or don't need skills
-                        if (pawn == null || pawn.Dead || pawn.Destroyed || pawn.skills != null)
+                        if (pawn == null || pawn.Dead || pawn.Destroyed)
                         {
                             continue;
                         }
 
-                        if (Utility_CacheManager.GetModExtension(pawn.def) == null)
+                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                        if (modExtension == null)
                         {
                             continue; // Skip if no mod extension is found
                         }
@@ -274,26 +311,48 @@ namespace emitbreaker.PawnControl
                         // Attach skill tracker if this pawn should be able to do work
                         if (ShouldHaveSkills(pawn))
                         {
-                            ForceAttachSkillTrackerIfMissing(pawn);
-                            attachedCount++;
+                            // Check if we need to inject skills
+                            if (pawn.skills == null)
+                            {
+                                ForceAttachSkillTrackerIfMissing(pawn);
+                                attachedCount++;
+                            }
+
+                            // Now ensure stats are properly injected (always try, even if skills already exist)
+                            try
+                            {
+                                if (Prefs.DevMode)
+                                {
+                                    Log.Message($"[PawnControl] Attempting stat injection for {pawn.LabelShort} ({pawn.def.defName})");
+                                }
+
+                                ForceAttachSkillTrackerIfMissing(pawn);
+                                Utility_StatManager.InjectConsolidatedStatHediff(pawn);
+                                Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn); // ✅ centralized
+                                statInjectionCount++;
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Error($"[PawnControl] Error during stat injection for {pawn.LabelShort}: {ex}");
+                            }
                         }
                     }
                 }
 
-                if (Prefs.DevMode && attachedCount > 0)
+                if (Prefs.DevMode && (attachedCount > 0 || statInjectionCount > 0))
                 {
-                    Log.Message($"[PawnControl] Attached skill trackers to {attachedCount} pawns during startup.");
+                    Log.Message($"[PawnControl] Process complete: Attached skill trackers to {attachedCount} pawns, injected stats for {statInjectionCount} pawns.");
                 }
             }
             catch (Exception ex)
             {
-                Log.Error($"[PawnControl] Error attaching skill trackers during startup: {ex}");
+                Log.Error($"[PawnControl] Error in AttachSkillTrackersToPawnsSafely: {ex}");
             }
         }
-
         /// <summary>
         /// Determines if a pawn should have skills attached based on its characteristics.
         /// </summary>
+
         public static bool ShouldHaveSkills(Pawn pawn)
         {
             // Skip null pawns or those without valid race properties
@@ -306,12 +365,6 @@ namespace emitbreaker.PawnControl
             {
                 return false;
             }
-
-            // Always attach to tool users (like animals with manipulator limbs)
-            //if (pawn.RaceProps.ToolUser)
-            //{
-            //    return true;
-            //}
 
             // Check for any managed extension that indicates this pawn should work
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
@@ -438,6 +491,36 @@ namespace emitbreaker.PawnControl
 
             // Default: don't attach skills to standard non-humanlike pawns
             return false;
+        }
+
+        public static float GetWorkPrioritySortingValue(Pawn pawn, WorkTypeDef workType)
+        {
+            if (pawn == null || workType == null)
+                return -2f;
+
+            if (pawn.workSettings == null || !pawn.workSettings.EverWork)
+                return -2f;
+
+            if (pawn.WorkTypeIsDisabled(workType))
+                return -1f;
+
+            // Simulate for non-humanlike
+            if (!pawn.RaceProps?.Humanlike ?? true)
+            {
+                return SetInjectedSkillLevel(pawn);
+            }
+
+            // Use real value if available
+            return pawn.skills?.AverageOfRelevantSkillsFor(workType) ?? 0f;
+        }
+
+        // Scoped fallback for PawnColumnWorker sorting/priority only
+        public static float SafeAverageOfRelevantSkillsFor(Pawn pawn, WorkTypeDef workType)
+        {
+            if (pawn?.skills != null)
+                return pawn.skills.AverageOfRelevantSkillsFor(workType);
+
+            return SetInjectedSkillLevel(pawn);
         }
     }
 }
