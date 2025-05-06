@@ -30,6 +30,11 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // IMPORTANT: Only player pawns and slaves owned by player should gather items for caravans
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             // Don't assign caravan gathering jobs to pawns already forming caravans
             if (pawn.IsFormingCaravan())
             {

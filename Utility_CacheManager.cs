@@ -12,30 +12,45 @@ namespace emitbreaker.PawnControl
 {
     public static class Utility_CacheManager
     {
-        public static readonly Dictionary<ThingDef, NonHumanlikePawnControlExtension> modExtensionCache = new Dictionary<ThingDef, NonHumanlikePawnControlExtension>();
-        public static readonly Dictionary<ThingDef, HashSet<string>> tagCache = new Dictionary<ThingDef, HashSet<string>>();
+        public static readonly Dictionary<ThingDef, NonHumanlikePawnControlExtension> _modExtensionCache = new Dictionary<ThingDef, NonHumanlikePawnControlExtension>();
+        public static readonly Dictionary<ThingDef, HashSet<string>> _tagCache = new Dictionary<ThingDef, HashSet<string>>();
 
         // Caching ForceColonist Pawns
-        private static readonly Dictionary<Map, List<Pawn>> cachedColonistLikePawns = new Dictionary<Map, List<Pawn>>();
-        private static readonly Dictionary<Map, int> cachedFrameIndex = new Dictionary<Map, int>();
+        private static readonly Dictionary<Map, List<Pawn>> _colonistLikePawnCache = new Dictionary<Map, List<Pawn>>();
+        private static readonly Dictionary<Map, int> _frameIndexCache = new Dictionary<Map, int>();
 
-        private static readonly Dictionary<string, DutyDef> dutyCache = new Dictionary<string, DutyDef>();
+        private static readonly Dictionary<string, DutyDef> _dutyCache = new Dictionary<string, DutyDef>();
         // Cache to store the tag-check result per ThingDef
-        private static readonly Dictionary<ThingDef, bool> cachedApparelRestriction = new Dictionary<ThingDef, bool>();
+        private static readonly Dictionary<ThingDef, bool> _apparelRestrictionCache = new Dictionary<ThingDef, bool>();
         
-        public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> workEnabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
-        public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> workDisabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _workEnabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _workDisabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceDraftableCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceEquipWeaponCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceWearApparelCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
+
+        // Cache for Utililty_IdentityManager
+        public static readonly Dictionary<ThingDef, bool> _isAnimalCache = new Dictionary<ThingDef, bool>();
+        public static readonly Dictionary<ThingDef, bool> _isHumanlikeCache = new Dictionary<ThingDef, bool>();
+        public static readonly Dictionary<ThingDef, bool> _isMechanoidCache = new Dictionary<ThingDef, bool>();
+        public static readonly Dictionary<FlagScopeTarget, bool> _flagOverrides = new Dictionary<FlagScopeTarget, bool>();
 
         // Add this static dictionary to cache jobs
-        public static readonly Dictionary<Thing, Job> _cachedJobs = new Dictionary<Thing, Job>();
+        public static readonly Dictionary<Thing, Job> _jobCache = new Dictionary<Thing, Job>();
+
+        /// <summary>Cache of ThingDefs with their work tag allowance status</summary>
+        // Use separate caches for different tag types
+        public static Dictionary<ThingDef, bool> _allowWorkTagCache = new Dictionary<ThingDef, bool>();
+        public static Dictionary<ThingDef, bool> _blockWorkTagCache = new Dictionary<ThingDef, bool>();
+        public static Dictionary<ThingDef, bool> _combinedWorkTagCache = new Dictionary<ThingDef, bool>();
 
         public static DutyDef GetDuty(string defName)
         {
             DutyDef result;
-            if (!dutyCache.TryGetValue(defName, out result))
+            if (!_dutyCache.TryGetValue(defName, out result))
             {
                 result = DefDatabase<DutyDef>.GetNamedSilentFail(defName);
-                dutyCache[defName] = result;
+                _dutyCache[defName] = result;
             }
             return result;
         }
@@ -53,7 +68,7 @@ namespace emitbreaker.PawnControl
             NonHumanlikePawnControlExtension cached;
 
             // === Check Cache First ===
-            if (modExtensionCache.TryGetValue(def, out cached))
+            if (_modExtensionCache.TryGetValue(def, out cached))
             {
                 return cached;
             }
@@ -76,7 +91,7 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            modExtensionCache[def] = modExtension; // Safe to cache null for future checks
+            _modExtensionCache[def] = modExtension; // Safe to cache null for future checks
 
             return modExtension;
         }
@@ -90,7 +105,7 @@ namespace emitbreaker.PawnControl
                 var ext = def.GetModExtension<NonHumanlikePawnControlExtension>();
                 if (ext != null)
                 {
-                    modExtensionCache[def] = ext;
+                    _modExtensionCache[def] = ext;
 
                     // ✅ Add this line to enable skill passion injection support
                     ext.CacheSkillPassions();
@@ -98,13 +113,13 @@ namespace emitbreaker.PawnControl
             }
             if (Prefs.DevMode)
             {
-                Log.Message($"[PawnControl] Non Humanlike Pawn Controller refreshed: {Utility_CacheManager.modExtensionCache.Count} extensions loaded.");
+                Log.Message($"[PawnControl] Non Humanlike Pawn Controller refreshed: {_modExtensionCache.Count} extensions loaded.");
             }
         }
 
         public static void ClearModExtensionCache()
         {
-            modExtensionCache.Clear();
+            _modExtensionCache.Clear();
             Log.Message("[PawnControl] Cleared modExtensionCache.");
         }
 
@@ -119,8 +134,8 @@ namespace emitbreaker.PawnControl
             }
 
             int frame = Time.frameCount;
-            if (cachedColonistLikePawns.TryGetValue(map, out var cached) &&
-                cachedFrameIndex.TryGetValue(map, out var cachedFrame) &&
+            if (_colonistLikePawnCache.TryGetValue(map, out var cached) &&
+                _frameIndexCache.TryGetValue(map, out var cachedFrame) &&
                 frame - cachedFrame <= 5) // 5-frame TTL (adjustable)
             {
                 return cached;
@@ -160,15 +175,15 @@ namespace emitbreaker.PawnControl
                 return false;
             }).ToList();
 
-            cachedColonistLikePawns[map] = result;
-            cachedFrameIndex[map] = frame;
+            _colonistLikePawnCache[map] = result;
+            _frameIndexCache[map] = frame;
             return result;
         }
 
         public static void InvalidateColonistLikeCache(Map map)
         {
-            cachedColonistLikePawns.Remove(map);
-            cachedFrameIndex.Remove(map);
+            _colonistLikePawnCache.Remove(map);
+            _frameIndexCache.Remove(map);
         }
 
         /// <summary>
@@ -204,7 +219,7 @@ namespace emitbreaker.PawnControl
             if (pawn == null || pawn.def == null) return false;
 
             bool result;
-            if (!cachedApparelRestriction.TryGetValue(pawn.def, out result))
+            if (!_apparelRestrictionCache.TryGetValue(pawn.def, out result))
             {
                 var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
 
@@ -213,7 +228,7 @@ namespace emitbreaker.PawnControl
                     result = physicalModExtension != null && physicalModExtension.restrictApparelByBodyType;
                 }
 
-                cachedApparelRestriction[pawn.def] = result;
+                _apparelRestrictionCache[pawn.def] = result;
             }
             return result;
         }

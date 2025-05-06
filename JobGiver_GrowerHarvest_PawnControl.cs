@@ -36,6 +36,11 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // IMPORTANT: Only player pawns and slaves owned by player should harvest
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             // Skip pawns in lords (e.g., in caravans, raids, etc.)
             if (pawn.GetLord() != null)
             {

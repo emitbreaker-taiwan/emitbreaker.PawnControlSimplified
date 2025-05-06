@@ -39,6 +39,11 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // IMPORTANT: Only player pawns and slaves owned by player should sow
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
                 pawn,
                 "Growing",
@@ -232,96 +237,6 @@ namespace emitbreaker.PawnControl
             return job;
         }
 
-        /// <summary>
-        /// Create a job for sowing using custom bucket processing for IntVec3
-        /// </summary>
-        private Job TryCreateSowJobBKG(Pawn pawn, bool forced = false)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_sowableCellsCache.ContainsKey(mapId) || _sowableCellsCache[mapId].Count == 0)
-                return null;
-
-            // Create distance buckets manually since we can't use the generic method with IntVec3
-            List<IntVec3>[] buckets = CreateDistanceBucketsForCells(
-                pawn,
-                _sowableCellsCache[mapId],
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find the best cell to sow
-            IntVec3 targetCell = FindFirstValidCell(buckets, pawn, forced);
-
-            // Create job if target found
-            if (targetCell.IsValid)
-            {
-                // Determine what to plant
-                ThingDef plantDefToSow = WorkGiver_Grower.CalculateWantedPlantDef(targetCell, pawn.Map);
-                if (plantDefToSow == null)
-                    return null;
-
-                // Check skill requirements
-                if (plantDefToSow.plant.sowMinSkill > 0)
-                {
-                    if (pawn.skills != null && pawn.skills.GetSkill(SkillDefOf.Plants).Level < plantDefToSow.plant.sowMinSkill)
-                    {
-                        JobFailReason.Is("UnderAllowedSkill".Translate(plantDefToSow.plant.sowMinSkill));
-                        return null;
-                    }
-                    else if (pawn.IsColonyMech && pawn.RaceProps.mechFixedSkillLevel < plantDefToSow.plant.sowMinSkill)
-                    {
-                        JobFailReason.Is("UnderAllowedSkill".Translate(plantDefToSow.plant.sowMinSkill));
-                        return null;
-                    }
-                }
-
-                // Check for adjacent blockers that need to be cleared first
-                Thing adjacentBlocker = PlantUtility.AdjacentSowBlocker(plantDefToSow, targetCell, pawn.Map);
-                if (adjacentBlocker != null)
-                {
-                    if (adjacentBlocker is Plant plant &&
-                        pawn.CanReserveAndReach(plant, PathEndMode.Touch, Danger.Deadly, 1, -1, null, forced) &&
-                        !plant.IsForbidden(pawn))
-                    {
-                        IPlantToGrowSettable plantGrower = plant.Position.GetPlantToGrowSettable(plant.Map);
-                        if (plantGrower == null || plantGrower.GetPlantDefToGrow() != plant.def)
-                        {
-                            Zone_Growing plantZone = plant.Position.GetZone(pawn.Map) as Zone_Growing;
-                            Zone_Growing targetZone = targetCell.GetZone(pawn.Map) as Zone_Growing;
-
-                            if ((targetZone != null && !targetZone.allowCut) ||
-                                (plantZone != null && !plantZone.allowCut && plant.def == plantZone.GetPlantDefToGrow()))
-                                return null;
-
-                            if (PlantUtility.TreeMarkedForExtraction(plant))
-                                return null;
-
-                            if (PlantUtility.PawnWillingToCutPlant_Job(plant, pawn))
-                                return JobMaker.MakeJob(JobDefOf.CutPlant, plant);
-                        }
-                    }
-                    return null;
-                }
-
-                // Create the sowing job
-                Job job = JobMaker.MakeJob(JobDefOf.Sow, targetCell);
-                job.plantDefToSow = plantDefToSow;
-
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to sow {plantDefToSow.label} at {targetCell}");
-                }
-
-                return job;
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Create distance-based buckets for IntVec3 cells (similar to JobGiverManager but for IntVec3)
-        /// </summary>
         private List<IntVec3>[] CreateDistanceBucketsForCells(Pawn pawn, IEnumerable<IntVec3> cells, float[] distanceThresholds)
         {
             if (pawn == null || cells == null || distanceThresholds == null)
@@ -373,6 +288,11 @@ namespace emitbreaker.PawnControl
                 // Check each cell in this distance band
                 foreach (IntVec3 cell in buckets[b])
                 {
+                    // Similarly, check if there's a hydroponics basin and ensure it belongs to pawn's faction
+                    Thing edifice = cell.GetEdifice(map);
+                    if (edifice is Building_PlantGrower && edifice.Faction != pawn.Faction)
+                        continue;
+
                     // Skip if forbidden
                     if (cell.IsForbidden(pawn))
                         continue;

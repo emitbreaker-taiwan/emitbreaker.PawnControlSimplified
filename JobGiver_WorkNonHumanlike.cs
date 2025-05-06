@@ -41,12 +41,18 @@ namespace emitbreaker.PawnControl
                     return ThinkResult.NoJob;
                 }
 
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                if (modExtension == null)
+                {
+                    return ThinkResult.NoJob;
+                }
+
                 // CRITICAL FIX: Set mind state to active, which is required for work AI to function
                 if (pawn.mindState != null)
                 {
                     pawn.mindState.Active = true;
 
-                    if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Setting {pawn.LabelShort}'s mindState.Active = true");
                     }
@@ -55,7 +61,7 @@ namespace emitbreaker.PawnControl
                 // Work settings check
                 if (pawn.workSettings == null || !pawn.workSettings.EverWork)
                 {
-                    if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Warning($"[PawnControl] {pawn.LabelShort} has no work settings or !EverWork");
                     }
@@ -70,14 +76,13 @@ namespace emitbreaker.PawnControl
 
                 // FIXED: Check if this pawn should be handled by PawnControl
                 bool hasPawnControlTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def);
-                bool isAnimal = pawn.RaceProps.Animal;
 
                 // Only continue if pawn has tags OR is an animal
-                if (!hasPawnControlTags && !isAnimal)
+                if (!hasPawnControlTags)
                 {
-                    if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
-                        Log.Warning($"[PawnControl] {pawn.LabelShort} has no work tags and is not an animal");
+                        Log.Warning($"[PawnControl] {pawn.LabelShort} has no work tags.");
                     }
                     return ThinkResult.NoJob;
                 }
@@ -111,7 +116,7 @@ namespace emitbreaker.PawnControl
                 }
 
                 // Additional diagnostic code for emergency list
-                if (emergency && Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                if (emergency && Prefs.DevMode && modExtension.debugMode)
                 {
                     Log.Warning($"[PawnControl DEBUG] Emergency WorkGivers check for {pawn.LabelCap}:");
                     if (pawn.mindState?.priorityWork != null)
@@ -136,7 +141,7 @@ namespace emitbreaker.PawnControl
                     // If emergency list is empty or null, try to rebuild both lists
                     if (emergencyList == null || emergencyList.Count == 0)
                     {
-                        if (Prefs.DevMode)
+                        if (Prefs.DevMode && modExtension.debugMode)
                         {
                             Log.Warning($"[PawnControl] Empty emergency WorkGiver list for {pawn.LabelCap}. Attempting to rebuild...");
                         }
@@ -147,7 +152,7 @@ namespace emitbreaker.PawnControl
                         // If still empty after rebuild, fall back to normal list
                         if (emergencyList == null || emergencyList.Count == 0)
                         {
-                            if (Prefs.DevMode)
+                            if (Prefs.DevMode && modExtension.debugMode)
                             {
                                 Log.Warning($"[PawnControl] Falling back to normal WorkGiver list for {pawn.LabelCap} in emergency mode");
                             }
@@ -170,7 +175,7 @@ namespace emitbreaker.PawnControl
 
                 if (list == null || list.Count == 0)
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Warning($"[PawnControl] Empty WorkGiver list for {pawn.LabelCap}. Attempting to rebuild...");
                     }
@@ -181,7 +186,7 @@ namespace emitbreaker.PawnControl
 
                     if (list == null || list.Count == 0)
                     {
-                        if (Prefs.DevMode)
+                        if (Prefs.DevMode && modExtension.debugMode)
                         {
                             Log.Error($"[PawnControl] Failed to rebuild WorkGiver lists for {pawn.LabelCap}. Cannot issue jobs.");
                         }
@@ -235,7 +240,7 @@ namespace emitbreaker.PawnControl
                                 pawn.jobs.DebugLogEvent($"JobGiver_Work produced non-scan Job {job2.ToStringSafe()} from {workGiver}");
                             }
 
-                            if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                            if (Prefs.DevMode && modExtension.debugMode)
                             {
                                 Log.Message($"[PawnControl] Found NonScanJob {job2.def.defName} for {pawn.LabelShort} from {workGiver.def.defName}");
                             }
@@ -285,8 +290,8 @@ namespace emitbreaker.PawnControl
                                         Job cachedJob = scanner.JobOnThing(pawn, thing);
                                         if (cachedJob != null)
                                         {
-                                            Utility_CacheManager._cachedJobs[thing] = cachedJob;
-                                            if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                                            Utility_CacheManager._jobCache[thing] = cachedJob;
+                                            if (Prefs.DevMode && modExtension.debugMode)
                                             {
                                                 Log.Message($"[PawnControl] Cached job {cachedJob.def.defName} for {thing.Label}");
                                             }
@@ -297,12 +302,12 @@ namespace emitbreaker.PawnControl
                                         Log.Error($"[PawnControl] Error while caching job: {ex}");
                                     }
 
-                                    if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                                    if (Prefs.DevMode && modExtension.debugMode)
                                     {
                                         Log.Message($"[PawnControl] Found potential work thing for {pawn.LabelShort}: {thing.Label}");
                                     }
                                 }
-                                else if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                                else if (Prefs.DevMode && modExtension.debugMode)
                                 {
                                     Log.Warning($"[PawnControl DEBUG] No valid thing target found for {scanner.def.defName} on {pawn.LabelCap}");
                                 }
@@ -352,7 +357,7 @@ namespace emitbreaker.PawnControl
                                         scannerWhoProvidedTarget = scanner;
                                         closestDistSquared = distSq;
 
-                                        if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                                        if (Prefs.DevMode && modExtension.debugMode)
                                         {
                                             Log.Message($"[PawnControl] Found potential work cell for {pawn.LabelShort} at {cell}");
                                         }
@@ -385,7 +390,7 @@ namespace emitbreaker.PawnControl
                             job3.workGiverDef = scannerWhoProvidedTarget.def;
 
                             // Log successful job creation
-                            if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                            if (Prefs.DevMode && modExtension.debugMode)
                             {
                                 Log.Message($"[PawnControl] Created job {job3.def.defName} for {pawn.LabelShort} with workGiver {scannerWhoProvidedTarget.def.defName}");
                             }
@@ -410,18 +415,18 @@ namespace emitbreaker.PawnControl
                     Job job3 = null;
                     try
                     {
-                        if (Prefs.DevMode)
+                        if (Prefs.DevMode && modExtension.debugMode)
                         {
                             Log.Message($"[PawnControl] Attempting final job creation for {pawn.LabelShort} with {(bestTargetOfLastPriority.HasThing ? bestTargetOfLastPriority.Thing.Label : "cell")}");
                         }
 
                         // Check for cached job first before calling JobOnThing again
-                        if (bestTargetOfLastPriority.HasThing && Utility_CacheManager._cachedJobs.TryGetValue(bestTargetOfLastPriority.Thing, out Job cachedJob))
+                        if (bestTargetOfLastPriority.HasThing && Utility_CacheManager._jobCache.TryGetValue(bestTargetOfLastPriority.Thing, out Job cachedJob))
                         {
                             job3 = cachedJob;
-                            Utility_CacheManager._cachedJobs.Remove(bestTargetOfLastPriority.Thing); // Use it once then remove
+                            Utility_CacheManager._jobCache.Remove(bestTargetOfLastPriority.Thing); // Use it once then remove
                             
-                            if (Prefs.DevMode && pawn.def.defName.Contains("Snotling"))
+                            if (Prefs.DevMode && modExtension.debugMode)
                             {
                                 Log.Message($"[PawnControl] Using cached job {job3.def.defName} for {bestTargetOfLastPriority.Thing.Label}");
                             }
@@ -434,7 +439,7 @@ namespace emitbreaker.PawnControl
                                 : scannerWhoProvidedTarget.JobOnThing(pawn, bestTargetOfLastPriority.Thing);
                         }
 
-                        if (job3 == null && Prefs.DevMode)
+                        if (job3 == null && Prefs.DevMode && modExtension.debugMode)
                         {
                             Log.Warning($"[PawnControl] Second JobOnThing call returned null despite initial success");
                         }
@@ -447,13 +452,13 @@ namespace emitbreaker.PawnControl
                     // The rest of the code remains the same
                     if (job3 != null)
                     {
-                        if (Prefs.DevMode)
+                        if (Prefs.DevMode && modExtension.debugMode)
                         {
                             Log.Message($"[PawnControl] Final job created successfully: {job3.def.defName}");
                         }
                         job3.workGiverDef = scannerWhoProvidedTarget.def;
                         // Verify the job is valid
-                        if (Prefs.DevMode)
+                        if (Prefs.DevMode && modExtension.debugMode)
                         {
                             if (!pawn.CanReserveAndReach(job3.targetA.Thing, job3.targetA.Thing == null ? PathEndMode.OnCell : PathEndMode.Touch, Danger.Some))
                             {
@@ -473,7 +478,7 @@ namespace emitbreaker.PawnControl
 
                         return new ThinkResult(job3, this, scannerWhoProvidedTarget.def.tagToGive);
                     }
-                    else if (Prefs.DevMode)
+                    else if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Warning($"[PawnControl] Final job creation returned null");
                     }
@@ -486,8 +491,6 @@ namespace emitbreaker.PawnControl
             {
                 Log.Error($"[PawnControl] Critical error in JobGiver_WorkNonHumanlike for {pawn?.LabelShort ?? "unknown"}: {ex}");
             }
-
-
 
             return ThinkResult.NoJob;
         }
@@ -570,9 +573,9 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Clears the job cache. Call this when saving/loading or when jobs might become invalid.
         /// </summary>
-        public static void ClearJobCache()
+        public static void ResetCache()
         {
-            Utility_CacheManager._cachedJobs.Clear();
+            Utility_CacheManager._jobCache.Clear();
         }
     }
 }

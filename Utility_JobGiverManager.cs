@@ -40,6 +40,14 @@ namespace emitbreaker.PawnControl
             string debugJobDesc = null,
             bool skipEmergencyCheck = false) where T : class
         {
+            // Early exit if pawn is drafted
+            if (pawn.drafter != null && pawn.drafter.Drafted)
+            {
+                if (Prefs.DevMode)
+                    Log.Message($"[PawnControl] {pawn.LabelShort} is drafted, skipping {debugJobDesc ?? workTag} job");
+                return null;
+            }
+
             // 1. Emergency check - yield to firefighting if there's a fire (unless we should skip it)
             if (!skipEmergencyCheck && ShouldYieldToEmergencyJob(pawn))
             {
@@ -304,7 +312,12 @@ namespace emitbreaker.PawnControl
             // Basic eligibility check
             if (!IsEligibleForSpecializedJobGiver(pawn, workTypeTag))
                 return null;
-                
+
+            // IMPORTANT: For designation-based jobs, ONLY player faction pawns or pawns slaved to player faction can perform them
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             // Quick skip check - if no designations on map
             if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(designationDef))
                 return null;
@@ -328,20 +341,24 @@ namespace emitbreaker.PawnControl
                 (T t) => (t.Position - pawn.Position).LengthHorizontalSquared,
                 distanceThresholds
             );
-            
+
             // Apply extra validation if provided
-            Func<T, Pawn, bool> finalValidation = (T t, Pawn p) => 
+            Func<T, Pawn, bool> finalValidation = (T t, Pawn p) =>
             {
-                if (t.Destroyed || !t.Spawned || 
+                // IMPORTANT: Check faction interaction validity first since this is a designator-based job
+                if (!IsValidFactionInteraction(t, p, requiresDesignator: true))
+                    return false;
+
+                if (t.Destroyed || !t.Spawned ||
                     pawn.Map.designationManager.DesignationOn(t, designationDef) == null)
                     return false;
-                    
+
                 if (extraValidation != null && !extraValidation(t))
                     return false;
-                    
+
                 return reachabilityFunc(t, p);
             };
-            
+
             // Find target
             T target = FindFirstValidTargetInBuckets(buckets, pawn, finalValidation, reachabilityCache);
             
@@ -760,6 +777,63 @@ namespace emitbreaker.PawnControl
                 default:
                     return false;
             }
+        }
+
+        /// <summary>
+        /// Checks if a pawn is allowed to perform work on a target based on faction rules
+        /// </summary>
+        public static bool IsValidFactionInteraction(Thing target, Pawn pawn, bool requiresDesignator = false)
+        {
+            // For designator-oriented tasks, only player pawns can perform them
+            if (requiresDesignator && pawn.Faction != Faction.OfPlayer)
+            {
+                return false;
+            }
+
+            Pawn targetPawn = target as Pawn;
+
+            // Skip faction check for dead or downed pawns with strip designation
+            // This is consistent with vanilla behavior where pawns can strip anyone
+            if (requiresDesignator && targetPawn != null &&
+                (targetPawn.Dead || targetPawn.Downed) &&
+                targetPawn.Map?.designationManager.DesignationOn(targetPawn, DesignationDefOf.Strip) != null)
+            {
+                return true;
+            }
+
+            // For corpses - allow stripping regardless of faction if designated
+            if (requiresDesignator && target is Corpse corpse &&
+                corpse.Map?.designationManager.DesignationOn(corpse, DesignationDefOf.Strip) != null)
+            {
+                return true;
+            }
+
+            // Check if target has a different non-null faction
+            if (target.Faction != null && target.Faction != pawn.Faction)
+            {   
+                if (targetPawn == null)
+                {
+                    return false;
+                }
+
+                // Special handling for prisoners - wardens can interact with prisoner pawns
+                if ((targetPawn.IsPrisoner || targetPawn.IsSlave) && targetPawn.HostFaction == pawn.Faction)
+                {
+                    return true;
+                }
+
+                // Special handling for patients - doctors can treat patients from other factions
+                if (FeedPatientUtility.ShouldBeFed(targetPawn) || targetPawn.health.HasHediffsNeedingTend())
+                {
+                    Building_Bed bed = targetPawn.CurrentBed();
+                    if (bed != null && bed.Medical)
+                        return true;
+                }
+
+                return false;
+            }
+
+            return true;
         }
     }
 }

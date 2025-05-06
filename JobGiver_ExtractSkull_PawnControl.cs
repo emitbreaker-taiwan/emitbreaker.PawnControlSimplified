@@ -33,6 +33,11 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // IMPORTANT: Only player pawns and slaves owned by player should extract skulls
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             // Make sure we can extract skulls on this game
             if (ModsConfig.IdeologyActive && !CanPawnExtractSkull(pawn))
             {
@@ -79,7 +84,7 @@ namespace emitbreaker.PawnControl
                                                              q.CanReserveAndReach(corpse, PathEndMode.OnCell, Danger.Deadly),
                             distanceThresholds: DISTANCE_THRESHOLDS);
                 },
-                debugJobDesc: "firefighting assignment");
+                debugJobDesc: "skull extraction assignment");
         }
 
         /// <summary>

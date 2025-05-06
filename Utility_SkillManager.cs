@@ -154,7 +154,7 @@ namespace emitbreaker.PawnControl
 
             if (modExtension.skillPassionDict.TryGetValue(skillDef, out var passion))
             {
-                if (Prefs.DevMode)
+                if (Prefs.DevMode && modExtension.debugMode)
                 {
                     Log.Message($"[PawnControl] Injected {passion} passion for {skillDef.defName} in {def.defName}.");
                 }
@@ -273,7 +273,7 @@ namespace emitbreaker.PawnControl
                             // Now ensure stats are properly injected (always try, even if skills already exist)
                             try
                             {
-                                if (Prefs.DevMode)
+                                if (Prefs.DevMode && modExtension.debugMode)
                                 {
                                     Log.Message($"[PawnControl] Attempting stat injection for {pawn.LabelShort} ({pawn.def.defName})");
                                 }
@@ -321,7 +321,7 @@ namespace emitbreaker.PawnControl
                             // Now ensure stats are properly injected (always try, even if skills already exist)
                             try
                             {
-                                if (Prefs.DevMode)
+                                if (Prefs.DevMode && modExtension.debugMode)
                                 {
                                     Log.Message($"[PawnControl] Attempting stat injection for {pawn.LabelShort} ({pawn.def.defName})");
                                 }
@@ -349,6 +349,7 @@ namespace emitbreaker.PawnControl
                 Log.Error($"[PawnControl] Error in AttachSkillTrackersToPawnsSafely: {ex}");
             }
         }
+
         /// <summary>
         /// Determines if a pawn should have skills attached based on its characteristics.
         /// </summary>
@@ -375,7 +376,7 @@ namespace emitbreaker.PawnControl
 
             if (Utility_TagManager.WorkEnabled(pawn.def, ManagedTags.AllowAllWork))
             {
-                if (Prefs.DevMode)
+                if (Prefs.DevMode && modExtension.debugMode)
                 {
                     Log.Message($"[PawnControl] Injected all skills to {pawn.LabelShort}.");
                 }
@@ -383,7 +384,7 @@ namespace emitbreaker.PawnControl
             }
             else if(Utility_TagManager.WorkEnabled(pawn.def, ManagedTags.BlockAllWork))
             {
-                if (Prefs.DevMode)
+                if (Prefs.DevMode && modExtension.debugMode)
                 {
                     Log.Message($"[PawnControl] Blocked all skills to {pawn.LabelShort}.");
                 }
@@ -393,7 +394,7 @@ namespace emitbreaker.PawnControl
             {
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Construction.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Construction.label} to {pawn.LabelShort}.");
                     }
@@ -401,7 +402,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Growing.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_PlantCutting.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Plants.label} to {pawn.LabelShort}.");
                     }
@@ -409,7 +410,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Research.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_DarkStudy.ToString()))
                 {
-                    if (Prefs.DevMode) 
+                    if (Prefs.DevMode && modExtension.debugMode) 
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Intellectual.label} to {pawn.LabelShort}.");
                     }
@@ -417,7 +418,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Mining.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Mining.label} to {pawn.LabelShort}.");
                     }
@@ -425,7 +426,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Hunting.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Shooting.label} to {pawn.LabelShort}.");
                     }
@@ -433,7 +434,7 @@ namespace emitbreaker.PawnControl
                 }
                 //if (Utility_TagManager.WorkEnabled(pawn.def, ManagedTags.AllowWorkPrefix + SkillDefOf.Melee.defName))
                 //{
-                //    if (Prefs.DevMode)
+                //    if (Prefs.DevMode && modExtension.debugMode)
                 //    {
                 //        Log.Message($"[PawnControl] Injected {SkillDefOf.Melee.label} to {pawn.LabelShort}.");
                 //    }
@@ -441,7 +442,7 @@ namespace emitbreaker.PawnControl
                 //}
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Warden.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Childcare.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Social.label} to {pawn.LabelShort}.");
                     }
@@ -449,7 +450,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Hunting.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Handling.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Animals.label} to {pawn.LabelShort}.");
                     }
@@ -457,7 +458,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Cooking.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Cooking.label} to {pawn.LabelShort}.");
                     }
@@ -465,7 +466,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Doctor.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Medicine.label} to {pawn.LabelShort}.");
                     }
@@ -473,7 +474,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Art.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Artistic.label} to {pawn.LabelShort}.");
                     }
@@ -481,7 +482,7 @@ namespace emitbreaker.PawnControl
                 }
                 if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Crafting.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Smithing.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Tailoring.ToString()))
                 {
-                    if (Prefs.DevMode)
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Injected {SkillDefOf.Crafting.label} to {pawn.LabelShort}.");
                     }

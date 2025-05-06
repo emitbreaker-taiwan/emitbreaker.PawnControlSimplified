@@ -17,12 +17,6 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public static class Utility_ThinkTreeManager
     {
-        /// <summary>Cache of ThingDefs with their work tag allowance status</summary>
-        // Use separate caches for different tag types
-        private static Dictionary<ThingDef, bool> _allowWorkTagCache = new Dictionary<ThingDef, bool>();
-        private static Dictionary<ThingDef, bool> _blockWorkTagCache = new Dictionary<ThingDef, bool>();
-        private static Dictionary<ThingDef, bool> _combinedWorkTagCache = new Dictionary<ThingDef, bool>();
-
         /// <summary>Cached reflection access to the ResolveSubnodes method</summary>
         private static readonly MethodInfo resolveMethod = AccessTools.Method(typeof(ThinkNode), "ResolveSubnodes");
 
@@ -37,14 +31,14 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Check combined cache first
-            if (_combinedWorkTagCache.TryGetValue(def, out bool result))
+            if (Utility_CacheManager._combinedWorkTagCache.TryGetValue(def, out bool result))
                 return result;
 
             // Quick reject if no extension
             var modExtension = Utility_CacheManager.GetModExtension(def);
             if (modExtension == null)
             {
-                _combinedWorkTagCache[def] = false;
+                Utility_CacheManager._combinedWorkTagCache[def] = false;
                 return false;
             }
 
@@ -56,9 +50,9 @@ namespace emitbreaker.PawnControl
                                Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.BlockWorkPrefix);
 
             // Store in respective caches
-            _allowWorkTagCache[def] = allowResult;
-            _blockWorkTagCache[def] = blockResult;
-            _combinedWorkTagCache[def] = allowResult || blockResult;
+            Utility_CacheManager._allowWorkTagCache[def] = allowResult;
+            Utility_CacheManager._blockWorkTagCache[def] = blockResult;
+            Utility_CacheManager._combinedWorkTagCache[def] = allowResult || blockResult;
 
             return allowResult || blockResult;
         }
@@ -76,14 +70,14 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (_allowWorkTagCache.TryGetValue(def, out bool hasTag))
+            if (Utility_CacheManager._allowWorkTagCache.TryGetValue(def, out bool hasTag))
             {
                 return hasTag;
             }
 
             if (Utility_CacheManager.GetModExtension(def) == null)
             {
-                _allowWorkTagCache[def] = false;
+                Utility_CacheManager._allowWorkTagCache[def] = false;
                 return false; // No mod extension, no tags
             }
 
@@ -91,7 +85,7 @@ namespace emitbreaker.PawnControl
                 Utility_TagManager.HasTag(def, ManagedTags.AllowAllWork) ||
                 Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.AllowWorkPrefix);
 
-            _allowWorkTagCache[def] = result; // ✅ Cache the computed result
+            Utility_CacheManager._allowWorkTagCache[def] = result; // ✅ Cache the computed result
             return result;
         }
 
@@ -108,14 +102,14 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (_blockWorkTagCache.TryGetValue(def, out bool hasTag))
+            if (Utility_CacheManager._blockWorkTagCache.TryGetValue(def, out bool hasTag))
             {
                 return hasTag;
             }
 
             if (Utility_CacheManager.GetModExtension(def) == null)
             {
-                _blockWorkTagCache[def] = false;
+                Utility_CacheManager._blockWorkTagCache[def] = false;
                 return false; // No mod extension, no tags
             }
 
@@ -123,7 +117,7 @@ namespace emitbreaker.PawnControl
                 Utility_TagManager.HasTag(def, ManagedTags.BlockAllWork) ||
                 Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.BlockWorkPrefix);
 
-            _blockWorkTagCache[def] = result; // ✅ Cache the computed result
+            Utility_CacheManager._blockWorkTagCache[def] = result; // ✅ Cache the computed result
             return result;
         }
 
@@ -282,11 +276,11 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        public static void ClearTagCaches()
+        public static void ResetCache()
         {
-            _allowWorkTagCache.Clear();
-            _blockWorkTagCache.Clear();
-            _combinedWorkTagCache.Clear();
+            Utility_CacheManager._allowWorkTagCache.Clear();
+            Utility_CacheManager._blockWorkTagCache.Clear();
+            Utility_CacheManager._combinedWorkTagCache.Clear();
         }
     }
 }

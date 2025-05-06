@@ -42,14 +42,19 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // IMPORTANT: Only player pawns and slaves owned by player should operate crematoriums
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
-                    // Update fire cache
+                    // Update crematorium cache
                     UpdateCremateCacheSafely(p.Map);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
+                    // Find and create a job for cremating corpses
                     return Utility_JobGiverManager.TryCreateBillGiverJob(p, _crematoriumCache, _reachabilityCache);
                 },
                 debugJobDesc: "cremate assignment",

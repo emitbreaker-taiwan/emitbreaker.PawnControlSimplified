@@ -246,41 +246,41 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            private static bool IsWorkColumnSupported(PawnColumnDef col, IEnumerable<Pawn> taggedPawns)
-            {
-                if (col == null || col.workType == null)
-                {
-                    return true; // ✅ Allow non-work columns always
-                }
+            //private static bool IsWorkColumnSupported(PawnColumnDef col, IEnumerable<Pawn> taggedPawns)
+            //{
+            //    if (col == null || col.workType == null)
+            //    {
+            //        return true; // ✅ Allow non-work columns always
+            //    }
 
-                string tag = ManagedTags.AllowWorkPrefix + col.workType.defName;
-                bool columnEnabled = false;
+            //    string tag = ManagedTags.AllowWorkPrefix + col.workType.defName;
+            //    bool columnEnabled = false;
 
-                foreach (Pawn pawn in taggedPawns)
-                {
-                    if (pawn == null || pawn.def == null || pawn.def.race == null)
-                    {
-                        continue;
-                    }
+            //    foreach (Pawn pawn in taggedPawns)
+            //    {
+            //        if (pawn == null || pawn.def == null || pawn.def.race == null)
+            //        {
+            //            continue;
+            //        }
 
-                    if (pawn.workSettings?.WorkIsActive(col.workType) == true)
-                    {
-                        columnEnabled = true;
-                    }
+            //        if (pawn.workSettings?.WorkIsActive(col.workType) == true)
+            //        {
+            //            columnEnabled = true;
+            //        }
 
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                    if (modExtension != null)
-                    {
-                        if (pawn.workSettings == null || !pawn.workSettings.EverWork)
-                        {
-                            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
-                            columnEnabled = true;
-                        }
-                    }
-                }
+            //        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            //        if (modExtension != null)
+            //        {
+            //            if (pawn.workSettings == null || !pawn.workSettings.EverWork)
+            //            {
+            //                Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
+            //                columnEnabled = true;
+            //            }
+            //        }
+            //    }
 
-                return columnEnabled;
-            }
+            //    return columnEnabled;
+            //}
         }
 
         // Step 2: Hook WrokTypeIsDisabled since modded pawn does not have actual skill.
@@ -291,6 +291,11 @@ namespace emitbreaker.PawnControl
             public static bool Prefix(Pawn __instance, WorkTypeDef w, ref bool __result)
             {
                 var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                if (modExtension == null)
+                {
+                    return true; // ✅ No mod extension, proceed with vanilla logic
+                }
+
                 if (modExtension != null)
                 {
                     var allowed = Utility_TagManager.WorkEnabled(__instance.def, w.defName.ToString());
@@ -508,6 +513,12 @@ namespace emitbreaker.PawnControl
                     return true; // Allow vanilla drawing if invalid
                 }
 
+                var modExtension = Utility_CacheManager.GetModExtension(p.def);
+                if (modExtension == null)
+                {
+                    return true; // Allow vanilla drawing if no mod extension
+                }
+
                 if (!Utility_ThinkTreeManager.HasAllowWorkTag(p.def))
                 {
                     return true; // Allow vanilla drawing if not PawnControl target
@@ -680,7 +691,7 @@ namespace emitbreaker.PawnControl
         public static class Patch_ITab_Pawn_Character_IsVisible
         {
             // Cache the FieldInfo for ITab.selThing to avoid repeated reflection lookups
-            private static readonly FieldInfo selThingField = AccessTools.Field(typeof(ITab), "SelThing");
+            private static readonly PropertyInfo selThingProp = AccessTools.Property(typeof(ITab), "SelThing");
 
             // Prefix: if we decide to hide, set __result=false and skip the original
             [HarmonyPrefix]
@@ -689,11 +700,11 @@ namespace emitbreaker.PawnControl
                 try
                 {
                     // If we couldn't find the field, bail out to vanilla
-                    if (selThingField == null)
+                    if (selThingProp == null)
                         return true;
 
                     // Get the selected thing (Pawn or Corpse)
-                    var thing = selThingField.GetValue(__instance) as Thing;
+                    var thing = selThingProp.GetValue(__instance) as Thing;
                     if (thing == null)
                         return true; // no selection, let vanilla decide
 
@@ -715,7 +726,7 @@ namespace emitbreaker.PawnControl
                     {
                         // Only for non-humanlike pawns with our mod extension
                         __result = false;
-                        if (Prefs.DevMode)
+                        if (Prefs.DevMode && modExtension.debugMode)
                         {
                             Log.Message($"[PawnControl] Hidden Bio tab for modded non-humanlike pawn: {pawn.LabelShort}");
                         }
@@ -745,7 +756,7 @@ namespace emitbreaker.PawnControl
                 try
                 {
                     // Get the selected pawn
-                    Thing selThing = selThingField?.GetValue(__instance) as Thing;
+                    Thing selThing = selThingProp?.GetValue(__instance) as Thing;
                     if (selThing == null) return;
 
                     Pawn pawn = selThing as Pawn ?? (selThing as Corpse)?.InnerPawn;
@@ -753,11 +764,17 @@ namespace emitbreaker.PawnControl
 
                     // FOCUSED SCOPE: Double-check only non-humanlike with our mod extension
                     var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension == null)
+                    {
+                        return;
+                    }
                     if (modExtension != null && !pawn.RaceProps.Humanlike)
                     {
                         __result = false;
-                        if (Prefs.DevMode)
+                        if (Prefs.DevMode && modExtension.debugMode)
+                        {
                             Log.Message($"[PawnControl] Backup catch: Hidden Bio tab for modded non-humanlike: {pawn.LabelShort}");
+                        }
                     }
                 }
                 catch
@@ -779,9 +796,11 @@ namespace emitbreaker.PawnControl
                 if (__result == null || __result.def == null || __result.RaceProps.Humanlike)
                     return;
 
-                var ext = Utility_CacheManager.GetModExtension(__result.def);
-                if (ext == null)
+                var modExtension = Utility_CacheManager.GetModExtension(__result.def);
+                if (modExtension == null)
+                {
                     return;
+                }
 
                 Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__result);
 
@@ -803,11 +822,29 @@ namespace emitbreaker.PawnControl
             public static void Postfix(Pawn __instance)
             {
                 if (__instance == null || __instance.Dead || __instance.Destroyed)
+                {
                     return;
+                }
+
+                // Skip the rest of processing for humanlike pawns
+                if (__instance.RaceProps.Humanlike)
+                {
+                    return;
+                }
 
                 // Check for both mod extension and work tags
                 var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                // Skip if no mod extension (but we've still handled mind activation above if it had tags)
+                if (modExtension == null)
+                {
+                    return;
+                }
+
                 bool hasTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def);
+                if (!hasTags)
+                {
+                    return; // No tags, skip further processing
+                }
 
                 // CRITICAL FIX: Ensure mind state is active for any eligible pawn immediately
                 if (__instance.mindState != null &&
@@ -817,31 +854,25 @@ namespace emitbreaker.PawnControl
                 {
                     __instance.mindState.Active = true;
 
-                    if (Prefs.DevMode && __instance.def.defName.Contains("Snotling"))
+                    if (Prefs.DevMode && modExtension.debugMode)
                     {
                         Log.Message($"[PawnControl] Activated {__instance.LabelShort}'s mind during SpawnSetup");
                     }
                 }
 
-                // Skip the rest of processing for humanlike pawns
-                if (__instance.RaceProps.Humanlike)
-                    return;
-
-                // Skip if no mod extension (but we've still handled mind activation above if it had tags)
-                if (modExtension == null)
-                    return;
-
                 LongEventHandler.ExecuteWhenFinished(() =>
                 {
                     if (__instance.health?.hediffSet == null || !__instance.Spawned)
+                    {
                         return;
+                    }
 
                     // ✅ Ensure hediff is injected only once, and allow mutation/removal logic to run inside the HediffComp
                     if (!__instance.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub")))
                     {
                         Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__instance);
 
-                        if (Prefs.DevMode)
+                        if (Prefs.DevMode && modExtension.debugMode)
                         {
                             // ✅ Log thinker state
                             Utility_DebugManager.DumpThinkerStatus(__instance);
@@ -862,50 +893,50 @@ namespace emitbreaker.PawnControl
         /// Outline: If a pawn has no native BeatFire verb (e.g. non‐humanlike),
         /// fall back to our custom Verb_BeatFire via TryStartCastOn.
         /// </summary>
-        [HarmonyPatch(typeof(Pawn_NativeVerbs), nameof(Pawn_NativeVerbs.TryBeatFire))]
-        public static class Patch_Pawn_NativeVerbs_TryBeatFire_Fallback
+        [HarmonyPatch(typeof(Pawn_NativeVerbs), "CheckCreateVerbProperties", MethodType.Normal)]
+        public static class Patch_NativeVerbs_InjectBeatFire
         {
-            private const string LOG_KEY = "PawnControl.NativeVerbs.TryBeatFire";
+            // ─── Outline: cache FieldInfo and VerbProperties once ───────────────────────
+            private static readonly FieldInfo CachedPropsField =
+                AccessTools.Field(typeof(Pawn_NativeVerbs), "cachedVerbProperties");
+            private static readonly FieldInfo CachedBeatFireField =
+                AccessTools.Field(typeof(Pawn_NativeVerbs), "cachedBeatFireVerb");
+            private static readonly VerbProperties FireProps =
+                NativeVerbPropertiesDatabase.VerbWithCategory(VerbCategory.BeatFire);
 
-            // Prefix intercepts TryBeatFire; returns false to skip original when we handle it.
-            static bool Prefix(Pawn_NativeVerbs __instance, Fire targetFire, ref bool __result)
+            // ─── Postfix runs only when vanilla CheckCreateVerbProperties would ──────────
+            public static void Postfix(Pawn_NativeVerbs __instance)
             {
-                // 1️⃣ If vanilla has a BeatFire verb, let original run
-                if (__instance.BeatFireVerb != null)
-                    return true;
+                // 1️⃣ Early-exit if we already injected
+                var currentProps = (List<VerbProperties>)CachedPropsField.GetValue(__instance);
+                var currentVerb = (Verb_BeatFire)CachedBeatFireField.GetValue(__instance);
+                if (currentVerb != null || currentProps?.Contains(FireProps) == true)
+                    return;
 
-                // 2️⃣ Get the pawn from IVerbOwner.ConstantCaster
-                var owner = (IVerbOwner)__instance;
-                var pawn = owner.ConstantCaster as Pawn;
-                if (pawn == null)
-                {
-                    __result = false;
-                    return false;
-                }
+                // 2️⃣ Get your pawn and skip humanlikes or non-tagged defs
+                var pawn = ((IVerbOwner)__instance).ConstantCaster as Pawn;
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                bool hasTags = Utility_TagManager.HasTag(pawn.def, PawnEnumTags.AllowWork_Firefighter.ToString());
+                if (pawn.RaceProps.Humanlike || modExtension == null || !hasTags)
+                    return;
 
-                // 3️⃣ Apply only to our mod’s target pawns
-                var ext = Utility_CacheManager.GetModExtension(pawn.def);
-                bool hasTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def);
-                if (pawn.RaceProps.Humanlike || (ext == null && !hasTags))
-                    return true;
+                // 3️⃣ Build or append the verb properties list
+                if (currentProps == null)
+                    currentProps = new List<VerbProperties>();
+                currentProps.Add(FireProps);
+                CachedPropsField.SetValue(__instance, currentProps);
 
-                // 4️⃣ Instantiate and start our custom fire‐beat verb
-                var verb = new Verb_BeatFire { caster = pawn };
-                __result = !pawn.stances.FullBodyBusy
-                           && verb.TryStartCastOn((LocalTargetInfo)targetFire);
-
-                if (__result && Prefs.DevMode)
-                    Log.Message($"{LOG_KEY}: {pawn.LabelShort} used fallback BeatFire on {targetFire}");
-
-                // 5️⃣ Skip the original (prevents “has no beat fire verb” error)
-                return false;
+                // 4️⃣ Instantiate & cache the real BeatFireVerb
+                var realVerb = __instance.verbTracker.GetVerb(VerbCategory.BeatFire) as Verb_BeatFire;
+                CachedBeatFireField.SetValue(__instance, realVerb);
             }
         }
 
 
 
 
-        // Step X: Inject plant-cut override inside GenConstruct.HandleBlockingThingJob
+
+        // Step 11: Inject plant-cut override inside GenConstruct.HandleBlockingThingJob
         [HarmonyPatch(typeof(GenConstruct), nameof(GenConstruct.HandleBlockingThingJob))]
         public static class Patch_GenConstruct_HandleBlockingThingJob_PlantCutOverride
         {
@@ -1029,8 +1060,215 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        // Debuggers
 
+        /// <summary>
+        /// Patch #3 Step 1. Ensure that the pawn is fully initialized and ready for draft.
+        /// </summary>
+        [HarmonyPatch(typeof(Pawn))]
+        [HarmonyPatch("SpawnSetup")]
+        [HarmonyPatch(new Type[] { typeof(Map), typeof(bool) })]
+        public static class Patch_Pawn_SpawnSetup_DraftInjector
+        {
+            // ─── cache the Pawn tracker fields ───────────────────────────────
+            public static readonly FieldInfo EquipmentField =
+                AccessTools.Field(typeof(Pawn), "equipment");
+            public static readonly FieldInfo ApparelField =
+                AccessTools.Field(typeof(Pawn), "apparel");
+            public static readonly FieldInfo InventoryField =
+                AccessTools.Field(typeof(Pawn), "inventory");
+
+            [HarmonyPostfix]
+            public static void Postfix(Pawn __instance, Map map)
+            {
+                if (__instance == null
+                    || __instance.Dead
+                    || __instance.def?.race == null)
+                {
+                    return;
+                }
+
+                if (__instance.RaceProps.Humanlike)
+                {
+                    return;
+                }
+
+                var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                if (modExtension == null)
+                {
+                    return;
+                }
+
+                if (!Utility_TagManager.ForceDraftable(__instance.def))
+                {
+                    return;
+                }
+
+                // ─── 1) repair or inject drafter ───────────────────────────────
+                Utility_DrafterManager.EnsureDrafter(__instance, modExtension, isSpawnSetup: true);
+
+                // ─── 2) inject equipment tracker if missing ────────────────────
+                if (EquipmentField.GetValue(__instance) == null)
+                {
+                    var eqTracker = new Pawn_EquipmentTracker(__instance);
+                    EquipmentField.SetValue(__instance, eqTracker);
+                    eqTracker.Notify_PawnSpawned();   // only Pawn_EquipmentTracker has this method
+                }
+
+                // ─── 3) inject apparel tracker if missing ───────────────────────
+                if (ApparelField.GetValue(__instance) == null)
+                {
+                    // Pawn_ApparelTracker has no Notify_PawnSpawned(), so we omit it
+                    ApparelField.SetValue(__instance, new Pawn_ApparelTracker(__instance));
+                }
+
+                // ─── 4) inject inventory tracker if missing ────────────────────
+                if (InventoryField.GetValue(__instance) == null)
+                {
+                    // Pawn_InventoryTracker has no Notify_PawnSpawned(), so we omit it
+                    InventoryField.SetValue(__instance, new Pawn_InventoryTracker(__instance));
+                }
+            }
+        }
+
+        // Patch #3 Step 2. Ensure that the pawn has drafter gizmo.
+        [HarmonyPatch]
+        public static class Patch_Pawn_GetGizmos_AddDrafterViaReflection_Cached
+        {
+            // ── 1) Target the internal Pawn.GetGizmos() method via AccessTools ──
+            public static MethodBase TargetMethod() =>
+                AccessTools.Method(typeof(Pawn), "GetGizmos", Type.EmptyTypes);
+
+            // ── 2) Cache reflection info for Pawn_DraftController.GetGizmos ────
+            private static readonly MethodInfo _drafterGetGizmosMI =
+                AccessTools.Method(typeof(Pawn_DraftController), "GetGizmos");
+            private static readonly Func<Pawn_DraftController, IEnumerable<Gizmo>> _drafterGetGizmos =
+                AccessTools.MethodDelegate<Func<Pawn_DraftController, IEnumerable<Gizmo>>>(_drafterGetGizmosMI);
+
+            // ── 3) Postfix: yield vanilla gizmos, then any from cached drafter delegate ──
+            public static IEnumerable<Gizmo> Postfix(IEnumerable<Gizmo> __result, Pawn __instance)
+            {
+                foreach (var g in __result)
+                    yield return g;
+
+                var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                if (modExtension == null)
+                {
+                    yield break; // No mod extension, skip
+                }
+
+                var drafter = __instance.drafter;
+                if (drafter != null)
+                {
+                    foreach (var g in _drafterGetGizmos(drafter))
+                        yield return g;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Patch #3 Step 3. Stops *all* think-tree jobs for drafted animals, exactly as happens for drafted colonists.
+        /// </summary>
+        [HarmonyPatch(typeof(ThinkNode_JobGiver), nameof(ThinkNode_JobGiver.TryIssueJobPackage))]
+        public static class Patch_ThinkNode_JobGiver_TryIssueJobPackage_StopOnDrafted
+        {
+            public static bool Prefix(ThinkNode_JobGiver __instance, Pawn pawn, JobIssueParams jobParams, ref ThinkResult __result)
+            {
+                if (pawn == null || pawn.Dead || pawn.Destroyed)
+                    return true;
+
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                if (modExtension == null)
+                    return true; // No mod extension, skip
+
+                if (!Utility_TagManager.ForceDraftable(pawn.def))
+                    return true; // No draftable tag, skip
+
+                var drafter = pawn?.drafter;
+                if (drafter != null && drafter.Drafted)
+                {
+                    // 1) retrieve the pawn's thinker
+                    var thinker = pawn.thinker; // or via AccessTools.Field("thinkerInt")
+
+                    // 2) if this node belongs to the constant tree, let it run
+                    if (thinker.ConstantThinkNodeRoot.ThisAndChildrenRecursive.Contains(__instance))
+                        return true;
+
+                    // 3) otherwise cancel
+                    __result = ThinkResult.NoJob;
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Patch #3 Step 4. Patch Float Menu to allow pawn to equip weapons from the ground.
+        /// </summary>
+        [HarmonyPatch(typeof(FloatMenuMakerMap))]
+        [HarmonyPatch("TryMakeFloatMenu")]
+        [HarmonyPatch(new Type[] { typeof(Pawn) })]
+        public static class Patch_FloatMenuMakerMap_TryMakeFloatMenu_ForAnimalEquipWeapon
+        {
+            // We need an alternative approach that doesn't rely on accessing a specific field
+            public static void Postfix(Pawn pawn)
+            {
+                try
+                {
+                    // Check if pawn is valid for weapon equipping
+                    if (pawn == null || pawn.RaceProps.Humanlike || pawn.Map == null)
+                        return;
+
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension == null || !Utility_TagManager.ForceEquipWeapon(pawn.def))
+                        return;
+
+                    // Alternative approach:
+                    // 1. Get the cell the player clicked on
+                    IntVec3 clickCell = UI.MouseCell();
+                    if (!clickCell.IsValid || !clickCell.InBounds(pawn.Map))
+                        return;
+
+                    // 2. Look for weapons on that cell
+                    List<Thing> weapons = pawn.Map.thingGrid.ThingsListAtFast(clickCell)
+                        .Where(t => t is ThingWithComps twc &&
+                                 twc.GetComp<CompEquippable>() != null &&
+                                 t.def.IsWeapon)
+                        .ToList();
+
+                    if (weapons.Count == 0)
+                        return;
+
+                    // 3. Instead of adding to the float menu directly, we'll create a new one
+                    List<FloatMenuOption> options = new List<FloatMenuOption>();
+                    foreach (Thing weapon in weapons)
+                    {
+                        if (pawn.equipment?.Primary == weapon)
+                            continue;
+
+                        string label = "Equip".Translate() + " " + weapon.LabelCap;
+                        options.Add(new FloatMenuOption(label, () =>
+                        {
+                            var job = JobMaker.MakeJob(JobDefOf.Equip, weapon);
+                            pawn.jobs.TryTakeOrderedJob(job, JobTag.Misc);
+                        }));
+                    }
+
+                    // 4. Show our own float menu if we have options
+                    if (options.Count > 0)
+                    {
+                        Find.WindowStack.Add(new FloatMenu(options));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Add better error handling
+                    if (Prefs.DevMode)
+                        Log.Error($"[PawnControl] Error in Patch_FloatMenuMakerMap_TryMakeFloatMenu_ForAnimalEquipWeapon: {ex}");
+                }
+            }
+        }
+
+        // Debuggers
         // Add this patch to monitor ThinkTree usage - forcibly disabled for release builds
         [HarmonyPatch(typeof(ThinkNode_PrioritySorter), nameof(ThinkNode_PrioritySorter.TryIssueJobPackage))]
         public static class Patch_ThinkNode_PrioritySorter_Monitor
@@ -1038,11 +1276,15 @@ namespace emitbreaker.PawnControl
             [HarmonyPrefix]
             public static void Prefix(ThinkNode_PrioritySorter __instance, Pawn pawn)
             {
-                if (!Prefs.DevMode || Prefs.DevMode)
-                    return;
-
                 if (pawn?.def == null)
                     return;
+
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                if (modExtension == null)
+                    return; // Only for modded pawns
+
+                if (!Prefs.DevMode || !modExtension.debugMode)
+                    return; // Only in dev mode
 
                 // Only for monitored pawns in dev mode
                 bool hasJobGiverWorkNonHumanlike = false;
@@ -1084,8 +1326,15 @@ namespace emitbreaker.PawnControl
             [HarmonyPrefix]
             public static bool Prefix(Pawn pawn)
             {
-                if (!Prefs.DevMode || Prefs.DevMode)
-                    return true;
+                if (pawn?.def == null)
+                    return true; // Allow vanilla if null
+
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                if (modExtension == null)
+                    return true; // Only for modded pawns
+
+                if (!Prefs.DevMode || !modExtension.debugMode)
+                    return true; // Only in dev mode
 
                 Log.Message($"[PawnControl] DEBUG: InjectConsolidatedStatHediff CALLED for {pawn?.LabelShort ?? "null"} (Humanlike: {pawn?.RaceProps?.Humanlike.ToString() ?? "null"})");
                 return true; // Continue with the original method
@@ -1094,8 +1343,15 @@ namespace emitbreaker.PawnControl
             [HarmonyPostfix]
             public static void Postfix(Pawn pawn)
             {
-                if (!Prefs.DevMode || Prefs.DevMode)
-                    return;
+                if (pawn?.def == null)
+                    return; // Allow vanilla if null
+
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                if (modExtension == null)
+                    return; // Only for modded pawns
+
+                if (!Prefs.DevMode || !modExtension.debugMode)
+                    return; // Only in dev mode
 
                 Log.Message($"[PawnControl] DEBUG: InjectConsolidatedStatHediff COMPLETED for {pawn?.LabelShort ?? "null"}");
 
@@ -1121,52 +1377,6 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        [HarmonyPatch(typeof(Pawn), nameof(Pawn.GetGizmos))]
-        public static class Patch_Pawn_GetGizmos_StatDebug
-        {
-            [HarmonyPostfix]
-            public static IEnumerable<Gizmo> Postfix(IEnumerable<Gizmo> __result, Pawn __instance)
-            {
-                foreach (var gizmo in __result)
-                {
-                    yield return gizmo;
-                }
-
-                // ✅ Null check
-                if (__instance == null || __instance.RaceProps == null)
-                {
-                    yield break;
-                }
-
-                // ✅ Dev mode check
-                if (!Prefs.DevMode || __instance?.def == null)
-                {
-                    yield break;
-                }
-
-                // ✅ Only show if pawn has mod extension
-                var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
-                if (modExtension == null)
-                    yield break;
-
-                yield return new Command_Action
-                {
-                    defaultLabel = "PawnControl_LogStat",
-                    defaultDesc = "Log race + stat mutation info.",
-                    icon = TexCommand.SelectShelf, // built-in dev icon
-                    action = () => Utility_DebugManager.LogRaceAndPawnStats(__instance)
-                };
-
-                yield return new Command_Action
-                {
-                    defaultLabel = "PawnControl_ValidateStat",
-                    defaultDesc = "Validate current stat values against race base.",
-                    icon = TexCommand.ClearPrioritizedWork,
-                    action = () => Utility_DebugManager.StatMutationValidator.Validate(__instance)
-                };
-            }
-        }
-
         // Debugs for Patch 2 Iterations - disabled for release builds
         /// <summary>
         /// Debug patch for ThinkNode_PrioritySorter's job package creation process.
@@ -1180,16 +1390,20 @@ namespace emitbreaker.PawnControl
             [HarmonyPrefix]
             public static void Prefix(ThinkNode_PrioritySorter __instance, Pawn pawn)
             {
-                // Skip if not in dev mode - only dump in development to avoid log spam
-                if (!Prefs.DevMode || Prefs.DevMode)
-                {
-                    return;
-                }
-
                 if (pawn == null || __instance == null)
                 {
                     return;
                 }
+
+                if (pawn?.def == null)
+                    return; // Allow vanilla if null
+
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                if (modExtension == null)
+                    return; // Only for modded pawns
+
+                if (!Prefs.DevMode || !modExtension.debugMode)
+                    return; // Only in dev mode
 
                 if (!Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def))
                 {
@@ -1223,11 +1437,15 @@ namespace emitbreaker.PawnControl
             [HarmonyPostfix]
             public static void Postfix(Pawn __instance, Map map, bool respawningAfterLoad)
             {
-                // Skip if not in dev mode - only dump in development to avoid log spam
-                if (!Prefs.DevMode || Prefs.DevMode)
-                {
-                    return;
-                }
+                if (__instance?.def == null)
+                    return; // Allow vanilla if null
+
+                var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                if (modExtension == null)
+                    return; // Only for modded pawns
+
+                if (!Prefs.DevMode || !modExtension.debugMode)
+                    return; // Only in dev mode
 
                 // Only process pawns that have PawnControl tags
                 if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def))
@@ -1254,7 +1472,57 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        // Add a Gizmo for on-demand validation
+
+        // Add a Gizmo for on-demand debug
+        [HarmonyPatch(typeof(Pawn), nameof(Pawn.GetGizmos))]
+        public static class Patch_Pawn_GetGizmos_StatDebug
+        {
+            [HarmonyPostfix]
+            public static IEnumerable<Gizmo> Postfix(IEnumerable<Gizmo> __result, Pawn __instance)
+            {
+                foreach (var gizmo in __result)
+                {
+                    yield return gizmo;
+                }
+
+                // ✅ Null check
+                if (__instance == null || __instance.RaceProps == null)
+                {
+                    yield break;
+                }
+
+                // ✅ Dev mode check
+                if (!Prefs.DevMode || __instance?.def == null)
+                {
+                    yield break;
+                }
+
+                // ✅ Only show if pawn has mod extension
+                var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                if (modExtension == null)
+                    yield break;
+
+                if (modExtension.debugMode)
+                {
+                    yield return new Command_Action
+                    {
+                        defaultLabel = "PawnControl_LogStat",
+                        defaultDesc = "Log race + stat mutation info.",
+                        icon = TexCommand.SelectShelf, // built-in dev icon
+                        action = () => Utility_DebugManager.LogRaceAndPawnStats(__instance)
+                    };
+
+                    yield return new Command_Action
+                    {
+                        defaultLabel = "PawnControl_ValidateStat",
+                        defaultDesc = "Validate current stat values against race base.",
+                        icon = TexCommand.ClearPrioritizedWork,
+                        action = () => Utility_DebugManager.StatMutationValidator.Validate(__instance)
+                    };
+                }
+            }
+        }
+
         [HarmonyPatch(typeof(Pawn), nameof(Pawn.GetGizmos))]
         public static class Patch_Pawn_GetGizmos_DebugThinkTree
         {
@@ -1270,15 +1538,25 @@ namespace emitbreaker.PawnControl
                     yield break;
 
                 // Only show for pawns with our mod extension
-                if (__instance?.def == null || !Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def))
+                if (__instance?.def == null)
                     yield break;
 
-                yield return new Command_Action
+                var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                if (modExtension == null)
+                    yield break;
+
+                if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def))
+                    yield break;
+
+                if (modExtension.debugMode)
                 {
-                    defaultLabel = "Debug: Validate ThinkTree",
-                    defaultDesc = "Validate this pawn's ThinkTree configuration",
-                    action = () => Utility_ThinkTreeManager.ValidateThinkTree(__instance),
-                };
+                    yield return new Command_Action
+                    {
+                        defaultLabel = "Debug: Validate ThinkTree",
+                        defaultDesc = "Validate this pawn's ThinkTree configuration",
+                        action = () => Utility_ThinkTreeManager.ValidateThinkTree(__instance),
+                    };
+                }
             }
         }
     }

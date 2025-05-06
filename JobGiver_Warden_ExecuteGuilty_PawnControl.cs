@@ -116,6 +116,10 @@ namespace emitbreaker.PawnControl
                 pawn,
                 (target, p) =>
                 {
+                    // IMPORTANT: Check faction interaction validity first
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(target, p, requiresDesignator: false))
+                        return false;
+
                     return !target.IsForbidden(p) &&
                            target?.guilt != null &&
                            target.guilt.IsGuilty &&

@@ -39,6 +39,11 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // IMPORTANT: Only player pawns and slaves owned by player should fill fermenting barrels
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
@@ -122,6 +127,10 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (barrel, p) => {
+                    // IMPORTANT: Check faction interaction validity first
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(barrel, p, requiresDesignator: true))
+                        return false;
+
                     // Skip if no longer valid
                     if (barrel == null || barrel.Destroyed || !barrel.Spawned)
                         return false;

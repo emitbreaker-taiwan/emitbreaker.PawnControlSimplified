@@ -33,10 +33,8 @@ namespace emitbreaker.PawnControl
                 pawn,
                 "Hauling",
                 (p, forced) => {
-                    // Update plant cache
                     UpdateTurretCache(p.Map);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
                     return TryCreateRefuelTurretJob(p);
                 },
                 debugJobDesc: "refuel turret assignment");
@@ -109,6 +107,10 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (turret, p) => {
+                    // IMPORTANT: Check faction interaction validity first
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(turret, p, requiresDesignator: false))
+                        return false;
+
                     // Skip if no longer valid
                     if (turret == null || turret.Destroyed || !turret.Spawned)
                         return false;

@@ -110,6 +110,10 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (building, p) => {
+                    // IMPORTANT: Check faction interaction validity first
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(building, p, requiresDesignator: false))
+                        return false;
+
                     // Skip if no longer valid
                     if (building == null || building.Destroyed || !building.Spawned)
                         return false;

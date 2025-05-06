@@ -78,7 +78,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Use enum-safe check for tag
-            if (!Utility_TagManager.HasTag(pawn.def, ManagedTags.AutoDraftInjection))
+            if (!Utility_TagManager.ForceDraftable(pawn.def))
             {
                 return;
             }

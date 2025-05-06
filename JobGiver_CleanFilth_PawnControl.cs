@@ -36,6 +36,11 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // IMPORTANT: Only player pawns and slaves owned by player should clear filth
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             // Check if map has any filth in home area
             if (pawn.Map.listerFilthInHomeArea.FilthInHomeArea.Count == 0)
             {

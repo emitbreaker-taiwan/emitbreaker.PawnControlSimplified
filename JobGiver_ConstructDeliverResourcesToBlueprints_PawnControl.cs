@@ -142,6 +142,10 @@ namespace emitbreaker.PawnControl
 
                 foreach (Blueprint blueprint in buckets[b])
                 {
+                    // Skip frames from different factions
+                    if (blueprint.Faction != pawn.Faction)
+                        continue;
+
                     // Check for blocking things first
                     Thing blocker = GenConstruct.FirstBlockingThing(blueprint, pawn);
                     if (blocker != null)

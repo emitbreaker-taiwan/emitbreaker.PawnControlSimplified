@@ -49,14 +49,16 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // For construction jobs, we allow pawns to work on their own faction's frames
+            // This naturally handles both player pawns and siege raiders
             return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
-                    // Update fire cache
+                    // Update frame cache
                     UpdateFrameCacheSafely(p.Map);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
+                    // Find and create a job for delivering resources to frames
                     return TryCreateFrameDeliveryJob(pawn);
                 },
                 debugJobDesc: "delivering resources to frames assignment",
@@ -138,6 +140,10 @@ namespace emitbreaker.PawnControl
 
                 foreach (Frame frame in buckets[b])
                 {
+                    // Skip frames from different factions
+                    if (frame.Faction != pawn.Faction)
+                        continue;
+
                     // Skip if thing is forbidden or unreachable
                     if (frame.IsForbidden(pawn) || !pawn.CanReach(frame, PathEndMode.Touch, pawn.NormalMaxDanger()))
                         continue;
