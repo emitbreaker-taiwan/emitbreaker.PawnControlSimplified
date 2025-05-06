@@ -2,10 +2,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using Verse;
+using Verse.Noise;
 using static emitbreaker.PawnControl.HarmonyPatches;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace emitbreaker.PawnControl
 {
@@ -13,7 +16,9 @@ namespace emitbreaker.PawnControl
     {
         private bool drafterAlreadyInjected = false;
 
-        public GameComponent_LateInjection(Game game) { }
+        public GameComponent_LateInjection(Game game) 
+        {
+        }
 
         public override void GameComponentTick()
         {
@@ -45,7 +50,7 @@ namespace emitbreaker.PawnControl
             base.GameComponentOnGUI();
 
             // This is a good spot to ensure cache is clean before saving
-            JobGiver_WorkNonHumanlike.ClearJobCache();
+            JobGiver_WorkNonHumanlike.ResetCache();
         }
 
         /// <summary>
@@ -55,8 +60,21 @@ namespace emitbreaker.PawnControl
         {
             base.FinalizeInit();
 
+            // Ensure all modded pawns have their stat injections applied
+            Utility_StatManager.CheckStatHediffDefExists();
+
+            // Reset caches to ensure no stale data is present
+            ResetAllCache();
+        }
+
+        private void ResetAllCache()
+        {
+            // Clear work status caches on initialization
+            Utility_TagManager.ResetCache();
+            Utility_ThinkTreeManager.ResetCache();
+
             // General job giver caches
-            JobGiver_WorkNonHumanlike.ClearJobCache();
+            JobGiver_WorkNonHumanlike.ResetCache();
 
             // Plant cutting job givers
             JobGiver_PlantsCut_PawnControl.ResetCache();
@@ -67,6 +85,9 @@ namespace emitbreaker.PawnControl
 
             // Fire Fighting job givers
             JobGiver_FightFires_PawnControl.ResetCache();
+
+            // Doctor job givers
+            JobGiver_FeedPatient_PawnControl.ResetCache();
 
             // Cleaning job givers
             JobGiver_CleanFilth_PawnControl.ResetCache();
@@ -85,6 +106,14 @@ namespace emitbreaker.PawnControl
             JobGiver_Warden_Feed_PawnControl.ResetCache();
             JobGiver_Warden_DeliverFood_PawnControl.ResetCache();
             JobGiver_Warden_Chat_PawnControl.ResetCache();
+
+            // Handling job givers
+            JobGiver_Tame_PawnControl.ResetCache();
+            JobGiver_Train_PawnControl.ResetCache();
+            JobGiver_TakeToPen_PawnControl.ResetCache();
+            JobGiver_Slaughter_PawnControl.ResetCache();
+            JobGiver_ReleaseAnimalToWild_PawnControl.ResetCache();
+            JobGiver_GatherAnimalBodyResources_PawnControl.ResetCache();
 
             // Hauling job givers
             JobGiver_EmptyEggBox_PawnControl.ResetCache();
@@ -113,52 +142,29 @@ namespace emitbreaker.PawnControl
 
         private void InjectDraftersSafely()
         {
-            List<Map> maps = Find.Maps;
-            int mapCount = maps.Count;
-            if (mapCount == 0)
+            foreach (var map in Find.Maps)
             {
-                drafterAlreadyInjected = true;
-                return;
-            }
-
-            for (int i = 0; i < mapCount; i++)
-            {
-                Map map = maps[i];
-                List<Pawn> pawns = map.mapPawns.AllPawns;
-                int pawnCount = pawns.Count;
-                if (pawnCount == 0)
-                    continue;
-
-                for (int j = 0; j < pawnCount; j++)
+                Utility_DrafterManager.InjectDraftersIntoMapPawns(map);
+                
+                // Now give every non-human pawn its equipment/apparel/inventory
+                foreach (var pawn in map.mapPawns.AllPawnsSpawned)
                 {
-                    Pawn pawn = pawns[j];
-                    if (pawn == null || pawn.def == null || pawn.RaceProps == null || pawn.Dead || pawn.Destroyed)
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension == null || pawn.RaceProps.Humanlike)
+                    {
                         continue;
-                    if (!pawn.Spawned || pawn.Faction == null || pawn.drafter != null)
-                        continue;
-                    //if (Utility_Compatibility.TryGetModExtensionNoDependency(pawn.def, "MIM40kFactions.BodySnatcherExtension") != null)
-                    //    continue;
-                    if (!Utility_DrafterManager.ShouldInjectDrafter(pawn))
-                        continue;
-                    if (Utility_VehicleFramework.IsVehiclePawn(pawn))
-                        continue;
+                    }
 
-                    try
+                    if (pawn.drafter == null)
                     {
-                        pawn.drafter = new Pawn_DraftController(pawn);
-                        if (Prefs.DevMode)
-                        {
-                            Log.Message($"[PawnControl] Late-injected drafter: {pawn.LabelShort}");
-                        }
+                        continue;
                     }
-                    catch (Exception ex)
-                    {
-                        Log.Warning($"[PawnControl] Drafter injection failed for {pawn?.LabelCap ?? "unknown pawn"}: {ex.Message}");
-                    }
+
+                    Utility_DrafterManager.EnsureAllTrackers(pawn); 
                 }
             }
 
-            drafterAlreadyInjected = true; // Correctly set after all maps processed
+            drafterAlreadyInjected = true; // Set after all maps processed
         }
 
         // In GameComponent_LateInjection

@@ -31,6 +31,11 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // IMPORTANT: Only player pawns and slaves owned by player should empty egg boxes
+            if (pawn.Faction != Faction.OfPlayer &&
+                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return null;
+
             return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
@@ -117,6 +122,10 @@ namespace emitbreaker.PawnControl
 
                 foreach (Thing eggBox in buckets[b])
                 {
+                    // IMPORTANT: Check faction interaction validity
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(eggBox, pawn, requiresDesignator: false))
+                        continue;
+
                     // Skip if egg box doesn't exist or is forbidden
                     if (eggBox == null || eggBox.Destroyed || !eggBox.Spawned || eggBox.IsForbidden(pawn))
                         continue;

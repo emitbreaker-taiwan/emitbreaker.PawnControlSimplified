@@ -14,11 +14,11 @@ namespace emitbreaker.PawnControl
         AllowAllWork,
         AllowWork_Firefighter,
         AllowWork_Patient,
-        AllowWork_Doctor,
+        AllowWork_Doctor, // Available
         AllowWork_PatientBedRest,
         AllowWork_BasicWorker, // Available
         AllowWork_Warden, // Available
-        AllowWork_Handling,
+        AllowWork_Handling, // Available
         AllowWork_Cooking,
         AllowWork_Hunting,
         AllowWork_Construction,

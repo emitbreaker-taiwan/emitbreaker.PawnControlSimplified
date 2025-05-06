@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Verse;
 using Verse.AI;
+using static UnityEngine.GraphicsBuffer;
 
 namespace emitbreaker.PawnControl
 {
@@ -135,10 +136,17 @@ namespace emitbreaker.PawnControl
             Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
-                (prisoner, p) => !prisoner.IsForbidden(p) &&
+                (prisoner, p) =>
+                {
+                    // IMPORTANT: Check faction interaction validity first
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(prisoner, p, requiresDesignator: false))
+                        return false;
+
+                    return !prisoner.IsForbidden(p) &&
                                 ShouldTakeCareOfPrisoner(p, prisoner) &&
                                 IsExecutionIdeoAllowed(p, prisoner) &&
-                                p.CanReserveAndReach(prisoner, PathEndMode.OnCell, Danger.Deadly),
+                                p.CanReserveAndReach(prisoner, PathEndMode.OnCell, Danger.Deadly);
+                },
                 _reachabilityCache
             );
 

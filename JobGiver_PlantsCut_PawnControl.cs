@@ -71,21 +71,36 @@ namespace emitbreaker.PawnControl
                 buckets, pawn,
                 (plant, p) =>
                 {
-                    // 1) designated?
-                    bool hasDes = p.Map.designationManager.DesignationOn(plant, DesignationDefOf.CutPlant) != null
-                               || p.Map.designationManager.DesignationOn(plant, DesignationDefOf.HarvestPlant) != null;
-                    if (!hasDes)
+                    // First check basic validity
+                    if (plant == null || plant.Destroyed || !plant.Spawned)
+                        return false;
+
+                    // Check if the plant is designated
+                    bool isDesignated = p.Map.designationManager.DesignationOn(plant, DesignationDefOf.CutPlant) != null
+                                    || p.Map.designationManager.DesignationOn(plant, DesignationDefOf.HarvestPlant) != null;
+
+                    // If plant is designated, only player pawns can cut, but any plant can be targeted
+                    if (isDesignated)
                     {
-                        // 2) in a growing zone we own?
+                        if (p.Faction != Faction.OfPlayer)
+                            return false;
+                    }
+                    else
+                    {
+                        // For non-designated plants (zone-based), check zone and faction ownership
                         var zone = p.Map.zoneManager.ZoneAt(plant.Position) as Zone_Growing;
-                        if (zone == null || !zone.allowCut
-                            || (p.Faction != null && p.Faction != Faction.OfPlayer))   // ← pawn’s faction
+                        if (zone == null || !zone.allowCut)
+                            return false;
+
+                        // Zone-based cutting is restricted to player pawns cutting plants in player-owned zones
+                        if (p.Faction != Faction.OfPlayer)
                             return false;
                     }
 
-                    // common checks
+                    // Common checks for any cutting job
                     if (plant.IsForbidden(p) || !PlantUtility.PawnWillingToCutPlant_Job(plant, p))
                         return false;
+
                     return p.CanReserve(plant);
                 },
                 _reachabilityCache

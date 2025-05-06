@@ -26,6 +26,7 @@ namespace emitbreaker.PawnControl
         /// Optional: List of additional think trees to be injected.
         /// (Example: "PawnControl_WorkTreeTemplate")
         /// </summary>
+        [Obsolete("Partial injection causes error - use mainWorkThinkTreeDefName and/or constantThinkTreeDefName instead")]
         [NoTranslate]
         public List<string> additionalMain = new List<string>();
 
@@ -87,6 +88,9 @@ namespace emitbreaker.PawnControl
         public bool forceDraftable = false;
         public bool forceWork = false;
         public bool forceTrainerTab = false;
+        public bool forceEquipWeapon = false;
+        public bool forceWearApparel = false;
+        [Obsolete("Replaced by forceDraftable")]
         public bool autoDraftInject = false;
 
         // === Lord duty customization ===

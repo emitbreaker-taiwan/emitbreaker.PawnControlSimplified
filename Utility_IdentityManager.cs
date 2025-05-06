@@ -13,10 +13,6 @@ namespace emitbreaker.PawnControl
 {
     public static class Utility_IdentityManager
     {
-        public static readonly Dictionary<ThingDef, bool> isAnimalCache = new Dictionary<ThingDef, bool>();
-        public static readonly Dictionary<ThingDef, bool> isHumanlikeCache = new Dictionary<ThingDef, bool>();
-        public static readonly Dictionary<ThingDef, bool> isMechanoidCache = new Dictionary<ThingDef, bool>();
-        private static readonly Dictionary<FlagScopeTarget, bool> flagOverrides = new Dictionary<FlagScopeTarget, bool>();
         public static bool identityFlagsPreloaded = false;
         public static bool IsIdentityFlagsPreloaded => identityFlagsPreloaded;
 
@@ -31,14 +27,14 @@ namespace emitbreaker.PawnControl
 
             if (reload)
             {
-                animalCount = isAnimalCache.Count(x => x.Value);
-                humanlikeCount = isHumanlikeCache.Count(x => x.Value);
-                mechanoidCount = isMechanoidCache.Count(x => x.Value);
+                animalCount = Utility_CacheManager._isAnimalCache.Count(x => x.Value);
+                humanlikeCount = Utility_CacheManager._isHumanlikeCache.Count(x => x.Value);
+                mechanoidCount = Utility_CacheManager._isMechanoidCache.Count(x => x.Value);
             }
 
-            isAnimalCache.Clear();
-            isHumanlikeCache.Clear();
-            isMechanoidCache.Clear();
+            Utility_CacheManager._isAnimalCache.Clear();
+            Utility_CacheManager._isHumanlikeCache.Clear();
+            Utility_CacheManager._isMechanoidCache.Clear();
 
             foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
@@ -56,33 +52,33 @@ namespace emitbreaker.PawnControl
                 bool forceAnimal = ForcedAnimalCondition(def, modExtension);
                 bool forceHumanlike = ForcedHumanlikeCondition(def, modExtension);
                 bool forceMechanoid = ForcedMechanoidCondition(def, modExtension);
-                isAnimalCache[def] = forceAnimal;
-                isHumanlikeCache[def] = forceHumanlike;
-                isMechanoidCache[def] = forceMechanoid;
+                Utility_CacheManager._isAnimalCache[def] = forceAnimal;
+                Utility_CacheManager._isHumanlikeCache[def] = forceHumanlike;
+                Utility_CacheManager._isMechanoidCache[def] = forceMechanoid;
             }
 
             identityFlagsPreloaded = true;
 
             if (reload)
             {
-                animalCountNew = isAnimalCache.Count(x => x.Value);
-                humanlikeCountNew = isHumanlikeCache.Count(x => x.Value);
-                mechanoidCountNew = isMechanoidCache.Count(x => x.Value);
+                animalCountNew = Utility_CacheManager._isAnimalCache.Count(x => x.Value);
+                humanlikeCountNew = Utility_CacheManager._isHumanlikeCache.Count(x => x.Value);
+                mechanoidCountNew = Utility_CacheManager._isMechanoidCache.Count(x => x.Value);
 
                 if ((animalCount != animalCountNew) || (humanlikeCount != humanlikeCountNew) || (mechanoidCount != mechanoidCountNew))
                 {
                     if (Prefs.DevMode)
                     {
-                        Log.Message($"[PawnControl] Identity flag summary: Animal={isAnimalCache.Count}, Humanlike={isHumanlikeCache.Count}, Mechanoid={isMechanoidCache.Count}");
+                        Log.Message($"[PawnControl] Identity flag summary: Animal={Utility_CacheManager._isAnimalCache.Count}, Humanlike={Utility_CacheManager._isHumanlikeCache.Count}, Mechanoid={Utility_CacheManager._isMechanoidCache.Count}");
                     }
                 }
             }
         }
         
         // For Harmony Patch in early loading stage where Mod Extensions are not fully loaded yet.
-        public static bool IsForcedAnimal(ThingDef def) => def != null && isAnimalCache.TryGetValue(def, out var result) && result;
-        public static bool IsForcedHumanlike(ThingDef def) => def != null && isHumanlikeCache.TryGetValue(def, out var result) && result;
-        public static bool IsForcedMechanoid(ThingDef def) => def != null && isMechanoidCache.TryGetValue(def, out var result) && result;
+        public static bool IsForcedAnimal(ThingDef def) => def != null && Utility_CacheManager._isAnimalCache.TryGetValue(def, out var result) && result;
+        public static bool IsForcedHumanlike(ThingDef def) => def != null && Utility_CacheManager._isHumanlikeCache.TryGetValue(def, out var result) && result;
+        public static bool IsForcedMechanoid(ThingDef def) => def != null && Utility_CacheManager._isMechanoidCache.TryGetValue(def, out var result) && result;
 
         // Check whether does pawn forcefully converted to other type or not.
         private static bool ForcedAnimalCondition(ThingDef def, NonHumanlikePawnControlExtension modExtension)
@@ -136,7 +132,7 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (isAnimalCache.TryGetValue(def, out bool value))
+            if (Utility_CacheManager._isAnimalCache.TryGetValue(def, out bool value))
             {
                 return value;
             }
@@ -151,7 +147,7 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (isHumanlikeCache.TryGetValue(def, out bool value))
+            if (Utility_CacheManager._isHumanlikeCache.TryGetValue(def, out bool value))
             {
                 return value;
             }
@@ -166,7 +162,7 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (isMechanoidCache.TryGetValue(def, out bool value))
+            if (Utility_CacheManager._isMechanoidCache.TryGetValue(def, out bool value))
             {
                 return value;
             }
@@ -177,12 +173,12 @@ namespace emitbreaker.PawnControl
         // Dynamic Flag Management
         public static void SetFlagOverride(FlagScopeTarget flag, bool value)
         {
-            flagOverrides[flag] = value;
+            Utility_CacheManager._flagOverrides[flag] = value;
         }
 
         public static bool IsFlagOverridden(FlagScopeTarget flag)
         {
-            return flagOverrides.TryGetValue(flag, out bool active) && active;
+            return Utility_CacheManager._flagOverrides.TryGetValue(flag, out bool active) && active;
         }
 
         public static bool MatchesIdentityFlags(Pawn pawn, PawnIdentityFlags flags)

@@ -66,6 +66,18 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="JobGiver_Shear_PawnControl.cs" />
+    <Compile Include="JobGiver_Milk_PawnControl.cs" />
+    <Compile Include="JobGiver_GatherAnimalBodyResources_PawnControl.cs" />
+    <Compile Include="JobGiver_ReleaseAnimalToWild_PawnControl.cs" />
+    <Compile Include="JobGiver_Slaughter_PawnControl.cs" />
+    <Compile Include="JobGiver_FeedAnimalPatientHandling_PawnControl.cs" />
+    <Compile Include="JobGiver_FeedAnimalPatient_PawnControl.cs" />
+    <Compile Include="JobGiver_FeedPrisonerPatient_PawnControl.cs" />
+    <Compile Include="JobGiver_FeedHumanPatient_PawnControl.cs" />
+    <Compile Include="JobGiver_FeedPatient_PawnControl.cs" />
+    <Compile Include="JobGiver_RebalanceAnimalsInPens_PawnControl.cs" />
+    <Compile Include="JobGiver_TakeRoamingAnimalsToPen_PawnControl.cs" />
     <Compile Include="JobGiver_CleanFilth_PawnControl.cs" />
     <Compile Include="JobGiver_ClearSnow_PawnControl.cs" />
     <Compile Include="JobGiver_EmptyEggBox_PawnControl.cs" />
@@ -86,6 +98,9 @@
     <Compile Include="JobGiver_GrowerHarvest_PawnControl.cs" />
     <Compile Include="JobGiver_Strip_PawnControl.cs" />
     <Compile Include="JobGiver_TakeBeerOutOfBarrel_PawnControl.cs" />
+    <Compile Include="JobGiver_TakeToPen_PawnControl.cs" />
+    <Compile Include="JobGiver_Tame_PawnControl.cs" />
+    <Compile Include="JobGiver_Train_PawnControl.cs" />
     <Compile Include="JobGiver_UnloadCarriers_PawnControl.cs" />
     <Compile Include="JobGiver_Warden_Chat_PawnControl.cs" />
     <Compile Include="JobGiver_Warden_DeliverFood_PawnControl.cs" />

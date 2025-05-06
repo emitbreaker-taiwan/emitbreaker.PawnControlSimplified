@@ -38,10 +38,8 @@ namespace emitbreaker.PawnControl
                 pawn,
                 "Hauling",
                 (p, forced) => {
-                    // Update plant cache
                     UpdateUnloadablePawnsCache(p.Map);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
                     return TryCreateUnloadInventoryJob(p);
                 },
                 debugJobDesc: "unload carriers assignment");
@@ -124,6 +122,10 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (carrier, p) => {
+                    // IMPORTANT: Check faction interaction validity first
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(carrier, p, requiresDesignator: false))
+                        return false;
+
                     // Skip if no longer valid
                     if (carrier == null || carrier.Dead || !carrier.Spawned || carrier == p)
                         return false;

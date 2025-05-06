@@ -1,5 +1,6 @@
 using RimWorld;
 using System.Collections.Generic;
+using System.Threading;
 using Verse;
 using Verse.AI;
 
@@ -113,6 +114,10 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (thing, p) => {
+                    // IMPORTANT: Check faction interaction validity first
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, p, requiresDesignator: true))
+                        return false;
+
                     // Skip if no longer valid
                     if (thing == null || thing.Destroyed || !thing.Spawned)
                         return false;

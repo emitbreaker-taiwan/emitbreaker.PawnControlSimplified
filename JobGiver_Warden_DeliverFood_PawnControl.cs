@@ -112,6 +112,10 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (prisoner, p) => {
+                    // IMPORTANT: Check faction interaction validity first
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(prisoner, p, requiresDesignator: false))
+                        return false;
+
                     // Skip if no longer a valid prisoner for food delivery
                     if (prisoner?.guest == null || !prisoner.IsPrisoner ||
                         !prisoner.guest.CanBeBroughtFood ||
