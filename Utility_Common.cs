@@ -17,7 +17,12 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (Utility_VehicleFramework.IsVehiclePawn(pawn))
+            if (Utility_CompatibilityManager.VehicleFramework.IsVehiclePawn(pawn))
+            {
+                return false;
+            }
+
+            if (Utility_CompatibilityManager.HumanoidAlienRaces.IsHARRace(pawn.def))
             {
                 return false;
             }
@@ -58,6 +63,29 @@ namespace emitbreaker.PawnControl
         public static WorkGiverDef WorkGiverDefNamed(string defName)
         {
             return DefDatabase<WorkGiverDef>.GetNamed(defName);
+        }
+
+        public static ThinkTreeDef ThinkTreeDefNamed(string defName)
+        {
+            return DefDatabase<ThinkTreeDef>.GetNamed(defName);
+        }
+
+        // UPDATED: Cache the names on first access to avoid repeated reflection.
+        private static readonly List<string> _pawnEnumTagNamesListCache = Enum.GetNames(typeof(PawnEnumTags)).ToList();
+        private static readonly HashSet<string> _pawnEnumTagNamesHashSetCache = new HashSet<string>(_pawnEnumTagNamesListCache);
+
+        /// <summary>
+        /// Returns all PawnEnumTags as a List of their names.
+        /// </summary>
+        /// <returns>List of enum member names</returns>
+        public static List<string> GetPawnEnumTagNames()
+        {
+            return _pawnEnumTagNamesListCache;
+        }
+
+        public static HashSet<string> GetPawnEnumTagNamesHashSet()
+        {
+            return _pawnEnumTagNamesHashSetCache;
         }
     }
 }

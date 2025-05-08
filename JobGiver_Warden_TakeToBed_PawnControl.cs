@@ -29,126 +29,82 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
                 pawn,
                 "Warden",
                 (p, forced) => {
-                    // Update plant cache
-                    UpdatePrisonerCache(p.Map);
+                    // Update prisoner cache with standardized method
+                    Utility_JobGiverManager.UpdatePrisonerCache(
+                        p.Map,
+                        ref _lastCacheUpdateTick,
+                        CACHE_UPDATE_INTERVAL,
+                        _prisonerCache,
+                        _reachabilityCache,
+                        FilterPrisonersNeedingBeds);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateTakeToBedJob(p);
+                    // Create job using standardized method
+                    return Utility_JobGiverManager.TryCreatePrisonerInteractionJob(
+                        p,
+                        _prisonerCache,
+                        _reachabilityCache,
+                        ValidateCanTakeToBed,
+                        CreateTakeToBedJob,
+                        DISTANCE_THRESHOLDS);
                 },
                 debugJobDesc: "prisoner bed assignment");
         }
 
         /// <summary>
-        /// Updates the cache of prisoners that may need to be taken to beds
+        /// Filter function to identify prisoners that need to be taken to beds
         /// </summary>
-        private void UpdatePrisonerCache(Map map)
+        private bool FilterPrisonersNeedingBeds(Pawn prisoner)
         {
-            if (map == null) return;
+            if (prisoner.guest == null || prisoner.InAggroMentalState || prisoner.IsFormingCaravan())
+                return false;
 
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
+            // Add downed prisoners needing medical rest
+            if (prisoner.Downed && HealthAIUtility.ShouldSeekMedicalRest(prisoner) && !prisoner.InBed())
+                return true;
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_prisonerCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_prisonerCache.ContainsKey(mapId))
-                    _prisonerCache[mapId].Clear();
-                else
-                    _prisonerCache[mapId] = new List<Pawn>();
+            // Add non-downed prisoners without proper beds
+            if (!prisoner.Downed && RestUtility.FindBedFor(prisoner, prisoner, true, guestStatus: new GuestStatus?(GuestStatus.Prisoner)) == null)
+                return true;
 
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Find all prisoners who might need to be taken to bed
-                foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
-                {
-                    if (prisoner == null || prisoner.Destroyed || !prisoner.Spawned)
-                        continue;
-
-                    if (prisoner.guest != null && !prisoner.InAggroMentalState && !prisoner.IsFormingCaravan())
-                    {
-                        // Add downed prisoners needing medical rest or non-downed prisoners without proper beds
-                        if ((prisoner.Downed && HealthAIUtility.ShouldSeekMedicalRest(prisoner) && !prisoner.InBed()) ||
-                            (!prisoner.Downed && RestUtility.FindBedFor(prisoner, prisoner, true, guestStatus: new GuestStatus?(GuestStatus.Prisoner)) == null))
-                        {
-                            _prisonerCache[mapId].Add(prisoner);
-                        }
-                    }
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
+            return false;
         }
 
         /// <summary>
-        /// Create a job to take a prisoner to bed using manager-driven bucket processing
+        /// Validates if a warden can take a specific prisoner to bed
         /// </summary>
-        private Job TryCreateTakeToBedJob(Pawn pawn)
+        private bool ValidateCanTakeToBed(Pawn prisoner, Pawn warden)
         {
-            if (pawn?.Map == null) return null;
+            // Skip if no longer a valid prisoner
+            if (prisoner?.guest == null || !prisoner.IsPrisoner ||
+                prisoner.InAggroMentalState || prisoner.IsFormingCaravan())
+                return false;
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_prisonerCache.ContainsKey(mapId) || _prisonerCache[mapId].Count == 0)
-                return null;
+            // Check if warden can reach prisoner
+            if (!warden.CanReserveAndReach(prisoner, PathEndMode.OnCell, warden.NormalMaxDanger()))
+                return false;
 
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                _prisonerCache[mapId],
-                (prisoner) => (prisoner.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
+            // Try to create a job for this prisoner
+            return TryMakeJob(warden, prisoner, false) != null;
+        }
 
-            // Find the best prisoner to take to bed
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (prisoner, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(prisoner, p, requiresDesignator: false))
-                        return false;
+        /// <summary>
+        /// Creates a job to take a prisoner to bed
+        /// </summary>
+        private Job CreateTakeToBedJob(Pawn warden, Pawn prisoner)
+        {
+            Job job = TryMakeJob(warden, prisoner, false);
 
-                    // Skip if no longer a valid prisoner
-                    if (prisoner?.guest == null || !prisoner.IsPrisoner ||
-                        prisoner.InAggroMentalState || prisoner.IsFormingCaravan())
-                        return false;
-
-                    // Check basic requirements
-                    if (!prisoner.Spawned || prisoner.IsForbidden(p))
-                        return false;
-
-                    // Check if warden can reach prisoner
-                    if (!p.CanReserveAndReach(prisoner, PathEndMode.OnCell, p.NormalMaxDanger()))
-                        return false;
-
-                    // Try to create a job for this prisoner
-                    return TryMakeJob(p, prisoner, false) != null;
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
-            if (targetPrisoner != null)
+            if (job != null && Prefs.DevMode)
             {
-                Job job = TryMakeJob(pawn, targetPrisoner, false);
-
-                if (job != null && Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to take prisoner {targetPrisoner.LabelShort} to bed");
-                }
-
-                return job;
+                string jobType = job.def == JobDefOf.TakeWoundedPrisonerToBed ? "medical bed" : "assigned bed";
+                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to take prisoner {prisoner.LabelShort} to {jobType}");
             }
 
-            return null;
+            return job;
         }
 
         /// <summary>

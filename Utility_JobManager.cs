@@ -106,7 +106,7 @@ namespace emitbreaker.PawnControl
             }
             catch (Exception ex)
             {
-                Log.Warning($"[PawnControl] Exception while traversing {node.GetType().Name}: {ex}");
+                Utility_DebugManager.LogWarning($"Exception while traversing {node.GetType().Name}: {ex}");
             }
 
             // Recursively traverse subnodes

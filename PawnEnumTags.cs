@@ -11,6 +11,8 @@ namespace emitbreaker.PawnControl
         ForceAnimal,
         ForceDraftable,
         ForceWork,
+        ForceEquipWeapon,
+        ForceWearApparel,
         AllowAllWork,
         AllowWork_Firefighter,
         AllowWork_Patient,
@@ -21,7 +23,7 @@ namespace emitbreaker.PawnControl
         AllowWork_Handling, // Available
         AllowWork_Cooking,
         AllowWork_Hunting,
-        AllowWork_Construction,
+        AllowWork_Construction, // Available
         AllowWork_Growing, // Available
         AllowWork_Mining,
         AllowWork_PlantCutting, // Available

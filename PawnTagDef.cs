@@ -8,20 +8,15 @@ using Verse;
 
 namespace emitbreaker.PawnControl
 {
-    [Obsolete("Use tags instead")]
+    /// <summary>
+    /// Wraps a NonHumanlikePawnControlExtension loaded from XML so we can look it up by defName.
+    /// </summary>
     public class PawnTagDef : Def
     {
-        [NoTranslate]
-        public string category;
-
-        public Color? color = null;
-
-        public override void ResolveReferences()
-        {
-            base.ResolveReferences();
-            // fallback color assignment if needed
-            if (!color.HasValue)
-                color = new Color(1f, 1f, 1f); // default white
-        }
+        /// <summary>
+        /// The preset data to apply when this def is selected.
+        /// </summary>
+        public RaceTypeFlag targetRaceType; /// The race type to apply this preset (Humanlike, Animal, ToolUser, etc.)
+        public NonHumanlikePawnControlExtension modExtension;
     }
 }

@@ -129,12 +129,7 @@ namespace emitbreaker.PawnControl
             if (targetBarrel != null)
             {
                 Job job = JobMaker.MakeJob(JobDefOf.TakeBeerOutOfFermentingBarrel, targetBarrel);
-                
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to take beer out of fermenting barrel");
-                }
-                
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take beer out of fermenting barrel");
                 return job;
             }
 

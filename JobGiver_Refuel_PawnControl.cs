@@ -178,12 +178,7 @@ namespace emitbreaker.PawnControl
                         JobDefOf.RefuelAtomic : JobDefOf.Refuel;
 
                     Job job = JobMaker.MakeJob(jobDef, targetBuilding);
-
-                    if (Prefs.DevMode)
-                    {
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to refuel {targetBuilding.LabelCap}");
-                    }
-
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel {targetBuilding.LabelCap}");
                     return job;
                 }
             }

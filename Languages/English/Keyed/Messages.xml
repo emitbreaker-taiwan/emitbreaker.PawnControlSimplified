@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+
+	<!-- Core mod name -->
+	<PawnControl_ModName>Simple Non Humanlike Pawn Control</PawnControl_ModName>
+
+	<!-- Translation keys used in C# (.Translate calls) -->
+	<PawnControl_UnderAllowedSkill>Requires skill level {0}.</PawnControl_UnderAllowedSkill>
+	<PawnControl_MessageWorkTypeDisabledAge>Your age prevents this work type.</PawnControl_MessageWorkTypeDisabledAge>
+	<PawnControl_MessageIdeoOpposedWorkTypeSelected>Ideology forbids this work type for {0}.</PawnControl_MessageIdeoOpposedWorkTypeSelected>
+
+</LanguageData>

@@ -51,20 +51,13 @@ namespace emitbreaker.PawnControl
                 if (pawn.mindState != null)
                 {
                     pawn.mindState.Active = true;
-
-                    if (Prefs.DevMode && modExtension.debugMode)
-                    {
-                        Log.Message($"[PawnControl] Setting {pawn.LabelShort}'s mindState.Active = true");
-                    }
+                    Utility_DebugManager.LogNormal($"Setting {pawn.LabelShort}'s mindState.Active = true");
                 }
 
                 // Work settings check
                 if (pawn.workSettings == null || !pawn.workSettings.EverWork)
                 {
-                    if (Prefs.DevMode && modExtension.debugMode)
-                    {
-                        Log.Warning($"[PawnControl] {pawn.LabelShort} has no work settings or !EverWork");
-                    }
+                    Utility_DebugManager.LogWarning($"{pawn.LabelShort} has no work settings or !EverWork");
                     return ThinkResult.NoJob;
                 }
 
@@ -80,10 +73,7 @@ namespace emitbreaker.PawnControl
                 // Only continue if pawn has tags OR is an animal
                 if (!hasPawnControlTags)
                 {
-                    if (Prefs.DevMode && modExtension.debugMode)
-                    {
-                        Log.Warning($"[PawnControl] {pawn.LabelShort} has no work tags.");
-                    }
+                    Utility_DebugManager.LogWarning($"{pawn.LabelShort} has no work tags.");
                     return ThinkResult.NoJob;
                 }
 
@@ -118,16 +108,16 @@ namespace emitbreaker.PawnControl
                 // Additional diagnostic code for emergency list
                 if (emergency && Prefs.DevMode && modExtension.debugMode)
                 {
-                    Log.Warning($"[PawnControl DEBUG] Emergency WorkGivers check for {pawn.LabelCap}:");
+                    Utility_DebugManager.LogWarning($"Emergency WorkGivers check for {pawn.LabelCap}:");
                     if (pawn.mindState?.priorityWork != null)
                     {
-                        Log.Warning($"- Priority work: {pawn.mindState.priorityWork.WorkGiver?.defName ?? "null"}");
-                        Log.Warning($"- Priority work is prioritized: {pawn.mindState.priorityWork.IsPrioritized}");
-                        Log.Warning($"- Priority work workGivers count: {(pawn.mindState.priorityWork.WorkGiver?.workType?.workGiversByPriority?.Count ?? 0)}");
+                        Utility_DebugManager.LogWarning($"- Priority work: {pawn.mindState.priorityWork.WorkGiver?.defName ?? "null"}");
+                        Utility_DebugManager.LogWarning($"- Priority work is prioritized: {pawn.mindState.priorityWork.IsPrioritized}");
+                        Utility_DebugManager.LogWarning($"- Priority work workGivers count: {(pawn.mindState.priorityWork.WorkGiver?.workType?.workGiversByPriority?.Count ?? 0)}");
                     }
                     else
                     {
-                        Log.Warning("- No priority work found");
+                        Utility_DebugManager.LogWarning("- No priority work found");
                     }
                 }
 
@@ -141,21 +131,14 @@ namespace emitbreaker.PawnControl
                     // If emergency list is empty or null, try to rebuild both lists
                     if (emergencyList == null || emergencyList.Count == 0)
                     {
-                        if (Prefs.DevMode && modExtension.debugMode)
-                        {
-                            Log.Warning($"[PawnControl] Empty emergency WorkGiver list for {pawn.LabelCap}. Attempting to rebuild...");
-                        }
-
+                        Utility_DebugManager.LogWarning($"Empty emergency WorkGiver list for {pawn.LabelCap}. Attempting to rebuild...");
                         Utility_WorkSettingsManager.EnsureWorkGiversPopulated(pawn);
                         emergencyList = pawn.workSettings.WorkGiversInOrderEmergency;
 
                         // If still empty after rebuild, fall back to normal list
                         if (emergencyList == null || emergencyList.Count == 0)
                         {
-                            if (Prefs.DevMode && modExtension.debugMode)
-                            {
-                                Log.Warning($"[PawnControl] Falling back to normal WorkGiver list for {pawn.LabelCap} in emergency mode");
-                            }
+                            Utility_DebugManager.LogWarning($"Falling back to normal WorkGiver list for {pawn.LabelCap} in emergency mode");
                             list = pawn.workSettings.WorkGiversInOrderNormal;
                         }
                         else
@@ -175,10 +158,7 @@ namespace emitbreaker.PawnControl
 
                 if (list == null || list.Count == 0)
                 {
-                    if (Prefs.DevMode && modExtension.debugMode)
-                    {
-                        Log.Warning($"[PawnControl] Empty WorkGiver list for {pawn.LabelCap}. Attempting to rebuild...");
-                    }
+                    Utility_DebugManager.LogWarning($"Empty WorkGiver list for {pawn.LabelCap}. Attempting to rebuild...");
                     Utility_WorkSettingsManager.EnsureWorkGiversPopulated(pawn);
 
                     // Get the lists again
@@ -186,10 +166,7 @@ namespace emitbreaker.PawnControl
 
                     if (list == null || list.Count == 0)
                     {
-                        if (Prefs.DevMode && modExtension.debugMode)
-                        {
-                            Log.Error($"[PawnControl] Failed to rebuild WorkGiver lists for {pawn.LabelCap}. Cannot issue jobs.");
-                        }
+                        Utility_DebugManager.LogError($"Failed to rebuild WorkGiver lists for {pawn.LabelCap}. Cannot issue jobs.");
                         return ThinkResult.NoJob;
                     }
                 }
@@ -211,7 +188,7 @@ namespace emitbreaker.PawnControl
                         }
                         catch (Exception ex)
                         {
-                            Log.Error($"[PawnControl] Exception at priority boundary from {scannerWhoProvidedTarget?.def?.defName}: {ex}");
+                            Utility_DebugManager.LogError($"Exception at priority boundary from {scannerWhoProvidedTarget?.def?.defName}: {ex}");
                         }
 
                         if (job3 != null)
@@ -239,12 +216,7 @@ namespace emitbreaker.PawnControl
                             {
                                 pawn.jobs.DebugLogEvent($"JobGiver_Work produced non-scan Job {job2.ToStringSafe()} from {workGiver}");
                             }
-
-                            if (Prefs.DevMode && modExtension.debugMode)
-                            {
-                                Log.Message($"[PawnControl] Found NonScanJob {job2.def.defName} for {pawn.LabelShort} from {workGiver.def.defName}");
-                            }
-
+                            Utility_DebugManager.LogNormal($"Found NonScanJob {job2.def.defName} for {pawn.LabelShort} from {workGiver.def.defName}");
                             return new ThinkResult(job2, this, list[j].def.tagToGive);
                         }
 
@@ -291,25 +263,18 @@ namespace emitbreaker.PawnControl
                                         if (cachedJob != null)
                                         {
                                             Utility_CacheManager._jobCache[thing] = cachedJob;
-                                            if (Prefs.DevMode && modExtension.debugMode)
-                                            {
-                                                Log.Message($"[PawnControl] Cached job {cachedJob.def.defName} for {thing.Label}");
-                                            }
+                                            Utility_DebugManager.LogNormal($"Cached job {cachedJob.def.defName} for {thing.Label}");
                                         }
                                     }
                                     catch (Exception ex)
                                     {
-                                        Log.Error($"[PawnControl] Error while caching job: {ex}");
+                                        Utility_DebugManager.LogError($"Error while caching job: {ex}");
                                     }
-
-                                    if (Prefs.DevMode && modExtension.debugMode)
-                                    {
-                                        Log.Message($"[PawnControl] Found potential work thing for {pawn.LabelShort}: {thing.Label}");
-                                    }
+                                    Utility_DebugManager.LogNormal($"Found potential work thing for {pawn.LabelShort}: {thing.Label}");
                                 }
-                                else if (Prefs.DevMode && modExtension.debugMode)
+                                else
                                 {
-                                    Log.Warning($"[PawnControl DEBUG] No valid thing target found for {scanner.def.defName} on {pawn.LabelCap}");
+                                    Utility_DebugManager.LogWarning($"No valid thing target found for {scanner.def.defName} on {pawn.LabelCap}");
                                 }
                             }
 
@@ -356,11 +321,7 @@ namespace emitbreaker.PawnControl
                                         bestTargetOfLastPriority = new TargetInfo(cell, pawn.Map);
                                         scannerWhoProvidedTarget = scanner;
                                         closestDistSquared = distSq;
-
-                                        if (Prefs.DevMode && modExtension.debugMode)
-                                        {
-                                            Log.Message($"[PawnControl] Found potential work cell for {pawn.LabelShort} at {cell}");
-                                        }
+                                        Utility_DebugManager.LogNormal($"Found potential work cell for {pawn.LabelShort} at {cell}");
                                     }
                                 }
                             }
@@ -368,7 +329,7 @@ namespace emitbreaker.PawnControl
                     }
                     catch (Exception ex)
                     {
-                        Log.Error(string.Concat(pawn, " threw exception in WorkGiver ", workGiver.def.defName, ": ", ex.ToString()));
+                        Utility_DebugManager.LogError(string.Concat(pawn, " threw exception in WorkGiver ", workGiver.def.defName, ": ", ex.ToString()));
                     }
 
                     if (bestTargetOfLastPriority.IsValid)
@@ -382,7 +343,7 @@ namespace emitbreaker.PawnControl
                         }
                         catch (Exception ex)
                         {
-                            Log.Error($"[PawnControl] Exception getting job from scanner {scannerWhoProvidedTarget?.def?.defName}: {ex}");
+                            Utility_DebugManager.LogError($"Exception getting job from scanner {scannerWhoProvidedTarget?.def?.defName}: {ex}");
                         }
 
                         if (job3 != null)
@@ -390,10 +351,7 @@ namespace emitbreaker.PawnControl
                             job3.workGiverDef = scannerWhoProvidedTarget.def;
 
                             // Log successful job creation
-                            if (Prefs.DevMode && modExtension.debugMode)
-                            {
-                                Log.Message($"[PawnControl] Created job {job3.def.defName} for {pawn.LabelShort} with workGiver {scannerWhoProvidedTarget.def.defName}");
-                            }
+                            Utility_DebugManager.LogNormal($"Created job {job3.def.defName} for {pawn.LabelShort} with workGiver {scannerWhoProvidedTarget.def.defName}");
 
                             if (pawn.jobs.debugLog)
                             {
@@ -415,21 +373,14 @@ namespace emitbreaker.PawnControl
                     Job job3 = null;
                     try
                     {
-                        if (Prefs.DevMode && modExtension.debugMode)
-                        {
-                            Log.Message($"[PawnControl] Attempting final job creation for {pawn.LabelShort} with {(bestTargetOfLastPriority.HasThing ? bestTargetOfLastPriority.Thing.Label : "cell")}");
-                        }
+                        Utility_DebugManager.LogNormal($"Attempting final job creation for {pawn.LabelShort} with {(bestTargetOfLastPriority.HasThing ? bestTargetOfLastPriority.Thing.Label : "cell")}");
 
                         // Check for cached job first before calling JobOnThing again
                         if (bestTargetOfLastPriority.HasThing && Utility_CacheManager._jobCache.TryGetValue(bestTargetOfLastPriority.Thing, out Job cachedJob))
                         {
                             job3 = cachedJob;
                             Utility_CacheManager._jobCache.Remove(bestTargetOfLastPriority.Thing); // Use it once then remove
-                            
-                            if (Prefs.DevMode && modExtension.debugMode)
-                            {
-                                Log.Message($"[PawnControl] Using cached job {job3.def.defName} for {bestTargetOfLastPriority.Thing.Label}");
-                            }
+                            Utility_DebugManager.LogNormal($"Using cached job {job3.def.defName} for {bestTargetOfLastPriority.Thing.Label}");
                         }
                         else
                         {
@@ -439,36 +390,30 @@ namespace emitbreaker.PawnControl
                                 : scannerWhoProvidedTarget.JobOnThing(pawn, bestTargetOfLastPriority.Thing);
                         }
 
-                        if (job3 == null && Prefs.DevMode && modExtension.debugMode)
+                        if (job3 == null)
                         {
-                            Log.Warning($"[PawnControl] Second JobOnThing call returned null despite initial success");
+                            Utility_DebugManager.LogWarning($"Second JobOnThing call returned null despite initial success");
                         }
                     }
                     catch (Exception ex)
                     {
-                        Log.Error($"[PawnControl] Exception getting job from scanner {scannerWhoProvidedTarget?.def?.defName}: {ex}");
+                        Utility_DebugManager.LogError($"Exception getting job from scanner {scannerWhoProvidedTarget?.def?.defName}: {ex}");
                     }
 
                     // The rest of the code remains the same
                     if (job3 != null)
                     {
-                        if (Prefs.DevMode && modExtension.debugMode)
-                        {
-                            Log.Message($"[PawnControl] Final job created successfully: {job3.def.defName}");
-                        }
+                        Utility_DebugManager.LogNormal($"Final job created successfully: {job3.def.defName}");
                         job3.workGiverDef = scannerWhoProvidedTarget.def;
                         // Verify the job is valid
-                        if (Prefs.DevMode && modExtension.debugMode)
+                        if (!pawn.CanReserveAndReach(job3.targetA.Thing, job3.targetA.Thing == null ? PathEndMode.OnCell : PathEndMode.Touch, Danger.Some))
                         {
-                            if (!pawn.CanReserveAndReach(job3.targetA.Thing, job3.targetA.Thing == null ? PathEndMode.OnCell : PathEndMode.Touch, Danger.Some))
-                            {
-                                Log.Warning($"[PawnControl] Job target is unreachable: {(job3.targetA.Thing?.LabelCap ?? "null")}");
-                            }
+                            Utility_DebugManager.LogWarning($"Job target is unreachable: {(job3.targetA.Thing?.LabelCap ?? "null")}");
+                        }
 
-                            if (job3.targetA.Thing != null && job3.targetA.Thing.IsForbidden(pawn))
-                            {
-                                Log.Warning($"[PawnControl] Job target is forbidden: {job3.targetA.Thing.LabelCap}");
-                            }
+                        if (job3.targetA.Thing != null && job3.targetA.Thing.IsForbidden(pawn))
+                        {
+                            Utility_DebugManager.LogWarning($"Job target is forbidden: {job3.targetA.Thing.LabelCap}");
                         }
 
                         if (pawn.jobs.debugLog)
@@ -478,9 +423,9 @@ namespace emitbreaker.PawnControl
 
                         return new ThinkResult(job3, this, scannerWhoProvidedTarget.def.tagToGive);
                     }
-                    else if (Prefs.DevMode && modExtension.debugMode)
+                    else
                     {
-                        Log.Warning($"[PawnControl] Final job creation returned null");
+                        Utility_DebugManager.LogWarning($"Final job creation returned null");
                     }
 
                     Log.ErrorOnce(string.Concat(scannerWhoProvidedTarget, " provided target ", bestTargetOfLastPriority, " but yielded no actual job for pawn ", pawn, ". The CanGiveJob and JobOnX methods may not be synchronized."), 6112651);
@@ -489,7 +434,7 @@ namespace emitbreaker.PawnControl
             }
             catch (Exception ex)
             {
-                Log.Error($"[PawnControl] Critical error in JobGiver_WorkNonHumanlike for {pawn?.LabelShort ?? "unknown"}: {ex}");
+                Utility_DebugManager.LogError($"Critical error in JobGiver_WorkNonHumanlike for {pawn?.LabelShort ?? "unknown"}: {ex}");
             }
 
             return ThinkResult.NoJob;
@@ -564,7 +509,7 @@ namespace emitbreaker.PawnControl
             }
             catch (Exception ex)
             {
-                Log.Error($"{pawn} threw exception in GiverTryGiveJobPrioritized on WorkGiver {giver.def.defName}: {ex}");
+                Utility_DebugManager.LogError($"{pawn} threw exception in GiverTryGiveJobPrioritized on WorkGiver {giver.def.defName}: {ex}");
             }
 
             return null;

@@ -11,8 +11,21 @@ namespace emitbreaker.PawnControl
     /// <summary>
     /// Add this ModExtension to any non-humanlike ThingDef (Pawn) to enable advanced control behaviors.
     /// </summary>
-    public class NonHumanlikePawnControlExtension : DefModExtension
+    public class NonHumanlikePawnControlExtension : DefModExtension, IExposable
     {
+        // Declare private dictionary fields at the class level first
+        public Dictionary<SkillDef, Passion> _skillPassionDict;
+        public Dictionary<SkillDef, int> _simulatedSkillDict;
+
+        // In the constructor or a dedicated initialization method
+        public NonHumanlikePawnControlExtension()
+        {
+            // Pre-allocate collections with reasonable capacity
+            tags = new List<string>(25);
+            _skillPassionDict = new Dictionary<SkillDef, Passion>(8);
+            _simulatedSkillDict = new Dictionary<SkillDef, int>(8);
+        }
+
         /// <summary>
         /// Optional: Overrides the main ThinkTreeDef name to inject at static race-level.
         /// (Example: "PawnControl_WorkTreeTemplate")
@@ -21,14 +34,16 @@ namespace emitbreaker.PawnControl
         public string mainWorkThinkTreeDefName = null;
         [NoTranslate]
         public string constantThinkTreeDefName = null;
-
-        /// <summary>
-        /// Optional: List of additional think trees to be injected.
-        /// (Example: "PawnControl_WorkTreeTemplate")
-        /// </summary>
-        [Obsolete("Partial injection causes error - use mainWorkThinkTreeDefName and/or constantThinkTreeDefName instead")]
         [NoTranslate]
-        public List<string> additionalMain = new List<string>();
+        public string originalMainWorkThinkTreeDefName = null;
+        [NoTranslate]
+        public string originalConstantThinkTreeDefName = null;
+
+        // === Vehicle-specific override ===
+        //[NoTranslate]
+        //public ThinkTreeDef mainWorkThinkTreeDefNameVehicle;
+        //[NoTranslate]
+        //public ThinkTreeDef constantThinkTreeDefNameVehicle;
 
         /// <summary>
         /// Optional: List of allowed tags (work types, skill overrides, etc).
@@ -36,13 +51,6 @@ namespace emitbreaker.PawnControl
         /// </summary>
         [NoTranslate]
         public List<string> tags = new List<string>();
-
-        /// <summary>
-        /// Optional: PawnTagDef references to use in addition to simple string tags.
-        /// Allow dynamic or modular tag grouping.
-        /// </summary>
-        [Obsolete("Replaced by tags")]
-        public List<PawnTagDef> pawnTagDefs;
 
         /// <summary>
         /// Optional override for default skill simulation level - only for global settings and no need to change.
@@ -79,48 +87,115 @@ namespace emitbreaker.PawnControl
         public ForcedIdentityType? forceIdentity;
 
         // === Capability flags ===
-        [Obsolete("Replaced by forceIdentity + ForcedIdentityType")]
-        public bool forceAnimal = false;
-        [Obsolete("Replaced by forceIdentity + ForcedIdentityType")]
-        public bool forceHumanlike = false;
-        [Obsolete("Replaced by forceIdentity + ForcedIdentityType")]
-        public bool forceMechanoid = false;
         public bool forceDraftable = false;
-        public bool forceWork = false;
-        public bool forceTrainerTab = false;
         public bool forceEquipWeapon = false;
         public bool forceWearApparel = false;
-        [Obsolete("Replaced by forceDraftable")]
-        public bool autoDraftInject = false;
 
         // === Lord duty customization ===
-        public List<LordDutyMapping> lordDutyMappings;
-        [NoTranslate]
-        public string defaultDutyDef;
-        public float defaultDutyRadius = -1f;
 
         // === Apparel / Weapon filtering ===
         public List<BodyTypeDef> allowedBodyTypes;
         public bool restrictApparelByBodyType = true;
-        public bool restrictWeaponsByMass = true;
-
-        // === Vehicle-specific override ===
-        //public ThinkTreeDef forcedThinkTreeVehicle;
-
-        [Unsaved]
-        public Dictionary<SkillDef, Passion> skillPassionDict;
-
-        [Unsaved]
-        public Dictionary<SkillDef, int> simulatedSkillDict;
 
         public bool debugMode = false;
+        public bool fromXML = false;
+        public bool toBeRemoved = false;
+
+        // Implementation of IExposable for saving/loading
+        public void ExposeData()
+        {
+
+            Scribe_Values.Look(ref mainWorkThinkTreeDefName, "mainWorkThinkTreeDefName");
+            Scribe_Values.Look(ref constantThinkTreeDefName, "constantThinkTreeDefName");
+            Scribe_Values.Look(ref originalMainWorkThinkTreeDefName, "originalMainWorkThinkTreeDefName");
+            Scribe_Values.Look(ref originalConstantThinkTreeDefName, "originalConstantThinkTreeDefName");
+
+            Scribe_Collections.Look(ref tags, "tags", LookMode.Value);
+
+            // Handle nullable int properly
+            if (Scribe.mode == LoadSaveMode.Saving)
+            {
+                bool hasOverride = baseSkillLevelOverride.HasValue;
+                Scribe_Values.Look(ref hasOverride, "hasSkillOverride", false);
+                if (hasOverride)
+                {
+                    int value = baseSkillLevelOverride.Value;
+                    Scribe_Values.Look(ref value, "baseSkillLevelOverride");
+                }
+            }
+            else if (Scribe.mode == LoadSaveMode.LoadingVars)
+            {
+                bool hasOverride = false;
+                Scribe_Values.Look(ref hasOverride, "hasSkillOverride", false);
+                if (hasOverride)
+                {
+                    int value = 0;
+                    Scribe_Values.Look(ref value, "baseSkillLevelOverride");
+                    baseSkillLevelOverride = value;
+                }
+                else
+                {
+                    baseSkillLevelOverride = null;
+                }
+            }
+
+            Scribe_Values.Look(ref skillLevelToolUser, "skillLevelToolUser", 0);
+            Scribe_Values.Look(ref skillLevelAnimalAdvanced, "skillLevelAnimalAdvanced", 0);
+            Scribe_Values.Look(ref skillLevelAnimalIntermediate, "skillLevelAnimalIntermediate", 0);
+            Scribe_Values.Look(ref skillLevelAnimalBasic, "skillLevelAnimalBasic", 0);
+
+            // Make sure lists are property initialized after loading
+            if (Scribe.mode == LoadSaveMode.LoadingVars)
+            {
+                if (injectedSkills == null)
+                    injectedSkills = new List<SkillLevelEntry>();
+
+                if (injectedPassions == null)
+                    injectedPassions = new List<SkillPassionEntry>();
+
+                if (tags == null)
+                    tags = new List<string>();
+            }
+
+            Scribe_Values.Look(ref forceIdentity, "forceIdentity");
+            Scribe_Values.Look(ref forceDraftable, "forceDraftable", false);
+            Scribe_Values.Look(ref forceEquipWeapon, "forceEquipWeapon", false);
+            Scribe_Values.Look(ref forceWearApparel, "forceWearApparel", false);
+
+            Scribe_Values.Look(ref restrictApparelByBodyType, "restrictApparelByBodyType", false);
+            Scribe_Collections.Look(ref allowedBodyTypes, "allowedBodyTypes", LookMode.Def);
+
+            Scribe_Values.Look(ref debugMode, "debugMode", false);
+            Scribe_Values.Look(ref fromXML, "fromXML", true);
+            Scribe_Values.Look(ref toBeRemoved, "toBeRemoved", false);
+        }
+
+        public Dictionary<SkillDef, Passion> SkillPassionDict
+        {
+            get
+            {
+                if (_skillPassionDict == null)
+                    CacheSkillPassions();
+                return _skillPassionDict;
+            }
+        }
+
+        public Dictionary<SkillDef, int> SimulatedSkillDict
+        {
+            get
+            {
+                if (_simulatedSkillDict == null)
+                    CacheSimulatedSkillLevels();
+                return _simulatedSkillDict;
+            }
+        }
 
         public void CacheSkillPassions()
         {
             if (injectedPassions == null || injectedPassions.Count == 0)
                 return;
 
-            skillPassionDict = new Dictionary<SkillDef, Passion>();
+            _skillPassionDict = new Dictionary<SkillDef, Passion>();
             foreach (var entry in injectedPassions)
             {
                 if (entry == null || string.IsNullOrWhiteSpace(entry.skill))
@@ -129,44 +204,48 @@ namespace emitbreaker.PawnControl
                 SkillDef def = DefDatabase<SkillDef>.GetNamedSilentFail(entry.skill);
                 if (def != null)
                 {
-                    skillPassionDict[def] = entry.passion;
+                    _skillPassionDict[def] = entry.passion;
                 }
-                else if (Prefs.DevMode)
+                else
                 {
-                    Log.Warning($"[PawnControl] SkillDef '{entry.skill}' not found for passion injection.");
+                    Utility_DebugManager.LogWarning($"[PawnControl] SkillDef '{entry.skill}' not found for passion injection.");
                 }
             }
         }
 
         public void CacheSimulatedSkillLevels()
         {
-            if (injectedSkills == null || injectedSkills.Count == 0)
-                return;
-
-            simulatedSkillDict = new Dictionary<SkillDef, int>();
-            foreach (var entry in injectedSkills)
+            try
             {
-                if (entry == null || string.IsNullOrWhiteSpace(entry.skill))
-                    continue;
+                if (_simulatedSkillDict == null)
+                    _simulatedSkillDict = new Dictionary<SkillDef, int>();
+                else
+                    _simulatedSkillDict.Clear();
 
-                SkillDef def = DefDatabase<SkillDef>.GetNamedSilentFail(entry.skill);
-                if (def != null)
+                if (injectedSkills == null || injectedSkills.Count == 0)
+                    return;
+
+                foreach (var entry in injectedSkills)
                 {
-                    simulatedSkillDict[def] = entry.level;
-                }
-                else if (Prefs.DevMode)
-                {
-                    Log.Warning($"[PawnControl] SkillDef '{entry.skill}' not found for skill simulation.");
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.skill))
+                        continue;
+
+                    SkillDef def = DefDatabase<SkillDef>.GetNamedSilentFail(entry.skill);
+                    if (def != null)
+                    {
+                        _simulatedSkillDict[def] = entry.level;
+                        Utility_DebugManager.LogNormal($"Cached skill {def.defName} at level {entry.level}");
+                    }
+                    else
+                    {
+                        Utility_DebugManager.LogWarning($"[PawnControl] SkillDef '{entry.skill}' not found for skill simulation.");
+                    }
                 }
             }
-        }
-
-        /// <summary>
-        /// Helper method to determine if this extension is interesting for debugging
-        /// </summary>
-        public bool IsInteresting()
-        {
-            return true; // You can add more specific criteria later if needed
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error in CacheSimulatedSkillLevels: {ex.Message}");
+            }
         }
     }
 }

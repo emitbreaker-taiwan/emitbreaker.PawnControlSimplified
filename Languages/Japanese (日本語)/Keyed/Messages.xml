@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<LanguageData>
+
+	<PawnControl_ModName>シンプル非ヒト型ポーン制御</PawnControl_ModName>
+
+	<!-- Translation keys used in C# (.Translate calls) -->
+	<PawnControl_UnderAllowedSkill>必要なスキルレベル: {0}.</PawnControl_UnderAllowedSkill>
+	<PawnControl_MessageWorkTypeDisabledAge>年齢制限によりこの作業を実行できません。</PawnControl_MessageWorkTypeDisabledAge>
+	<PawnControl_MessageIdeoOpposedWorkTypeSelected>イデオロギーにより{0}の作業は禁止されています。</PawnControl_MessageIdeoOpposedWorkTypeSelected>
+
+</LanguageData>

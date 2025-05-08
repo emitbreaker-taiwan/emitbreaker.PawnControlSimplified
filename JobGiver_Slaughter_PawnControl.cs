@@ -172,12 +172,7 @@ namespace emitbreaker.PawnControl
             if (targetAnimal != null)
             {
                 Job job = JobMaker.MakeJob(JobDefOf.Slaughter, targetAnimal);
-
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to slaughter {targetAnimal.LabelShort}");
-                }
-
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to slaughter {targetAnimal.LabelShort}");
                 return job;
             }
 

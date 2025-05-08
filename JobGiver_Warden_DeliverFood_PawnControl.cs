@@ -28,149 +28,98 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
                 pawn,
                 "Warden",
                 (p, forced) => {
-                    // Update plant cache
-                    UpdatePrisonerCache(p.Map);
+                    // Update prisoner cache with standardized method
+                    Utility_JobGiverManager.UpdatePrisonerCache(
+                        p.Map,
+                        ref _lastCacheUpdateTick,
+                        CACHE_UPDATE_INTERVAL,
+                        _prisonerCache,
+                        _reachabilityCache,
+                        FilterPrisonersNeedingFood);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateDeliverFoodJob(p);
+                    // Create job using standardized method
+                    return Utility_JobGiverManager.TryCreatePrisonerInteractionJob(
+                        p,
+                        _prisonerCache,
+                        _reachabilityCache,
+                        ValidateCanDeliverFood,
+                        CreateDeliverFoodJob,
+                        DISTANCE_THRESHOLDS);
                 },
                 debugJobDesc: "deliver food assignment");
         }
 
         /// <summary>
-        /// Updates the cache of prisoners that need food delivered
+        /// Filter function to identify prisoners that need food delivered
         /// </summary>
-        private void UpdatePrisonerCache(Map map)
+        private bool FilterPrisonersNeedingFood(Pawn prisoner)
         {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_prisonerCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_prisonerCache.ContainsKey(mapId))
-                    _prisonerCache[mapId].Clear();
-                else
-                    _prisonerCache[mapId] = new List<Pawn>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Find all prisoners who need food delivered
-                foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
-                {
-                    if (prisoner == null || prisoner.Destroyed || !prisoner.Spawned)
-                        continue;
-
-                    // Check if prisoner needs food delivery
-                    if (prisoner.guest.CanBeBroughtFood &&
-                        prisoner.Position.IsInPrisonCell(prisoner.Map) &&
-                        prisoner.needs?.food != null &&
-                        prisoner.needs.food.CurLevelPercentage < prisoner.needs.food.PercentageThreshHungry + 0.02f &&
-                        !WardenFeedUtility.ShouldBeFed(prisoner) &&
-                        !FoodAvailableInRoomTo(prisoner))
-                    {
-                        _prisonerCache[mapId].Add(prisoner);
-                    }
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
+            return prisoner.guest.CanBeBroughtFood &&
+                prisoner.Position.IsInPrisonCell(prisoner.Map) &&
+                prisoner.needs?.food != null &&
+                prisoner.needs.food.CurLevelPercentage < prisoner.needs.food.PercentageThreshHungry + 0.02f &&
+                !WardenFeedUtility.ShouldBeFed(prisoner) &&
+                !FoodAvailableInRoomTo(prisoner);
         }
 
         /// <summary>
-        /// Create a job to deliver food to a prisoner using manager-driven bucket processing
+        /// Validates if food can be delivered to this prisoner
         /// </summary>
-        private Job TryCreateDeliverFoodJob(Pawn pawn)
+        private bool ValidateCanDeliverFood(Pawn prisoner, Pawn warden)
         {
-            if (pawn?.Map == null) return null;
+            // Skip if no longer a valid prisoner for food delivery
+            if (prisoner?.guest == null || !prisoner.IsPrisoner ||
+                !prisoner.guest.CanBeBroughtFood ||
+                !prisoner.Position.IsInPrisonCell(prisoner.Map) ||
+                prisoner.needs?.food == null ||
+                prisoner.needs.food.CurLevelPercentage >= prisoner.needs.food.PercentageThreshHungry + 0.02f ||
+                WardenFeedUtility.ShouldBeFed(prisoner) ||
+                FoodAvailableInRoomTo(prisoner))
+                return false;
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_prisonerCache.ContainsKey(mapId) || _prisonerCache[mapId].Count == 0)
-                return null;
+            // Check if there's food available for this prisoner
+            Thing foodSource;
+            ThingDef foodDef;
+            if (!FoodUtility.TryFindBestFoodSourceFor(warden, prisoner,
+                prisoner.needs.food.CurCategory == HungerCategory.Starving,
+                out foodSource, out foodDef, false, allowCorpse: false, calculateWantedStackCount: true))
+                return false;
 
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                _prisonerCache[mapId],
-                (prisoner) => (prisoner.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
+            // Don't deliver if food is already in same room
+            return foodSource.GetRoom() != prisoner.GetRoom();
+        }
 
-            // Find the best prisoner to deliver food to
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (prisoner, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(prisoner, p, requiresDesignator: false))
-                        return false;
-
-                    // Skip if no longer a valid prisoner for food delivery
-                    if (prisoner?.guest == null || !prisoner.IsPrisoner ||
-                        !prisoner.guest.CanBeBroughtFood ||
-                        !prisoner.Position.IsInPrisonCell(prisoner.Map) ||
-                        prisoner.needs?.food == null ||
-                        prisoner.needs.food.CurLevelPercentage >= prisoner.needs.food.PercentageThreshHungry + 0.02f ||
-                        WardenFeedUtility.ShouldBeFed(prisoner) ||
-                        FoodAvailableInRoomTo(prisoner))
-                        return false;
-
-                    // Check basic requirements
-                    if (!prisoner.Spawned || prisoner.IsForbidden(p) ||
-                        !p.CanReserveAndReach(prisoner, PathEndMode.OnCell, p.NormalMaxDanger()))
-                        return false;
-
-                    // Check if there's food available for this prisoner
-                    Thing foodSource;
-                    ThingDef foodDef;
-                    if (!FoodUtility.TryFindBestFoodSourceFor(p, prisoner,
-                        prisoner.needs.food.CurCategory == HungerCategory.Starving,
-                        out foodSource, out foodDef, false, allowCorpse: false, calculateWantedStackCount: true))
-                        return false;
-
-                    // Don't deliver if food is already in same room
-                    return foodSource.GetRoom() != prisoner.GetRoom();
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
-            if (targetPrisoner != null)
+        /// <summary>
+        /// Creates a job to deliver food to a prisoner
+        /// </summary>
+        private Job CreateDeliverFoodJob(Pawn warden, Pawn prisoner)
+        {
+            // Find best food source
+            Thing foodSource;
+            ThingDef foodDef;
+            if (FoodUtility.TryFindBestFoodSourceFor(warden, prisoner,
+                prisoner.needs.food.CurCategory == HungerCategory.Starving,
+                out foodSource, out foodDef, false, allowCorpse: false, calculateWantedStackCount: true))
             {
-                // Find best food source
-                Thing foodSource;
-                ThingDef foodDef;
-                if (FoodUtility.TryFindBestFoodSourceFor(pawn, targetPrisoner,
-                    targetPrisoner.needs.food.CurCategory == HungerCategory.Starving,
-                    out foodSource, out foodDef, false, allowCorpse: false, calculateWantedStackCount: true))
+                // Don't deliver if food is already in same room
+                if (foodSource.GetRoom() == prisoner.GetRoom())
+                    return null;
+
+                float nutrition = FoodUtility.GetNutrition(prisoner, foodSource, foodDef);
+                Job job = JobMaker.MakeJob(JobDefOf.DeliverFood, foodSource, prisoner);
+                job.count = FoodUtility.WillIngestStackCountOf(prisoner, foodDef, nutrition);
+                job.targetC = RCellFinder.SpotToChewStandingNear(prisoner, foodSource);
+
+                if (Prefs.DevMode)
                 {
-                    // Don't deliver if food is already in same room
-                    if (foodSource.GetRoom() == targetPrisoner.GetRoom())
-                        return null;
-
-                    float nutrition = FoodUtility.GetNutrition(targetPrisoner, foodSource, foodDef);
-                    Job job = JobMaker.MakeJob(JobDefOf.DeliverFood, foodSource, targetPrisoner);
-                    job.count = FoodUtility.WillIngestStackCountOf(targetPrisoner, foodDef, nutrition);
-                    job.targetC = RCellFinder.SpotToChewStandingNear(targetPrisoner, foodSource);
-
-                    if (Prefs.DevMode)
-                    {
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to deliver food to prisoner {targetPrisoner.LabelShort}");
-                    }
-
-                    return job;
+                    Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to deliver food to prisoner {prisoner.LabelShort}");
                 }
+
+                return job;
             }
 
             return null;

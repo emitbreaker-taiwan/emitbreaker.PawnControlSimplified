@@ -110,9 +110,9 @@ namespace emitbreaker.PawnControl
                 // Use the utility method if available
                 Job job = LoadTransportersJobUtility.JobOnTransporter(pawn, targetTransporter);
                 
-                if (job != null && Prefs.DevMode)
+                if (job != null)
                 {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to load transporter {targetTransporter.parent.LabelCap}");
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to load transporter {targetTransporter.parent.LabelCap}");
                 }
                 
                 return job;

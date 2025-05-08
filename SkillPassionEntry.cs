@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Verse;
 
 namespace emitbreaker.PawnControl
 {
@@ -11,9 +12,15 @@ namespace emitbreaker.PawnControl
     /// Defines an injected passion for a specific skill (string name based).
     /// Used inside NonHumanlikePawnControlExtension.injectedPassions.
     /// </summary>
-    public class SkillPassionEntry
+    public class SkillPassionEntry : IExposable
     {
         public string skill; // Use skill defName as string
         public Passion passion;
+
+        public void ExposeData()
+        {
+            Scribe_Values.Look(ref skill, "skill");
+            Scribe_Values.Look(ref passion, "passion");
+        }
     }
 }

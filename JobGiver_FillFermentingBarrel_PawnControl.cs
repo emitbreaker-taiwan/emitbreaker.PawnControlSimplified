@@ -175,12 +175,7 @@ namespace emitbreaker.PawnControl
                 if (wort != null)
                 {
                     Job job = JobMaker.MakeJob(JobDefOf.FillFermentingBarrel, targetBarrel, wort);
-                    
-                    if (Prefs.DevMode)
-                    {
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to fill fermenting barrel with wort");
-                    }
-                    
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to fill fermenting barrel with wort");
                     return job;
                 }
             }
@@ -211,6 +206,7 @@ namespace emitbreaker.PawnControl
         {
             Utility_CacheManager.ResetJobGiverCache(_barrelCache, _reachabilityCache);
             _lastCacheUpdateTick = -999;
+            ResetStaticData();
         }
 
         public override string ToString()

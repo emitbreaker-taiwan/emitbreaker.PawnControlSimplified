@@ -28,146 +28,95 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
                 pawn,
                 "Warden",
                 (p, forced) => {
-                    // Update plant cache
-                    UpdateHungryPrisonerCache(p.Map);
+                    // Update prisoner cache with standardized method
+                    Utility_JobGiverManager.UpdatePrisonerCache(
+                        p.Map,
+                        ref _lastCacheUpdateTick,
+                        CACHE_UPDATE_INTERVAL,
+                        _hungryPrisonerCache,
+                        _reachabilityCache,
+                        FilterHungryPrisoners);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateFeedPrisonerJob(p);
+                    // Create job using standardized method
+                    return Utility_JobGiverManager.TryCreatePrisonerInteractionJob(
+                        p,
+                        _hungryPrisonerCache,
+                        _reachabilityCache,
+                        ValidateCanFeedPrisoner,
+                        CreateFeedPrisonerJob,
+                        DISTANCE_THRESHOLDS);
                 },
                 debugJobDesc: "feed prisoner assignment");
         }
 
         /// <summary>
-        /// Updates the cache of prisoners that need to be fed
+        /// Filter function to identify prisoners that need to be fed
         /// </summary>
-        private void UpdateHungryPrisonerCache(Map map)
+        private bool FilterHungryPrisoners(Pawn prisoner)
         {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_hungryPrisonerCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_hungryPrisonerCache.ContainsKey(mapId))
-                    _hungryPrisonerCache[mapId].Clear();
-                else
-                    _hungryPrisonerCache[mapId] = new List<Pawn>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Find all prisoners who need to be fed
-                foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
-                {
-                    if (prisoner == null || prisoner.Destroyed || !prisoner.Spawned)
-                        continue;
-
-                    // Check if prisoner should be fed
-                    if (WardenFeedUtility.ShouldBeFed(prisoner) &&
-                        prisoner.needs?.food != null &&
-                        prisoner.needs.food.CurLevelPercentage < prisoner.needs.food.PercentageThreshHungry + 0.02f)
-                    {
-                        _hungryPrisonerCache[mapId].Add(prisoner);
-                    }
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
+            return WardenFeedUtility.ShouldBeFed(prisoner) &&
+                   prisoner.needs?.food != null &&
+                   prisoner.needs.food.CurLevelPercentage < prisoner.needs.food.PercentageThreshHungry + 0.02f;
         }
 
         /// <summary>
-        /// Create a job to feed a prisoner using manager-driven bucket processing
+        /// Validates if a warden can feed a specific prisoner
         /// </summary>
-        private Job TryCreateFeedPrisonerJob(Pawn pawn)
+        private bool ValidateCanFeedPrisoner(Pawn prisoner, Pawn warden)
         {
-            if (pawn?.Map == null) return null;
+            // Skip if no longer a valid hungry prisoner
+            if (prisoner?.guest == null || !prisoner.IsPrisoner ||
+                !WardenFeedUtility.ShouldBeFed(prisoner) ||
+                prisoner.needs?.food == null ||
+                prisoner.needs.food.CurLevelPercentage >= prisoner.needs.food.PercentageThreshHungry + 0.02f)
+                return false;
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_hungryPrisonerCache.ContainsKey(mapId) || _hungryPrisonerCache[mapId].Count == 0)
-                return null;
-
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                _hungryPrisonerCache[mapId],
-                (prisoner) => (prisoner.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find the best prisoner to feed
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (prisoner, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(prisoner, p, requiresDesignator: false))
-                        return false;
-
-                    // Skip if no longer a valid hungry prisoner
-                    if (prisoner?.guest == null || !prisoner.IsPrisoner ||
-                        !WardenFeedUtility.ShouldBeFed(prisoner) ||
-                        prisoner.needs?.food == null ||
-                        prisoner.needs.food.CurLevelPercentage >= prisoner.needs.food.PercentageThreshHungry + 0.02f)
-                        return false;
-
-                    // Check basic requirements
-                    if (!prisoner.Spawned || prisoner.IsForbidden(p) ||
-                        !p.CanReserveAndReach(prisoner, PathEndMode.OnCell, p.NormalMaxDanger()))
-                        return false;
-
-                    // Check food restriction policy
-                    if (prisoner.foodRestriction != null)
-                    {
-                        FoodPolicy respectedRestriction = prisoner.foodRestriction.GetCurrentRespectedRestriction(p);
-                        if (respectedRestriction != null && respectedRestriction.filter.AllowedDefCount == 0)
-                            return false;
-                    }
-
-                    // Check if there's food available for this prisoner
-                    Thing foodSource;
-                    ThingDef foodDef;
-                    return FoodUtility.TryFindBestFoodSourceFor(p, prisoner,
-                        prisoner.needs.food.CurCategory == HungerCategory.Starving,
-                        out foodSource, out foodDef, false, allowCorpse: false);
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
-            if (targetPrisoner != null)
+            // Check food restriction policy
+            if (prisoner.foodRestriction != null)
             {
-                // Find best food source
-                Thing foodSource;
-                ThingDef foodDef;
-                if (FoodUtility.TryFindBestFoodSourceFor(pawn, targetPrisoner,
-                    targetPrisoner.needs.food.CurCategory == HungerCategory.Starving,
-                    out foodSource, out foodDef, false, allowCorpse: false))
+                FoodPolicy respectedRestriction = prisoner.foodRestriction.GetCurrentRespectedRestriction(warden);
+                if (respectedRestriction != null && respectedRestriction.filter.AllowedDefCount == 0)
+                    return false;
+            }
+
+            // Check if there's food available for this prisoner
+            Thing foodSource;
+            ThingDef foodDef;
+            return FoodUtility.TryFindBestFoodSourceFor(warden, prisoner,
+                prisoner.needs.food.CurCategory == HungerCategory.Starving,
+                out foodSource, out foodDef, false, allowCorpse: false);
+        }
+
+        /// <summary>
+        /// Creates a job to feed a prisoner
+        /// </summary>
+        private Job CreateFeedPrisonerJob(Pawn warden, Pawn prisoner)
+        {
+            // Find best food source
+            Thing foodSource;
+            ThingDef foodDef;
+            if (FoodUtility.TryFindBestFoodSourceFor(warden, prisoner,
+                prisoner.needs.food.CurCategory == HungerCategory.Starving,
+                out foodSource, out foodDef, false, allowCorpse: false))
+            {
+                float nutrition = FoodUtility.GetNutrition(prisoner, foodSource, foodDef);
+                Job job = JobMaker.MakeJob(JobDefOf.FeedPatient, foodSource, prisoner);
+                job.count = FoodUtility.WillIngestStackCountOf(prisoner, foodDef, nutrition);
+
+                if (Prefs.DevMode)
                 {
-                    float nutrition = FoodUtility.GetNutrition(targetPrisoner, foodSource, foodDef);
-                    Job job = JobMaker.MakeJob(JobDefOf.FeedPatient, foodSource, targetPrisoner);
-                    job.count = FoodUtility.WillIngestStackCountOf(targetPrisoner, foodDef, nutrition);
+                    string foodInfo = "";
+                    if (FoodUtility.MoodFromIngesting(prisoner, foodSource, FoodUtility.GetFinalIngestibleDef(foodSource)) < 0)
+                        foodInfo = " (disliked food)";
 
-                    if (Prefs.DevMode)
-                    {
-                        string foodInfo = "";
-                        if (FoodUtility.MoodFromIngesting(targetPrisoner, foodSource, FoodUtility.GetFinalIngestibleDef(foodSource)) < 0)
-                            foodInfo = " (disliked food)";
-
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to feed prisoner {targetPrisoner.LabelShort}{foodInfo}");
-                    }
-
-                    return job;
+                    Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to feed prisoner {prisoner.LabelShort}{foodInfo}");
                 }
+
+                return job;
             }
 
             return null;

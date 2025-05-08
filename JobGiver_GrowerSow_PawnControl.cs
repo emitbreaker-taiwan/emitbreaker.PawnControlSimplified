@@ -232,8 +232,7 @@ namespace emitbreaker.PawnControl
             // Create and return the sow job
             var job = JobMaker.MakeJob(JobDefOf.Sow, targetCell);
             job.plantDefToSow = plantDefToSow;
-            if (Prefs.DevMode)
-                Log.Message($"[PawnControl] {pawn.LabelShort} created sow job for {plantDefToSow.label} at {targetCell}");
+            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created sow job for {plantDefToSow.label} at {targetCell}");
             return job;
         }
 

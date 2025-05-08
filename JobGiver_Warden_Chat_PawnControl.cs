@@ -28,158 +28,112 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
                 pawn,
                 "Warden",
                 (p, forced) => {
-                    // Update plant cache
-                    UpdatePrisonerCache(p.Map);
+                    // Update prisoner cache with standardized method
+                    Utility_JobGiverManager.UpdatePrisonerCache(
+                        p.Map,
+                        ref _lastCacheUpdateTick,
+                        CACHE_UPDATE_INTERVAL,
+                        _interactablePrisonerCache,
+                        _reachabilityCache,
+                        FilterInteractablePrisoners);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateChatWithPrisonerJob(p);
+                    // Create job using standardized method
+                    return Utility_JobGiverManager.TryCreatePrisonerInteractionJob(
+                        p,
+                        _interactablePrisonerCache,
+                        _reachabilityCache,
+                        ValidateCanChat,
+                        CreateChatJob,
+                        DISTANCE_THRESHOLDS);
                 },
                 debugJobDesc: "chat with prisoner assignment");
         }
 
         /// <summary>
-        /// Updates the cache of prisoners that are ready for interaction
+        /// Filter function to identify prisoners ready for chat interaction
         /// </summary>
-        private void UpdatePrisonerCache(Map map)
+        private bool FilterInteractablePrisoners(Pawn prisoner)
         {
-            if (map == null) return;
+            // Skip prisoners in mental states
+            if (prisoner.InMentalState)
+                return false;
 
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
+            PrisonerInteractionModeDef interactionMode = prisoner.guest?.ExclusiveInteractionMode;
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_interactablePrisonerCache.ContainsKey(mapId))
+            // Only include prisoners set for AttemptRecruit or ReduceResistance
+            if (interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ||
+                interactionMode == PrisonerInteractionModeDefOf.ReduceResistance)
             {
-                // Clear outdated cache
-                if (_interactablePrisonerCache.ContainsKey(mapId))
-                    _interactablePrisonerCache[mapId].Clear();
-                else
-                    _interactablePrisonerCache[mapId] = new List<Pawn>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Find all prisoners who can be interacted with
-                foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
+                // Only include prisoners scheduled for interaction
+                if (prisoner.guest.ScheduledForInteraction)
                 {
-                    if (prisoner == null || prisoner.Destroyed || !prisoner.Spawned)
-                        continue;
-
-                    // Skip prisoners in mental states
-                    if (prisoner.InMentalState)
-                        continue;
-
-                    PrisonerInteractionModeDef interactionMode = prisoner.guest?.ExclusiveInteractionMode;
-
-                    // Only include prisoners set for AttemptRecruit or ReduceResistance
-                    if (interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ||
-                        interactionMode == PrisonerInteractionModeDefOf.ReduceResistance)
+                    // Skip if resistance is already 0 and we're trying to reduce resistance
+                    if (!(interactionMode == PrisonerInteractionModeDefOf.ReduceResistance &&
+                          prisoner.guest.Resistance <= 0f))
                     {
-                        // Only include prisoners scheduled for interaction
-                        if (prisoner.guest.ScheduledForInteraction)
-                        {
-                            // Skip if resistance is already 0 and we're trying to reduce resistance
-                            if (!(interactionMode == PrisonerInteractionModeDefOf.ReduceResistance &&
-                                  prisoner.guest.Resistance <= 0f))
-                            {
-                                _interactablePrisonerCache[mapId].Add(prisoner);
-                            }
-                        }
+                        return true;
                     }
                 }
-
-                _lastCacheUpdateTick = currentTick;
             }
+
+            return false;
         }
 
         /// <summary>
-        /// Create a job to chat with a prisoner using manager-driven bucket processing
+        /// Validates if a warden can chat with a specific prisoner
         /// </summary>
-        private Job TryCreateChatWithPrisonerJob(Pawn pawn)
+        private bool ValidateCanChat(Pawn prisoner, Pawn warden)
         {
-            if (pawn?.Map == null) return null;
+            PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_interactablePrisonerCache.ContainsKey(mapId) || _interactablePrisonerCache[mapId].Count == 0)
-                return null;
+            // Check for valid interaction mode and scheduling
+            if ((interactionMode != PrisonerInteractionModeDefOf.AttemptRecruit &&
+                 interactionMode != PrisonerInteractionModeDefOf.ReduceResistance) ||
+                !prisoner.guest.ScheduledForInteraction)
+                return false;
 
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                _interactablePrisonerCache[mapId],
-                (prisoner) => (prisoner.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
+            // Skip resistance reduction if already at 0
+            if (interactionMode == PrisonerInteractionModeDefOf.ReduceResistance &&
+                prisoner.guest.Resistance <= 0f)
+                return false;
 
-            // Find the best prisoner to chat with
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (prisoner, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(prisoner, p, requiresDesignator: false))
-                        return false;
+            // Check if prisoner is downed but not in bed
+            if (prisoner.Downed && !prisoner.InBed())
+                return false;
 
-                    // Skip if no longer a valid prisoner for chatting
-                    if (prisoner?.guest == null || !prisoner.IsPrisoner || prisoner.InMentalState)
-                        return false;
+            // Check if prisoner is awake
+            if (!prisoner.Awake())
+                return false;
 
-                    PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
+            // Check basic reachability
+            if (!prisoner.Spawned || prisoner.IsForbidden(warden) ||
+                !warden.CanReserve(prisoner, 1, -1, null, false))
+                return false;
 
-                    // Check for valid interaction mode and scheduling
-                    if ((interactionMode != PrisonerInteractionModeDefOf.AttemptRecruit &&
-                         interactionMode != PrisonerInteractionModeDefOf.ReduceResistance) ||
-                        !prisoner.guest.ScheduledForInteraction)
-                        return false;
+            return true;
+        }
 
-                    // Skip resistance reduction if already at 0
-                    if (interactionMode == PrisonerInteractionModeDefOf.ReduceResistance &&
-                        prisoner.guest.Resistance <= 0f)
-                        return false;
+        /// <summary>
+        /// Creates the chat job for the warden
+        /// </summary>
+        private Job CreateChatJob(Pawn warden, Pawn prisoner)
+        {
+            Job job = JobMaker.MakeJob(JobDefOf.PrisonerAttemptRecruit, prisoner);
 
-                    // Check if prisoner is downed but not in bed
-                    if (prisoner.Downed && !prisoner.InBed())
-                        return false;
-
-                    // Check if prisoner is awake
-                    if (!prisoner.Awake())
-                        return false;
-
-                    // Check basic reachability
-                    if (!prisoner.Spawned || prisoner.IsForbidden(p) ||
-                        !p.CanReserve(prisoner, 1, -1, null, false))
-                        return false;
-
-                    return true;
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
-            if (targetPrisoner != null)
+            if (Prefs.DevMode)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.PrisonerAttemptRecruit, targetPrisoner);
+                PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
+                string interactionType = interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ?
+                    "recruit" : "reduce resistance of";
 
-                if (Prefs.DevMode)
-                {
-                    PrisonerInteractionModeDef interactionMode = targetPrisoner.guest.ExclusiveInteractionMode;
-                    string interactionType = interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ?
-                        "recruit" : "reduce resistance of";
-
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to {interactionType} prisoner {targetPrisoner.LabelShort}");
-                }
-
-                return job;
+                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to {interactionType} prisoner {prisoner.LabelShort}");
             }
 
-            return null;
+            return job;
         }
 
         /// <summary>

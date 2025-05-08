@@ -150,11 +150,7 @@ namespace emitbreaker.PawnControl
                     job.count = comp.ContainedThing.stackCount;
 
                     // Debug message
-                    if (Prefs.DevMode)
-                    {
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to empty egg box containing {comp.ContainedThing.Label} ({comp.ContainedThing.stackCount})");
-                    }
-
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to empty egg box containing {comp.ContainedThing.Label} ({comp.ContainedThing.stackCount})");
                     return job;
                 }
             }

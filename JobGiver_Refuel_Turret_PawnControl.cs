@@ -180,12 +180,7 @@ namespace emitbreaker.PawnControl
                         JobDefOf.RearmTurretAtomic : JobDefOf.RearmTurret;
 
                     Job job = JobMaker.MakeJob(jobDef, targetTurret);
-
-                    if (Prefs.DevMode)
-                    {
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to refuel turret {targetTurret.LabelCap}");
-                    }
-
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel turret {targetTurret.LabelCap}");
                     return job;
                 }
             }

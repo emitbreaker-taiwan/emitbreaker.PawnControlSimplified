@@ -153,10 +153,7 @@ namespace emitbreaker.PawnControl
 
             if (!ForceDraftable(def))
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                {
-                    Log.Error($"[PawnControl] {def.defName} is not forceDraftable, cannot force equip weapon.");
-                }
+                Utility_DebugManager.LogError($"{def.defName} is not forceDraftable, cannot force equip weapon.");
                 return false;
             }
 
@@ -191,10 +188,7 @@ namespace emitbreaker.PawnControl
 
             if (!ForceDraftable(def))
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                {
-                    Log.Error($"[PawnControl] {def.defName} is not forceDraftable, cannot force wear apparel.");
-                }
+                Utility_DebugManager.LogError($"{def.defName} is not forceDraftable, cannot force wear apparel.");
                 return false;
             }
 
@@ -253,8 +247,6 @@ namespace emitbreaker.PawnControl
             // ✅ Ensure legacy force flags are still represented
             if (set.Contains(ManagedTags.ForceAnimal)) set.Add(ManagedTags.ForceAnimal);
             if (set.Contains(ManagedTags.ForceDraftable)) set.Add(ManagedTags.ForceDraftable);
-            if (set.Contains(ManagedTags.ForceTrainerTab)) set.Add(ManagedTags.ForceTrainerTab);
-            if (set.Contains(ManagedTags.ForceWork)) set.Add(ManagedTags.ForceWork);
 
             return set;
         }
@@ -282,6 +274,79 @@ namespace emitbreaker.PawnControl
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Clears all cache entries for a specific race without affecting other races.
+        /// Use this instead of ResetCache() when working with a single race.
+        /// </summary>
+        public static void ClearCacheForRace(ThingDef def)
+        {
+            if (def == null) return;
+
+            Utility_DebugManager.LogNormal($"Clearing cache entries for race: {def.defName}");
+
+            // Clear race's tag cache
+            Utility_CacheManager._tagCache.Remove(def);
+
+            // Find and remove all tuple entries that reference this race
+            var keysToRemove = new List<ValueTuple<ThingDef, string>>();
+
+            // Clear work enabled cache for this race
+            foreach (var key in Utility_CacheManager._workEnabledCache.Keys)
+            {
+                if (key.Item1 == def)
+                    keysToRemove.Add(key);
+            }
+            foreach (var key in keysToRemove)
+                Utility_CacheManager._workEnabledCache.Remove(key);
+
+            // Reset and reuse list for work disabled cache
+            keysToRemove.Clear();
+            foreach (var key in Utility_CacheManager._workDisabledCache.Keys)
+            {
+                if (key.Item1 == def)
+                    keysToRemove.Add(key);
+            }
+            foreach (var key in keysToRemove)
+                Utility_CacheManager._workDisabledCache.Remove(key);
+
+            // Reset and reuse list for force draftable cache
+            keysToRemove.Clear();
+            foreach (var key in Utility_CacheManager._forceDraftableCache.Keys)
+            {
+                if (key.Item1 == def)
+                    keysToRemove.Add(key);
+            }
+            foreach (var key in keysToRemove)
+                Utility_CacheManager._forceDraftableCache.Remove(key);
+
+            // Reset and reuse list for force equip weapon cache
+            keysToRemove.Clear();
+            foreach (var key in Utility_CacheManager._forceEquipWeaponCache.Keys)
+            {
+                if (key.Item1 == def)
+                    keysToRemove.Add(key);
+            }
+            foreach (var key in keysToRemove)
+                Utility_CacheManager._forceEquipWeaponCache.Remove(key);
+
+            // Reset and reuse list for force wear apparel cache
+            keysToRemove.Clear();
+            foreach (var key in Utility_CacheManager._forceWearApparelCache.Keys)
+            {
+                if (key.Item1 == def)
+                    keysToRemove.Add(key);
+            }
+            foreach (var key in keysToRemove)
+                Utility_CacheManager._forceWearApparelCache.Remove(key);
+
+            // Also clear related caches in other managers if needed
+            Utility_CacheManager._isAnimalCache.Remove(def);
+            Utility_CacheManager._isHumanlikeCache.Remove(def);
+            Utility_CacheManager._isMechanoidCache.Remove(def);
+
+            Utility_DebugManager.LogNormal($"Cache entries for race {def.defName} successfully cleared");
         }
 
         // Add a method to clear both caches

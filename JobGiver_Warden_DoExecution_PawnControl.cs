@@ -1,10 +1,7 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
-using System.Linq;
 using Verse;
 using Verse.AI;
-using static UnityEngine.GraphicsBuffer;
 
 namespace emitbreaker.PawnControl
 {
@@ -44,11 +41,23 @@ namespace emitbreaker.PawnControl
                 pawn,
                 "Warden",
                 (p, forced) => {
-                    // Update cache with execution targets
-                    UpdateExecutionTargetsCache(p.Map);
+                    // Update prisoner cache with standardized method
+                    Utility_JobGiverManager.UpdatePrisonerCache(
+                        p.Map,
+                        ref _lastCacheUpdateTick,
+                        CACHE_UPDATE_INTERVAL,
+                        _executionTargetsCache,
+                        _reachabilityCache,
+                        FilterExecutionTargets);
 
-                    // Use custom logic to find and create a job for the best execution target
-                    return TryCreateExecutionJob(p);
+                    // Create job using standardized method
+                    return Utility_JobGiverManager.TryCreatePrisonerInteractionJob(
+                        p,
+                        _executionTargetsCache,
+                        _reachabilityCache,
+                        ValidateCanExecute,
+                        CreateExecutionJob,
+                        DISTANCE_THRESHOLDS);
                 },
                 // Additional check with JobFailReason
                 (p, setFailReason) => {
@@ -64,104 +73,52 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Update the execution targets cache periodically for improved performance
+        /// Filter function to identify prisoners marked for execution
         /// </summary>
-        private void UpdateExecutionTargetsCache(Map map)
+        private bool FilterExecutionTargets(Pawn prisoner)
         {
-            if (map == null) return;
+            // Skip invalid prisoners
+            if (prisoner?.guest == null || prisoner.Dead || !prisoner.Spawned)
+                return false;
 
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_executionTargetsCache.ContainsKey(mapId))
-            {
-                // Initialize or clear caches
-                Utility_CacheManager.ResetJobGiverCache(_executionTargetsCache, _reachabilityCache);
-                if (!_executionTargetsCache.ContainsKey(mapId))
-                    _executionTargetsCache[mapId] = new List<Pawn>();
-
-                // Find all prisoners marked for execution
-                foreach (Pawn prisoner in map.mapPawns.PrisonersOfColony)
-                {
-                    if (prisoner?.guest != null && !prisoner.Dead && prisoner.Spawned &&
-                        !prisoner.guest.IsInteractionDisabled(PrisonerInteractionModeDefOf.Execution) &&
-                        prisoner.guest.ExclusiveInteractionMode == PrisonerInteractionModeDefOf.Execution)
-                    {
-                        _executionTargetsCache[mapId].Add(prisoner);
-                    }
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
+            // Only include prisoners explicitly marked for execution
+            return !prisoner.guest.IsInteractionDisabled(PrisonerInteractionModeDefOf.Execution) &&
+                   prisoner.guest.ExclusiveInteractionMode == PrisonerInteractionModeDefOf.Execution;
         }
 
         /// <summary>
-        /// Create an execution job using the manager's bucket system
+        /// Validates if a warden can execute a specific prisoner
         /// </summary>
-        private Job TryCreateExecutionJob(Pawn pawn)
+        private bool ValidateCanExecute(Pawn prisoner, Pawn warden)
         {
-            if (pawn?.Map == null) return null;
+            // Skip if interaction mode changed
+            if (prisoner?.guest == null ||
+                prisoner.guest.ExclusiveInteractionMode != PrisonerInteractionModeDefOf.Execution ||
+                prisoner.guest.IsInteractionDisabled(PrisonerInteractionModeDefOf.Execution))
+                return false;
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_executionTargetsCache.ContainsKey(mapId) || _executionTargetsCache[mapId].Count == 0)
-                return null;
+            // Check base requirements
+            if (!ShouldTakeCareOfPrisoner(warden, prisoner) ||
+                !IsExecutionIdeoAllowed(warden, prisoner) ||
+                !warden.CanReserveAndReach(prisoner, PathEndMode.OnCell, Danger.Deadly))
+                return false;
 
-            // Step 1: Pre-filter valid execution targets (with prisoner-specific validation)
-            List<Pawn> validPrisoners = new List<Pawn>();
-            foreach (Pawn prisoner in _executionTargetsCache[mapId])
+            return true;
+        }
+
+        /// <summary>
+        /// Creates the execution job for the warden
+        /// </summary>
+        private Job CreateExecutionJob(Pawn warden, Pawn prisoner)
+        {
+            Job job = JobMaker.MakeJob(JobDefOf.PrisonerExecution, prisoner);
+
+            if (Prefs.DevMode)
             {
-                // Skip invalid prisoners
-                if (prisoner == null || prisoner.Dead || !prisoner.Spawned)
-                    continue;
-
-                // Skip if interaction mode changed
-                if (prisoner.guest == null ||
-                    prisoner.guest.ExclusiveInteractionMode != PrisonerInteractionModeDefOf.Execution ||
-                    prisoner.guest.IsInteractionDisabled(PrisonerInteractionModeDefOf.Execution))
-                    continue;
-
-                validPrisoners.Add(prisoner);
+                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job for executing prisoner {prisoner.LabelShort}");
             }
 
-            // Step 2: Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                validPrisoners,
-                (prisoner) => (prisoner.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Step 3: Find best target with specialized validation
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (prisoner, p) =>
-                {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(prisoner, p, requiresDesignator: false))
-                        return false;
-
-                    return !prisoner.IsForbidden(p) &&
-                                ShouldTakeCareOfPrisoner(p, prisoner) &&
-                                IsExecutionIdeoAllowed(p, prisoner) &&
-                                p.CanReserveAndReach(prisoner, PathEndMode.OnCell, Danger.Deadly);
-                },
-                _reachabilityCache
-            );
-
-            // Step 4: Create job if we found a target
-            if (targetPrisoner != null)
-            {
-                Job job = JobMaker.MakeJob(JobDefOf.PrisonerExecution, targetPrisoner);
-
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job for executing prisoner {targetPrisoner.LabelShort}");
-
-                return job;
-            }
-
-            return null;
+            return job;
         }
 
         /// <summary>
@@ -213,6 +170,7 @@ namespace emitbreaker.PawnControl
         {
             Utility_CacheManager.ResetJobGiverCache(_executionTargetsCache, _reachabilityCache);
             _lastCacheUpdateTick = -999;
+            ResetStaticData();
         }
 
         public override string ToString()

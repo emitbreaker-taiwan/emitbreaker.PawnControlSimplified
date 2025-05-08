@@ -110,9 +110,9 @@ namespace emitbreaker.PawnControl
                 // Use the utility method if available
                 Job job = EnterPortalUtility.JobOnPortal(pawn, targetPortal);
                 
-                if (job != null && Prefs.DevMode)
+                if (job != null)
                 {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to haul to portal {targetPortal.LabelCap}");
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to haul to portal {targetPortal.LabelCap}");
                 }
                 
                 return job;

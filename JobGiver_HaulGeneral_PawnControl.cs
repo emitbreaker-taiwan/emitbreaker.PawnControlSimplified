@@ -170,9 +170,9 @@ namespace emitbreaker.PawnControl
                 // Create haul job
                 Job job = HaulAIUtility.HaulToCellStorageJob(pawn, targetThing, storeCell, false);
 
-                if (job != null && Prefs.DevMode)
+                if (job != null)
                 {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created general hauling job for {targetThing.Label} to {storeCell}");
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created general hauling job for {targetThing.Label} to {storeCell}");
                 }
 
                 return job;

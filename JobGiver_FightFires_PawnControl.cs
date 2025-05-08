@@ -172,10 +172,7 @@ namespace emitbreaker.PawnControl
             if (targetFire != null)
             {
                 Job job = JobMaker.MakeJob(JobDefOf.BeatFire, targetFire);
-
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job for fighting fire at {targetFire.Position}");
-
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job for fighting fire at {targetFire.Position}");
                 return job;
             }
 

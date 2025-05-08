@@ -153,12 +153,7 @@ namespace emitbreaker.PawnControl
             if (targetCarrier != null)
             {
                 Job job = JobMaker.MakeJob(JobDefOf.UnloadInventory, targetCarrier);
-
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to unload inventory of {targetCarrier.LabelCap}");
-                }
-
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to unload inventory of {targetCarrier.LabelCap}");
                 return job;
             }
 
