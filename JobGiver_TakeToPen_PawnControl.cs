@@ -228,8 +228,7 @@ namespace emitbreaker.PawnControl
                         pawn, targetAnimal, targetPen, false, ropingPriority, out failReason);
                     if (job != null)
                     {
-                        if (Prefs.DevMode)
-                            Log.Message($"[PawnControl] {pawn.LabelShort} created job to take {targetAnimal.LabelShort} to pen {targetPen.parent.Label}");
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take {targetAnimal.LabelShort} to pen {targetPen.parent.Label}");
                         return job;
                     }
                 }
@@ -241,10 +240,7 @@ namespace emitbreaker.PawnControl
                 {
                     Job hitchJob = JobMaker.MakeJob(JobDefOf.RopeRoamerToHitchingPost, 
                         (LocalTargetInfo)targetAnimal, (LocalTargetInfo)hitchingPost);
-                    
-                    if (Prefs.DevMode)
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to take {targetAnimal.LabelShort} to hitching post");
-                    
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take {targetAnimal.LabelShort} to hitching post");
                     return hitchJob;
                 }
 
@@ -262,9 +258,7 @@ namespace emitbreaker.PawnControl
                         
                         if (job != null)
                         {
-                            if (Prefs.DevMode)
-                                Log.Message($"[PawnControl] {pawn.LabelShort} created job to take {targetAnimal.LabelShort} to unenclosed pen {targetPen.parent.Label}");
-                            
+                            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take {targetAnimal.LabelShort} to unenclosed pen {targetPen.parent.Label}");
                             return job;
                         }
                     }
@@ -275,10 +269,7 @@ namespace emitbreaker.PawnControl
                     AnimalPenUtility.RopeAttachmentInteractionCell(pawn, targetAnimal) != IntVec3.Invalid)
                 {
                     Job unropeJob = JobMaker.MakeJob(JobDefOf.Unrope, (LocalTargetInfo)targetAnimal);
-                    
-                    if (Prefs.DevMode)
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to unrope {targetAnimal.LabelShort}");
-                    
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to unrope {targetAnimal.LabelShort}");
                     return unropeJob;
                 }
             }

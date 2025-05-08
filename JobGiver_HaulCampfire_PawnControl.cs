@@ -30,7 +30,7 @@ namespace emitbreaker.PawnControl
             }
             else
             {
-                Log.Error("WorkGiverDef DoBillsHaulCampfire not found.");
+                Utility_DebugManager.LogError("WorkGiverDef DoBillsHaulCampfire not found.");
                 return null;
             }
         }
@@ -118,10 +118,7 @@ namespace emitbreaker.PawnControl
                         }
                     }
 
-                    if (Prefs.DevMode)
-                    {
-                        Log.Warning("[PawnControl] Could not find DoBillsHaulCampfire WorkGiverDef, using fallback method for campfires");
-                    }
+                    Utility_DebugManager.LogWarning("Could not find DoBillsHaulCampfire WorkGiverDef, using fallback method for campfires");
                 }
 
                 _lastCacheUpdateTick = currentTick;

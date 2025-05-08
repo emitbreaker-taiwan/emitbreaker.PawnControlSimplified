@@ -201,7 +201,7 @@ namespace emitbreaker.PawnControl
                         if (FoodUtility.MoodFromIngesting(targetPatient, foodSource, FoodUtility.GetFinalIngestibleDef(foodSource)) < 0)
                             foodInfo = " (disliked food)";
 
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to feed {targetPatient.LabelShort}{foodInfo}");
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to feed {targetPatient.LabelShort}{foodInfo}");
                     }
 
                     return job;

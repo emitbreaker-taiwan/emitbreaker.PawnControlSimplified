@@ -23,6 +23,14 @@ namespace emitbreaker.PawnControl
             return 5.5f;
         }
 
+        /// <summary>
+        /// Reset caches when loading game or changing maps
+        /// </summary>
+        public static new void ResetCache()
+        {
+            JobGiver_TakeToPen_PawnControl.ResetCache();
+        }
+
         public override string ToString()
         {
             return "JobGiver_RebalanceAnimalsInPens_PawnControl";

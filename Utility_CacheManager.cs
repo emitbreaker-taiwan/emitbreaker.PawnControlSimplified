@@ -1,12 +1,13 @@
-﻿using System;
+﻿using RimWorld;
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Verse.AI;
-using Verse;
-using RimWorld;
 using UnityEngine;
+using Verse;
+using Verse.AI;
 
 namespace emitbreaker.PawnControl
 {
@@ -14,6 +15,8 @@ namespace emitbreaker.PawnControl
     {
         public static readonly Dictionary<ThingDef, NonHumanlikePawnControlExtension> _modExtensionCache = new Dictionary<ThingDef, NonHumanlikePawnControlExtension>();
         public static readonly Dictionary<ThingDef, HashSet<string>> _tagCache = new Dictionary<ThingDef, HashSet<string>>();
+
+        public static readonly ConcurrentDictionary<ThingDef, bool> _forcedAnimalCache = new ConcurrentDictionary<ThingDef, bool>();
 
         // Caching ForceColonist Pawns
         private static readonly Dictionary<Map, List<Pawn>> _colonistLikePawnCache = new Dictionary<Map, List<Pawn>>();
@@ -43,6 +46,8 @@ namespace emitbreaker.PawnControl
         public static Dictionary<ThingDef, bool> _allowWorkTagCache = new Dictionary<ThingDef, bool>();
         public static Dictionary<ThingDef, bool> _blockWorkTagCache = new Dictionary<ThingDef, bool>();
         public static Dictionary<ThingDef, bool> _combinedWorkTagCache = new Dictionary<ThingDef, bool>();
+
+        public static readonly Dictionary<int, bool> _bioTabVisibilityCache = new Dictionary<int, bool>();
 
         public static DutyDef GetDuty(string defName)
         {
@@ -96,31 +101,77 @@ namespace emitbreaker.PawnControl
             return modExtension;
         }
 
+        public static void UpdateModExtensionCache(ThingDef def, NonHumanlikePawnControlExtension extension)
+        {
+            // Update the cache with the modified extension
+            if (_modExtensionCache.ContainsKey(def))
+            {
+                _modExtensionCache[def] = extension;
+            }
+        }
+
         public static void PreloadModExtensions()
         {
+            int loadedCount = 0;
+
             foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
                 if (def?.race == null) continue;
 
-                var ext = def.GetModExtension<NonHumanlikePawnControlExtension>();
-                if (ext != null)
+                var modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
+                if (modExtension != null)
                 {
-                    _modExtensionCache[def] = ext;
+                    _modExtensionCache[def] = modExtension;
+                    loadedCount++;
 
                     // ✅ Add this line to enable skill passion injection support
-                    ext.CacheSkillPassions();
+                    modExtension.CacheSkillPassions();
                 }
             }
-            if (Prefs.DevMode)
+
+            Utility_DebugManager.LogNormal($"Non Humanlike Pawn Controller refreshed: {loadedCount} extensions loaded.");
+        }
+
+        public static void PreloadModExtensionForRace(ThingDef def)
+        {
+            if (def == null) return;
+
+            // Look for our extension type in the mod extensions
+            if (def.modExtensions != null)
             {
-                Log.Message($"[PawnControl] Non Humanlike Pawn Controller refreshed: {_modExtensionCache.Count} extensions loaded.");
+                foreach (var ext in def.modExtensions)
+                {
+                    if (ext is NonHumanlikePawnControlExtension controlExt)
+                    {
+                        // Found an extension, update the cache
+                        _modExtensionCache[def] = controlExt;
+                        return;
+                    }
+                }
             }
+
+            // No extension found, ensure null is cached
+            _modExtensionCache[def] = null;
         }
 
         public static void ClearModExtensionCache()
         {
             _modExtensionCache.Clear();
-            Log.Message("[PawnControl] Cleared modExtensionCache.");
+            Utility_DebugManager.LogNormal("Cleared modExtensionCache.");
+        }
+
+        /// <summary>
+        /// Clears cached <see cref="NonHumanlikePawnControlExtension"/> for a specific ThingDef.
+        /// </summary>
+        public static void ClearModExtensionCachePerInstance(ThingDef def)
+        {
+            if (def == null)
+            {
+                return;
+            }
+
+            _modExtensionCache.Remove(def); // UPDATED: remove only this def’s entry
+            Utility_DebugManager.LogNormal($"Cleared modExtensionCache for {def.defName}."); // UPDATED: dev‐mode log
         }
 
         /// <summary>
@@ -221,11 +272,11 @@ namespace emitbreaker.PawnControl
             bool result;
             if (!_apparelRestrictionCache.TryGetValue(pawn.def, out result))
             {
-                var physicalModExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
+                var modExtension = GetModExtension(pawn.def);
 
-                if (physicalModExtension != null)
+                if (modExtension != null)
                 {
-                    result = physicalModExtension != null && physicalModExtension.restrictApparelByBodyType;
+                    result = modExtension != null && modExtension.restrictApparelByBodyType;
                 }
 
                 _apparelRestrictionCache[pawn.def] = result;

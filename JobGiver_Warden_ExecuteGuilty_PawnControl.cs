@@ -33,11 +33,23 @@ namespace emitbreaker.PawnControl
                 pawn,
                 "Warden",
                 (p, forced) => {
-                    // Update guilty pawn cache
-                    UpdateGuiltyPawnCache(p.Map);
+                    // Update guilty pawn cache with standardized method
+                    Utility_JobGiverManager.UpdatePrisonerCache(
+                        p.Map,
+                        ref _lastCacheUpdateTick,
+                        CACHE_UPDATE_INTERVAL,
+                        _guiltyPawnCache,
+                        _reachabilityCache,
+                        FilterGuiltyColonists);
 
-                    // Find and create execution job
-                    return TryCreateExecutionJob(p);
+                    // Create job using standardized method
+                    return Utility_JobGiverManager.TryCreatePrisonerInteractionJob(
+                        p,
+                        _guiltyPawnCache,
+                        _reachabilityCache,
+                        ValidateCanExecuteGuilty,
+                        CreateGuiltyExecutionJob,
+                        DISTANCE_THRESHOLDS);
                 },
                 // Additional check for violent capability
                 (p, setFailReason) => {
@@ -52,100 +64,53 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Updates the cache of guilty pawns awaiting execution
+        /// Filter function to identify guilty colonists awaiting execution
         /// </summary>
-        private void UpdateGuiltyPawnCache(Map map)
+        private bool FilterGuiltyColonists(Pawn pawn)
         {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            // Only update periodically to save performance
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_guiltyPawnCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_guiltyPawnCache.ContainsKey(mapId))
-                    _guiltyPawnCache[mapId].Clear();
-                else
-                    _guiltyPawnCache[mapId] = new List<Pawn>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Find all guilty colonists
-                foreach (Pawn pawn in map.mapPawns.FreeColonistsSpawned)
-                {
-                    if (pawn?.guilt != null && pawn.guilt.IsGuilty && pawn.guilt.awaitingExecution &&
-                        !pawn.InAggroMentalState && !pawn.IsFormingCaravan())
-                    {
-                        _guiltyPawnCache[mapId].Add(pawn);
-                    }
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
+            // Note: This is called with colonists, not prisoners
+            return pawn?.guilt != null &&
+                   pawn.guilt.IsGuilty &&
+                   pawn.guilt.awaitingExecution &&
+                   !pawn.InAggroMentalState &&
+                   !pawn.IsFormingCaravan();
         }
 
         /// <summary>
-        /// Create an execution job using distance-based bucketing
+        /// Validates if a warden can execute a guilty colonist
         /// </summary>
-        private Job TryCreateExecutionJob(Pawn pawn)
+        private bool ValidateCanExecuteGuilty(Pawn target, Pawn executor)
         {
-            if (pawn?.Map == null) return null;
+            // Skip if no longer valid target
+            if (target?.guilt == null ||
+                !target.guilt.IsGuilty ||
+                !target.guilt.awaitingExecution ||
+                target.InAggroMentalState ||
+                target.IsFormingCaravan())
+                return false;
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_guiltyPawnCache.ContainsKey(mapId) || _guiltyPawnCache[mapId].Count == 0)
-                return null;
+            // Check if executor can handle this execution
+            if (target.IsForbidden(executor) ||
+                !executor.CanReserveAndReach(target, PathEndMode.Touch, executor.NormalMaxDanger()))
+                return false;
 
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                _guiltyPawnCache[mapId],
-                (target) => (target.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
+            // Check if this action is allowed by ideology system
+            return new HistoryEvent(HistoryEventDefOf.ExecutedColonist, executor.Named(HistoryEventArgsNames.Doer)).Notify_PawnAboutToDo_Job();
+        }
 
-            // Validation function for guilty pawns
-            Pawn targetPawn = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (target, p) =>
-                {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(target, p, requiresDesignator: false))
-                        return false;
+        /// <summary>
+        /// Creates the execution job for the warden
+        /// </summary>
+        private Job CreateGuiltyExecutionJob(Pawn executor, Pawn target)
+        {
+            Job job = JobMaker.MakeJob(JobDefOf.GuiltyColonistExecution, target);
 
-                    return !target.IsForbidden(p) &&
-                           target?.guilt != null &&
-                           target.guilt.IsGuilty &&
-                           target.guilt.awaitingExecution &&
-                           !target.InAggroMentalState &&
-                           !target.IsFormingCaravan() &&
-                           p.CanReserveAndReach(target, PathEndMode.Touch, p.NormalMaxDanger()) &&
-                           new HistoryEvent(HistoryEventDefOf.ExecutedColonist, p.Named(HistoryEventArgsNames.Doer)).Notify_PawnAboutToDo_Job();
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
-            if (targetPawn != null)
+            if (Prefs.DevMode)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.GuiltyColonistExecution, targetPawn);
-
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to execute guilty colonist {targetPawn.LabelShort}");
-                }
-
-                return job;
+                Utility_DebugManager.LogNormal($"{executor.LabelShort} created job to execute guilty colonist {target.LabelShort}");
             }
 
-            return null;
+            return job;
         }
 
         /// <summary>

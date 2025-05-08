@@ -86,9 +86,7 @@ namespace emitbreaker.PawnControl
                         {
                             // If IsForbidden throws, assume it's not forbidden
                             isForbidden = false;
-
-                            if (Prefs.DevMode)
-                                Log.Warning($"[PawnControl] Error checking if corpse {corpse.InnerPawn?.LabelShort ?? "unknown"} is forbidden. Assuming not forbidden.");
+                            Utility_DebugManager.LogWarning($"Error checking if corpse {corpse.InnerPawn?.LabelShort ?? "unknown"} is forbidden. Assuming not forbidden.");
                         }
 
                         if (isForbidden)
@@ -105,8 +103,7 @@ namespace emitbreaker.PawnControl
                         }
                         catch (System.Exception ex)
                         {
-                            if (Prefs.DevMode)
-                                Log.Warning($"[PawnControl] Error checking if corpse {corpse.InnerPawn?.LabelShort ?? "unknown"} can be hauled: {ex.Message}");
+                            Utility_DebugManager.LogWarning($"Error checking if corpse {corpse.InnerPawn?.LabelShort ?? "unknown"} can be hauled: {ex.Message}");
                             canBeHauled = false;
                         }
 
@@ -128,13 +125,12 @@ namespace emitbreaker.PawnControl
                     catch (System.Exception ex)
                     {
                         // Catch any other exceptions to prevent crashes
-                        if (Prefs.DevMode)
-                            Log.Error($"[PawnControl] Error processing corpse for hauling: {ex}");
+                        Utility_DebugManager.LogError($"Error processing corpse for hauling: {ex}");
                     }
                 }
 
-                if (Prefs.DevMode && _haulableCorpsesCache[mapId].Count > 0)
-                    Log.Message($"[PawnControl] Found {_haulableCorpsesCache[mapId].Count} haulable corpses on map {mapId}");
+                if (_haulableCorpsesCache[mapId].Count > 0)
+                    Utility_DebugManager.LogNormal($"Found {_haulableCorpsesCache[mapId].Count} haulable corpses on map {mapId}");
 
                 _lastCacheUpdateTick = currentTick;
             }
@@ -231,29 +227,21 @@ namespace emitbreaker.PawnControl
                     {
                         job = JobMaker.MakeJob(JobDefOf.HaulToContainer, targetCorpse, grave);
                         job.count = 1;
-
-                        if (Prefs.DevMode)
-                        {
-                            Log.Message($"[PawnControl] {pawn.LabelShort} created job to bury {targetCorpse.InnerPawn.LabelShort}");
-                        }
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to bury {targetCorpse.InnerPawn.LabelShort}");
                     }
                     else if (container != null && container is Thing containerThing)
                     {
                         job = JobMaker.MakeJob(JobDefOf.HaulToContainer, targetCorpse, containerThing);
                         job.count = 1;
-
-                        if (Prefs.DevMode)
-                        {
-                            Log.Message($"[PawnControl] {pawn.LabelShort} created job to haul {targetCorpse.InnerPawn.LabelShort} to container");
-                        }
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to haul {targetCorpse.InnerPawn.LabelShort} to container");
                     }
                     else
                     {
                         job = HaulAIUtility.HaulToCellStorageJob(pawn, targetCorpse, storeCell, false);
 
-                        if (Prefs.DevMode && job != null)
+                        if (job != null)
                         {
-                            Log.Message($"[PawnControl] {pawn.LabelShort} created job to haul {targetCorpse.InnerPawn.LabelShort} to stockpile");
+                            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to haul {targetCorpse.InnerPawn.LabelShort} to stockpile");
                         }
                     }
 

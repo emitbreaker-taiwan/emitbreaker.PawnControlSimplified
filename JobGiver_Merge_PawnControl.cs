@@ -160,12 +160,7 @@ namespace emitbreaker.PawnControl
                         Job job = JobMaker.MakeJob(JobDefOf.HaulToCell, thing, heldThing.Position);
                         job.count = Mathf.Min(heldThing.def.stackLimit - heldThing.stackCount, thing.stackCount);
                         job.haulMode = HaulMode.ToCellStorage;
-
-                        if (Prefs.DevMode)
-                        {
-                            Log.Message($"[PawnControl] {pawn.LabelShort} created job to merge {thing.Label} ({thing.stackCount}) with {heldThing.Label} ({heldThing.stackCount})");
-                        }
-
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to merge {thing.Label} ({thing.stackCount}) with {heldThing.Label} ({heldThing.stackCount})");
                         return job;
                     }
                 }

@@ -117,11 +117,7 @@ namespace emitbreaker.PawnControl
                         Job job = JobMaker.MakeJob(JobDefOf.PrepareCaravan_GatherItems, thingToHaul);
                         job.lord = lord;
 
-                        if (Prefs.DevMode)
-                        {
-                            Log.Message($"[PawnControl] {pawn.LabelShort} created job to gather {thingToHaul.LabelCap} for caravan");
-                        }
-
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to gather {thingToHaul.LabelCap} for caravan");
                         return job;
                     }
                 }
@@ -145,7 +141,7 @@ namespace emitbreaker.PawnControl
                 catch (Exception ex)
                 {
                     // Fallback to our own implementation if the utility method fails
-                    Log.Warning($"[PawnControl] Error using GatherItemsForCaravanUtility.FindThingToHaul: {ex.Message}");
+                    Utility_DebugManager.LogWarning($"Error using GatherItemsForCaravanUtility.FindThingToHaul: {ex.Message}");
                 }
             }
 

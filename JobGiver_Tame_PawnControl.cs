@@ -202,10 +202,7 @@ namespace emitbreaker.PawnControl
             {
                 Job job = JobMaker.MakeJob(JobDefOf.Tame, targetAnimal, null, foodSource);
                 job.count = foodCount;
-
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to tame {targetAnimal.LabelShort}");
-
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to tame {targetAnimal.LabelShort}");
                 return job;
             }
 

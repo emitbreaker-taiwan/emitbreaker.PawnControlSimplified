@@ -53,8 +53,7 @@ namespace emitbreaker.PawnControl
             // Skip if no plants within efficient distance
             if (nearbyPlants.Count == 0)
             {
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] {pawn.LabelShort} found no plants to cut within efficient distance ({Math.Sqrt(MAX_EFFICIENT_DISTANCE_SQ)} tiles)");
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} found no plants to cut within efficient distance ({Math.Sqrt(MAX_EFFICIENT_DISTANCE_SQ)} tiles)");
                 return null;
             }
 
@@ -110,10 +109,7 @@ namespace emitbreaker.PawnControl
             if (targetPlant != null)
             {
                 Job job = JobMaker.MakeJob(JobDefOf.CutPlant, targetPlant);
-
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to cut {targetPlant.Label}");
-
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to cut {targetPlant.Label}");
                 return job;
             }
 

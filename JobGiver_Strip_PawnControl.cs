@@ -153,9 +153,8 @@ namespace emitbreaker.PawnControl
                 
                 if (Prefs.DevMode)
                 {
-                    string targetDesc = targetThing is Corpse corpse ? 
-                        $"corpse of {corpse.InnerPawn.LabelCap}" : targetThing.LabelCap;
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to strip {targetDesc}");
+                    string targetDesc = targetThing is Corpse corpse ? $"corpse of {corpse.InnerPawn.LabelCap}" : targetThing.LabelCap;
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to strip {targetDesc}");
                 }
                 
                 return job;

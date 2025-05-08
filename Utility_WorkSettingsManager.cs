@@ -46,10 +46,7 @@ namespace emitbreaker.PawnControl
             // ✅ Ensure WorkSettings exist
             EnsureWorkSettingsInitialized(pawn);
 
-            if (Prefs.DevMode && modExtension.debugMode)
-            {
-                Log.Message($"[PawnControl] Completed FullInitializePawn for {pawn.LabelShortCap} (forceLock={forceLock})");
-            }
+            Utility_DebugManager.LogNormal($"Completed FullInitializePawn for {pawn.LabelShortCap} (forceLock={forceLock})");
 
             // Add at the end of the method
             if (Prefs.DevMode && modExtension.debugMode && pawn?.thinker?.MainThinkNodeRoot != null)
@@ -88,10 +85,7 @@ namespace emitbreaker.PawnControl
                 // ✅ Skip full reinitialization if pawn already has static ThinkTree assigned
                 if (modExtension != null && !string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
                 {
-                    if (Prefs.DevMode && modExtension.debugMode)
-                    {
-                        Log.Message($"[PawnControl] Skipping FullInitialize for {pawn.LabelShortCap} (static ThinkTree '{modExtension.mainWorkThinkTreeDefName}' already assigned).");
-                    }
+                    Utility_DebugManager.LogNormal($"Skipping FullInitialize for {pawn.LabelShortCap} (static ThinkTree '{modExtension.mainWorkThinkTreeDefName}' already assigned).");
                     continue;
                 }
 
@@ -101,14 +95,11 @@ namespace emitbreaker.PawnControl
                 }
                 catch (Exception ex)
                 {
-                    Log.Warning($"[PawnControl] FullInitializePawn failed for {pawn?.LabelShortCap ?? "unknown pawn"}: {ex.Message}");
+                    Utility_DebugManager.LogWarning($"FullInitializePawn failed for {pawn?.LabelShortCap ?? "unknown pawn"}: {ex.Message}");
                 }
             }
 
-            if (Prefs.DevMode)
-            {
-                Log.Message($"[PawnControl] Completed FullInitializeAllEligiblePawns on map {map.Index} (forceLock={forceLock}).");
-            }
+            Utility_DebugManager.LogNormal($"Completed FullInitializeAllEligiblePawns on map {map.Index} (forceLock={forceLock}).");
         }
 
         /// <summary>
@@ -125,10 +116,8 @@ namespace emitbreaker.PawnControl
                     return; // No mod extension found, nothing to do
                 }
 
-                if (Prefs.DevMode && modExtension.debugMode)
-                {
-                    Log.Warning($"[PawnControl] WorkSettings missing for {pawn?.LabelShort ?? "null pawn"}. Attempting to create.");
-                }
+                Utility_DebugManager.LogWarning($"WorkSettings missing for {pawn?.LabelShort ?? "null pawn"}. Attempting to create.");
+
                 // First ensure skills exist if needed (skills should be initialized before work settings)
                 if (Utility_SkillManager.ShouldHaveSkills(pawn))
                 {
@@ -173,16 +162,10 @@ namespace emitbreaker.PawnControl
             {
                 EnsureWorkSettingsInitialized(pawn);
 
-                if (Prefs.DevMode && modExtension.debugMode)
-                {
-                    Log.Warning($"[PawnControl] SafeEnsurePawnReadyForWork: WorkSettings recreated for {pawn.LabelCap}.");
-                }
+                Utility_DebugManager.LogWarning($"SafeEnsurePawnReadyForWork: WorkSettings recreated for {pawn.LabelCap}.");
             }
-
-            if (Prefs.DevMode && modExtension.debugMode)
-            {
-                Log.Message($"[PawnControl] SafeEnsurePawnReadyForWork completed for {pawn.LabelCap}.");
-            }
+            
+            Utility_DebugManager.LogNormal($"SafeEnsurePawnReadyForWork completed for {pawn.LabelCap}.");
 
             // ✅ Mark as completed
             _workgiverReplacementDone.Add(pawn);
@@ -218,10 +201,7 @@ namespace emitbreaker.PawnControl
                     // First try regular initialization
                     if (!pawn.workSettings.Initialized)
                     {
-                        if (Prefs.DevMode && modExtension.debugMode)
-                        {
-                            Log.Warning($"[PawnControl] WorkSettings not initialized for {pawn.LabelCap}. Initializing...");
-                        }
+                        Utility_DebugManager.LogWarning($"WorkSettings not initialized for {pawn.LabelCap}. Initializing...");
                         pawn.workSettings.EnableAndInitialize();
                     }
                     
@@ -232,28 +212,19 @@ namespace emitbreaker.PawnControl
                     if (normalList == null || normalList.Count == 0 || 
                         emergencyList == null || emergencyList.Count == 0)
                     {
-                        if (Prefs.DevMode && modExtension.debugMode)
-                        {
-                            Log.Warning($"[PawnControl] WorkGiver lists still empty after initialization for {pawn.LabelCap}. Forcing rebuild...");
-                        }
+                        Utility_DebugManager.LogWarning($"WorkGiver lists still empty after initialization for {pawn.LabelCap}. Forcing rebuild...");
                         // Force rebuild via reflection
                         MethodInfo cacheMethod = AccessTools.Method(typeof(Pawn_WorkSettings), "CacheWorkGiversInOrder");
                         if (cacheMethod != null)
                         {
                             cacheMethod.Invoke(pawn.workSettings, null);
-                            if (Prefs.DevMode && modExtension.debugMode)
-                            {
-                                Log.Message($"[PawnControl] Forced WorkGiver cache rebuild for {pawn.LabelCap}");
-                            }
+                            Utility_DebugManager.LogNormal($"Forced WorkGiver cache rebuild for {pawn.LabelCap}");
 
                             // Add all WorkGivers manually if still empty
                             normalList = pawn.workSettings.WorkGiversInOrderNormal;
                             if (normalList == null || normalList.Count == 0)
                             {
-                                if (Prefs.DevMode && modExtension.debugMode)
-                                {
-                                    Log.Warning($"[PawnControl] Creating new WorkGiver lists for {pawn.LabelCap}");
-                                }
+                                Utility_DebugManager.LogWarning($"Creating new WorkGiver lists for {pawn.LabelCap}");
 
                                 // Create new lists if needed
                                 var normalField = AccessTools.Field(typeof(Pawn_WorkSettings), "workGiversInOrderNormal");
@@ -277,10 +248,7 @@ namespace emitbreaker.PawnControl
                                     
                                     normalField.SetValue(pawn.workSettings, newNormalList);
                                     emergencyField.SetValue(pawn.workSettings, newEmergencyList);
-                                    if (Prefs.DevMode && modExtension.debugMode)
-                                    {
-                                        Log.Message($"[PawnControl] Created new WorkGiver lists with {newNormalList.Count} normal and {newEmergencyList.Count} emergency givers");
-                                    }
+                                    Utility_DebugManager.LogNormal($"Created new WorkGiver lists with {newNormalList.Count} normal and {newEmergencyList.Count} emergency givers");
                                 }
                             }
                         }
@@ -289,7 +257,7 @@ namespace emitbreaker.PawnControl
             }
             catch (Exception ex)
             {
-                Log.Error($"[PawnControl] Exception in EnsureWorkGiversPopulated: {ex}");
+                Utility_DebugManager.LogError($"Exception in EnsureWorkGiversPopulated: {ex}");
             }
         }
     }

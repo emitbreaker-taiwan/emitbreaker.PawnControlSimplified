@@ -207,10 +207,7 @@ namespace emitbreaker.PawnControl
             if (targetAnimal != null)
             {
                 Job job = JobMaker.MakeJob(JobDefOf.Train, targetAnimal);
-
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to train {targetAnimal.LabelShort}");
-
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to train {targetAnimal.LabelShort}");
                 return job;
             }
 
@@ -232,10 +229,7 @@ namespace emitbreaker.PawnControl
             
             Job job = JobMaker.MakeJob(JobDefOf.TakeInventory, foodSource);
             job.count = numToTake;
-            
-            if (Prefs.DevMode)
-                Log.Message($"[PawnControl] {pawn.LabelShort} created job to take food for training {targetAnimal.LabelShort}");
-                
+            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take food for training {targetAnimal.LabelShort}");
             return job;
         }
 
@@ -258,6 +252,7 @@ namespace emitbreaker.PawnControl
         {
             Utility_CacheManager.ResetJobGiverCache(_trainableAnimalCache, _reachabilityCache);
             _lastCacheUpdateTick = -999;
+            ResetStaticData();
         }
 
         public override string ToString()

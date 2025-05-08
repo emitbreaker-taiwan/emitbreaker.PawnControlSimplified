@@ -148,12 +148,7 @@ namespace emitbreaker.PawnControl
             {
                 Job job = JobMaker.MakeJob(JobDefOf.ReleaseAnimalToWild, targetAnimal);
                 job.count = 1;
-
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to release {targetAnimal.LabelShort} to the wild");
-                }
-
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to release {targetAnimal.LabelShort} to the wild");
                 return job;
             }
 

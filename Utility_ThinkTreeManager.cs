@@ -66,7 +66,7 @@ namespace emitbreaker.PawnControl
         {
             if (def == null)
             {
-                Log.Warning($"[PawnControl] {def.label} is null.");
+                Utility_DebugManager.LogWarning($"{def.label} is null.");
                 return false;
             }
 
@@ -98,7 +98,7 @@ namespace emitbreaker.PawnControl
         {
             if (def == null)
             {
-                Log.Warning($"[PawnControl] {def.label} is null.");
+                Utility_DebugManager.LogWarning($"{def.label} is null.");
                 return false;
             }
 
@@ -177,15 +177,11 @@ namespace emitbreaker.PawnControl
                     if (thinkTree != null)
                     {
                         def.race.thinkTreeMain = thinkTree;
-
-                        if (Prefs.DevMode)
-                        {
-                            Log.Message($"[PawnControl] Replaced MainThinkTree '{modExtension.mainWorkThinkTreeDefName}' to {def.defName}.");
-                        }
+                        Utility_DebugManager.LogNormal($"Replaced MainThinkTree '{modExtension.mainWorkThinkTreeDefName}' to {def.defName}.");
                     }
-                    else if (Prefs.DevMode)
+                    else
                     {
-                        Log.Warning($"[PawnControl] MainThinkTreeDef '{modExtension.mainWorkThinkTreeDefName}' not found for {def.defName}.");
+                        Utility_DebugManager.LogWarning($"MainThinkTreeDef '{modExtension.mainWorkThinkTreeDefName}' not found for {def.defName}.");
                     }
                 }
 
@@ -197,10 +193,7 @@ namespace emitbreaker.PawnControl
                 //        if (!string.IsNullOrWhiteSpace(additionalDefName))
                 //        {
                 //            TryInjectSubtreeToRace(def, additionalDefName);
-                //            if (Prefs.DevMode)
-                //            {
-                //                Log.Message($"[PawnControl] Injected additional ThinkTree '{additionalDefName}' into '{def.race.thinkTreeMain?.defName}' for {def.defName}.");
-                //            }
+                //            Utility_DebugManager.LogNormal($"Injected additional ThinkTree '{additionalDefName}' into '{def.race.thinkTreeMain?.defName}' for {def.defName}.");
                 //        }
                 //    }
                 //}
@@ -212,23 +205,16 @@ namespace emitbreaker.PawnControl
                     if (constantTree != null)
                     {
                         def.race.thinkTreeConstant = constantTree;
-
-                        if (Prefs.DevMode)
-                        {
-                            Log.Message($"[PawnControl] Replaced ConstantThinkTree '{modExtension.constantThinkTreeDefName}' to {def.defName}.");
-                        }
+                        Utility_DebugManager.LogNormal($"Replaced ConstantThinkTree '{modExtension.constantThinkTreeDefName}' to {def.defName}.");
                     }
-                    else if (Prefs.DevMode)
+                    else
                     {
-                        Log.Warning($"[PawnControl] ConstantThinkTreeDef '{modExtension.constantThinkTreeDefName}' not found for {def.defName}.");
+                        Utility_DebugManager.LogWarning($"ConstantThinkTreeDef '{modExtension.constantThinkTreeDefName}' not found for {def.defName}.");
                     }
                 }
             }
 
-            if (Prefs.DevMode)
-            {
-                Log.Message("[PawnControl] Finished static ThinkTree injection phase.");
-            }
+            Utility_DebugManager.LogNormal("Finished static ThinkTree injection phase.");
         }
 
         public static void ValidateThinkTree(Pawn pawn)
@@ -251,13 +237,240 @@ namespace emitbreaker.PawnControl
                         hasConditionalColonist = true;
                 }
 
-                Log.Message($"[PawnControl DEBUG] ThinkTree validation for {pawn.LabelCap}:");
-                Log.Message($"- Has JobGiver_Work: {hasWorkGiver}");
-                Log.Message($"- Has ConditionalColonist: {hasConditionalColonist}");
+                Utility_DebugManager.LogNormal($"[PawnControl DEBUG] ThinkTree validation for {pawn.LabelCap}:");
+                Utility_DebugManager.LogNormal($"- Has JobGiver_Work: {hasWorkGiver}");
+                Utility_DebugManager.LogNormal($"- Has ConditionalColonist: {hasConditionalColonist}");
             }
             catch (Exception ex)
             {
-                Log.Error($"[PawnControl] ThinkTree validation error: {ex}");
+                Utility_DebugManager.LogError($"ThinkTree validation error: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Resets a pawn's think trees back to vanilla defaults
+        /// </summary>
+        public static void ResetThinkTreeToVanilla(Pawn pawn, string originalMainTreeName = null, string originalConstTreeName = null)
+        {
+            if (pawn == null) return;
+
+            // Check if there's a mod extension with stored original think trees
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            bool debugLogging = modExtension?.debugMode == true;
+
+            try
+            {
+                // ---- MAIN THINK TREE HANDLING ----
+                // Get the original main think tree - first check passed parameters
+                ThinkTreeDef mainThinkTree = null;
+
+                // First try passed parameters (useful when mod extension is already removed)
+                if (!string.IsNullOrEmpty(originalMainTreeName))
+                {
+                    mainThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(originalMainTreeName);
+                    if (mainThinkTree != null)
+                    {
+                        if (debugLogging)
+                            Utility_DebugManager.LogNormal($"Using provided original main think tree: {mainThinkTree.defName} for {pawn.LabelShort}");
+                    }
+                    else
+                    {
+                        if (debugLogging)
+                            Utility_DebugManager.LogWarning($"Provided original main think tree '{originalMainTreeName}' not found - using fallbacks");
+                    }
+                }
+
+                // Then check mod extension if available
+                if (mainThinkTree == null)
+                {
+                    if (modExtension != null && !string.IsNullOrEmpty(modExtension.originalMainWorkThinkTreeDefName))
+                    {
+                        mainThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.originalMainWorkThinkTreeDefName);
+                        if (mainThinkTree != null)
+                        {
+                            if (debugLogging)
+                                Utility_DebugManager.LogNormal($"Using stored original main think tree: {mainThinkTree.defName} for {pawn.LabelShort}");
+                        }
+                        else
+                        {
+                            if (debugLogging)
+                                Utility_DebugManager.LogWarning($"Stored original main think tree '{modExtension.originalMainWorkThinkTreeDefName}' not found - using fallbacks");
+                        }
+                    }
+                }
+
+                // Finally fall back to vanilla defaults based on race properties
+                if (mainThinkTree == null)
+                {
+                    // If no race-specific tree, use appropriate default
+                    mainThinkTree = pawn.RaceProps.Humanlike
+                        ? Utility_Common.ThinkTreeDefNamed("Humanlike")
+                        : (pawn.RaceProps.Animal ? Utility_Common.ThinkTreeDefNamed("Animal")
+                        : (pawn.RaceProps.IsMechanoid ? Utility_Common.ThinkTreeDefNamed("Mechanoid")
+                        : null));
+
+                    // Ultimate fallback - try to find ANY think tree if all else fails
+                    if (mainThinkTree == null)
+                    {
+                        mainThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail("Animal") ??
+                                       DefDatabase<ThinkTreeDef>.AllDefsListForReading.FirstOrDefault();
+
+                        if (mainThinkTree != null)
+                        {
+                            if (debugLogging)
+                                Utility_DebugManager.LogWarning($"Using ultimate fallback think tree {mainThinkTree.defName} for {pawn.LabelShort}");
+                        }
+                    }
+                }
+
+                // Reset main think tree if it was customized
+                var thinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTree");
+                if (thinkTreeField != null && mainThinkTree != null)
+                {
+                    thinkTreeField.SetValue(pawn.mindState, mainThinkTree);
+                }
+
+                // ---- CONSTANT THINK TREE HANDLING ----
+                // Similar process for constant think tree
+                ThinkTreeDef constantThinkTree = null;
+
+                // First try passed parameter
+                if (!string.IsNullOrEmpty(originalConstTreeName))
+                {
+                    constantThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(originalConstTreeName);
+                    if (constantThinkTree != null)
+                    {
+                        if (debugLogging)
+                            Utility_DebugManager.LogNormal($"Using provided original constant think tree: {constantThinkTree.defName} for {pawn.LabelShort}");
+                    }
+                    else
+                    {
+                        if (debugLogging)
+                            Utility_DebugManager.LogWarning($"Provided original constant think tree '{originalConstTreeName}' not found - using fallbacks");
+                    }
+                }
+
+                // Then check mod extension
+                if (constantThinkTree == null)
+                {
+                    if (modExtension != null && !string.IsNullOrEmpty(modExtension.originalConstantThinkTreeDefName))
+                    {
+                        constantThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.originalConstantThinkTreeDefName);
+                        if (constantThinkTree != null)
+                        {
+                            if (debugLogging)
+                                Utility_DebugManager.LogNormal($"Using stored original constant think tree: {constantThinkTree.defName} for {pawn.LabelShort}");
+                        }
+                        else
+                        {
+                            if (debugLogging)
+                                Utility_DebugManager.LogWarning($"Stored original constant think tree '{modExtension.originalConstantThinkTreeDefName}' not found - using fallbacks");
+                        }
+                    }
+                }
+
+                // Finally fall back to defaults (note: constant think trees are optional, so null is OK)
+                if (constantThinkTree == null)
+                {
+                    constantThinkTree = pawn.RaceProps.Humanlike
+                        ? Utility_Common.ThinkTreeDefNamed("HumanlikeConstant")
+                        : (pawn.RaceProps.Animal ? Utility_Common.ThinkTreeDefNamed("AnimalConstant")
+                        : null);
+                }
+
+                // Reset constant think tree
+                var constThinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTreeConstant");
+                if (constThinkTreeField != null && constantThinkTree != null && pawn.mindState != null)
+                {
+                    constThinkTreeField.SetValue(pawn.mindState, constantThinkTree);
+                }
+
+                // Reset any cached think nodes using reflection exclusively
+                if (pawn.mindState != null)
+                {
+                    // Get the thinker field via reflection
+                    var thinkerField = AccessTools.Field(typeof(Pawn_MindState), "thinker");
+                    if (thinkerField != null)
+                    {
+                        // Get the actual thinker object
+                        object thinkerObj = thinkerField.GetValue(pawn.mindState);
+                        if (thinkerObj != null)
+                        {
+                            // Find the thinkRoot field in whatever type thinkerObj is
+                            var thinkRootField = AccessTools.Field(thinkerObj.GetType(), "thinkRoot");
+                            if (thinkRootField != null)
+                            {
+                                // Set it to null to force a rebuild
+                                thinkRootField.SetValue(thinkerObj, null);
+                            }
+
+                            // Optionally, look for a "nextThink" field and reset it too
+                            var nextThinkField = AccessTools.Field(thinkerObj.GetType(), "nextThink");
+                            if (nextThinkField != null)
+                            {
+                                nextThinkField.SetValue(thinkerObj, 0);
+                            }
+                        }
+                    }
+                }
+
+                if (debugLogging)
+                    Utility_DebugManager.LogNormal($"Reset think tree for {pawn.LabelShort} to vanilla");
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error resetting think tree for {pawn.LabelShort}: {ex}");
+                // Attempt emergency fallback for critical failures
+                try
+                {
+                    EmergencyThinkTreeFallback(pawn);
+                }
+                catch
+                {
+                    // Silent fail for emergency handler
+                }
+            }
+        }
+
+        /// <summary>
+        /// Last resort emergency fallback used when normal reset fails
+        /// </summary>
+        private static void EmergencyThinkTreeFallback(Pawn pawn)
+        {
+            if (pawn?.mindState == null) return;
+
+            // Try to get the most basic think trees
+            ThinkTreeDef animalTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail("Animal");
+            ThinkTreeDef animalConstTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail("AnimalConstant");
+
+            if (animalTree != null)
+            {
+                var thinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTree");
+                if (thinkTreeField != null)
+                {
+                    thinkTreeField.SetValue(pawn.mindState, animalTree);
+                    Utility_DebugManager.LogWarning($"Applied emergency Animal think tree for {pawn.LabelShort}");
+                }
+            }
+
+            if (animalConstTree != null)
+            {
+                var constThinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTreeConstant");
+                if (constThinkTreeField != null)
+                {
+                    constThinkTreeField.SetValue(pawn.mindState, animalConstTree);
+                }
+            }
+
+            // Force think node rebuild
+            if (pawn.thinker != null)
+            {
+                Type thinkerType = pawn.thinker.GetType();
+                FieldInfo thinkRootField = AccessTools.Field(thinkerType, "thinkRoot");
+                if (thinkRootField != null)
+                {
+                    thinkRootField.SetValue(pawn.thinker, null);
+                }
             }
         }
 

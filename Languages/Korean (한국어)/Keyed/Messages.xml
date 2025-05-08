@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<LanguageData>
+
+	<!-- Core mod name -->
+	<PawnControl_ModName>간단한 비인간형 폰 제어</PawnControl_ModName>
+
+	<!-- Translation keys used in C# (.Translate calls) -->
+	<PawnControl_UnderAllowedSkill>필요한 스킬 레벨: {0}.</PawnControl_UnderAllowedSkill>
+	<PawnControl_MessageWorkTypeDisabledAge>연령 제한으로 이 작업을 수행할 수 없습니다.</PawnControl_MessageWorkTypeDisabledAge>
+	<PawnControl_MessageIdeoOpposedWorkTypeSelected>이 이념은 {0} 작업을 금지합니다.</PawnControl_MessageIdeoOpposedWorkTypeSelected>
+
+</LanguageData>

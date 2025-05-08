@@ -141,49 +141,40 @@ namespace emitbreaker.PawnControl
 
             if (HasAlreadyInjected(pawn))
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                    Log.Message($"[PawnControl] Skipped injection: {pawn.LabelShort} already processed.");
+                Utility_DebugManager.LogNormal($"Skipped injection: {pawn.LabelShort} already processed.");
                 return;
             }
 
-            if (Prefs.DevMode && modExtension.debugMode)
-            {
-                Log.Message($"[PawnControl] Stat consolidation attempt for {pawn.LabelShort} ({pawn.def?.defName ?? "null"})");
-            }
+            Utility_DebugManager.LogNormal($"Stat consolidation attempt for {pawn.LabelShort} ({pawn.def?.defName ?? "null"})");
 
             if (pawn == null)
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                    Log.Error("[PawnControl] Cannot inject stat hediff: pawn is null");
+                Utility_DebugManager.LogError("Cannot inject stat hediff: pawn is null");
                 return;
             }
 
             if (pawn.def == null)
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                    Log.Error($"[PawnControl] Cannot inject stat hediff for {pawn.LabelShort}: pawn.def is null");
+                Utility_DebugManager.LogError($"Cannot inject stat hediff for {pawn.LabelShort}: pawn.def is null");
                 return;
             }
 
             if (pawn.skills == null)
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                    Log.Warning($"[PawnControl] Cannot inject stat hediff for {pawn.LabelShort}: pawn.skills is null");
+                Utility_DebugManager.LogWarning($"Cannot inject stat hediff for {pawn.LabelShort}: pawn.skills is null");
                 return;
             }
 
             if (pawn.health == null || pawn.health.hediffSet == null)
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                    Log.Error($"[PawnControl] Cannot inject stat hediff for {pawn.LabelShort}: health system is null");
+                Utility_DebugManager.LogError($"Cannot inject stat hediff for {pawn.LabelShort}: health system is null");
                 return;
             }
 
             var skillsToCheck = GetSkillsNeedingStatSupport(pawn);
             if (skillsToCheck.Count == 0)
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                    Log.Message($"[PawnControl] No skills need stat support for {pawn.LabelShort}");
+                Utility_DebugManager.LogNormal($"No skills need stat support for {pawn.LabelShort}");
                 return;
             }
 
@@ -192,8 +183,7 @@ namespace emitbreaker.PawnControl
 
             if (statStubDef == null)
             {
-                if (Prefs.DevMode && modExtension.debugMode)
-                    Log.Error("[PawnControl] PawnControl_StatStub HediffDef not found in DefDatabase! Make sure it's defined in XML.");
+                Utility_DebugManager.LogError("PawnControl_StatStub HediffDef not found in DefDatabase! Make sure it's defined in XML.");
                 return;
             }
 
@@ -208,24 +198,24 @@ namespace emitbreaker.PawnControl
 
                     pawn.health.AddHediff(hediff);
 
-                    if (Prefs.DevMode && modExtension.debugMode)
+                    if (Utility_DebugManager.ShouldLog())
                     {
-                        Log.Message($"[PawnControl] XML-based stat hediff '{statStubDef.defName}' injected into {pawn.LabelShort}");
-                        Log.Message($"[PawnControl] Skills with stat support: {skillsToCheck.Count}");
+                        Utility_DebugManager.LogNormal($"XML-based stat hediff '{statStubDef.defName}' injected into {pawn.LabelShort}");
+                        Utility_DebugManager.LogNormal($"Skills with stat support: {skillsToCheck.Count}");
                         foreach (var skillDef in skillsToCheck)
                         {
-                            Log.Message($"  - {skillDef.defName}");
+                            Utility_DebugManager.LogNormal($"  - {skillDef.defName}");
                         }
                     }                    
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"[PawnControl] Error adding hediff to {pawn.LabelShort}: {ex}");
+                    Utility_DebugManager.LogError($"Error adding hediff to {pawn.LabelShort}: {ex}");
                 }
             }
-            else if (Prefs.DevMode && modExtension.debugMode)
+            else
             {
-                Log.Message($"[PawnControl] {pawn.LabelShort} already has the stat hediff.");
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} already has the stat hediff.");
             }
 
             MarkAsInjected(pawn);
@@ -240,21 +230,21 @@ namespace emitbreaker.PawnControl
 
             if (hediffDef == null)
             {
-                Log.Error("[PawnControl] CRITICAL ERROR: PawnControl_StatStub HediffDef not found in DefDatabase!");
+                Utility_DebugManager.LogError("CRITICAL ERROR: PawnControl_StatStub HediffDef not found in DefDatabase!");
             }
             else
             {
-                Log.Message($"[PawnControl] PawnControl_StatStub HediffDef found in DefDatabase: {hediffDef.defName}");
+                Utility_DebugManager.LogNormal($"PawnControl_StatStub HediffDef found in DefDatabase: {hediffDef.defName}");
 
                 // Check if it has the required components
                 if (hediffDef.comps == null || !hediffDef.comps.Any(c => c is HediffCompProperties_StatBridge))
                 {
-                    Log.Error("[PawnControl] PawnControl_StatStub HediffDef is missing HediffCompProperties_StatBridge!");
+                    Utility_DebugManager.LogError("PawnControl_StatStub HediffDef is missing HediffCompProperties_StatBridge!");
                 }
 
                 if (hediffDef.stages == null || hediffDef.stages.Count == 0 || hediffDef.stages[0].statOffsets == null)
                 {
-                    Log.Error("[PawnControl] PawnControl_StatStub HediffDef has no stages or statOffsets!");
+                    Utility_DebugManager.LogError("PawnControl_StatStub HediffDef has no stages or statOffsets!");
                 }
             }
         }

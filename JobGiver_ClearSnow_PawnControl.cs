@@ -192,12 +192,8 @@ namespace emitbreaker.PawnControl
             
             // Create the snow clearing job
             Job job = JobMaker.MakeJob(JobDefOf.ClearSnow, targetCell);
-            
-            if (Prefs.DevMode)
-            {
-                Log.Message($"[PawnControl] {pawn.LabelShort} created job to clear snow at {targetCell}");
-            }
-            
+
+            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to clear snow at {targetCell}");
             return job;
         }
 

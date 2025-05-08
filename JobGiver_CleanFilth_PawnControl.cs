@@ -153,12 +153,8 @@ namespace emitbreaker.PawnControl
                     {
                         job.targetQueueA.SortBy(targ => targ.Cell.DistanceToSquared(pawn.Position));
                     }
-                    
-                    if (Prefs.DevMode)
-                    {
-                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to clean {job.targetQueueA?.Count ?? 1} filth");
-                    }
-                    
+
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to clean {job.targetQueueA?.Count ?? 1} filth");
                     return job;
                 }
             }

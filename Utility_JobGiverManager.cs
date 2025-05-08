@@ -43,16 +43,14 @@ namespace emitbreaker.PawnControl
             // Early exit if pawn is drafted
             if (pawn.drafter != null && pawn.drafter.Drafted)
             {
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] {pawn.LabelShort} is drafted, skipping {debugJobDesc ?? workTag} job");
+                Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} is drafted, skipping {debugJobDesc ?? workTag} job");
                 return null;
             }
 
             // 1. Emergency check - yield to firefighting if there's a fire (unless we should skip it)
             if (!skipEmergencyCheck && ShouldYieldToEmergencyJob(pawn))
             {
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] {pawn.LabelShort} yielding from {debugJobDesc ?? workTag} to handle emergency");
+                Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} yielding from {debugJobDesc ?? workTag} to handle emergency");
                 return null;
             }
 
@@ -77,16 +75,16 @@ namespace emitbreaker.PawnControl
                 Job job = jobCreator(pawn, false);
 
                 // 5. Debug logging if a job was found
-                if (job != null && Prefs.DevMode)
+                if (job != null)
                 {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created {debugJobDesc ?? workTag} job: {job.def.defName}");
+                    Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} created {debugJobDesc ?? workTag} job: {job.def.defName}");
                 }
 
                 return job;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                Log.Error($"[PawnControl] Error creating {debugJobDesc ?? workTag} job for {pawn.LabelShort}: {ex}");
+                Utility_DebugManager.LogError($"Error creating {debugJobDesc ?? workTag} job for {pawn.LabelShort}: {ex}");
                 return null;
             }
         }
@@ -102,7 +100,7 @@ namespace emitbreaker.PawnControl
         {
             try
             {
-                if (pawn?.Map == null || pawn.Dead || !pawn.Spawned)
+                if (pawn?.Map == null || pawn.Dead || !pawn.Spawned || pawn?.Faction == null)
                 {
                     return null;
                 }
@@ -116,7 +114,7 @@ namespace emitbreaker.PawnControl
             }
             catch (Exception ex)
             {
-                Log.Error($"[PawnControl] Error in StandardTryGiveJob for {pawn?.LabelShort ?? "null"}, tag {workTag}, error: {ex}");
+                Utility_DebugManager.LogError($"Error in StandardTryGiveJob for {pawn?.LabelShort ?? "null"}, tag {workTag}, error: {ex}");
                 return null;
             }
         }
@@ -192,8 +190,7 @@ namespace emitbreaker.PawnControl
                 // If work type exists and is disabled in pawn's settings, don't give job
                 if (workTypeDef != null && !pawn.workSettings.WorkIsActive(workTypeDef))
                 {
-                    if (Prefs.DevMode)
-                        Log.Message($"[PawnControl] {pawn.LabelShort} has work type {workTypeDef.defName} disabled in work settings, skipping job");
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} has work type {workTypeDef.defName} disabled in work settings, skipping job");
                     return false;
                 }
             }
@@ -366,12 +363,7 @@ namespace emitbreaker.PawnControl
             if (target != null)
             {
                 Job job = JobMaker.MakeJob(jobDef, target);
-                
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job {jobDef.defName} for {target.Label}");
-                }
-                
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job {jobDef.defName} for {target.Label}");                
                 return job;
             }
             
@@ -457,10 +449,7 @@ namespace emitbreaker.PawnControl
                         Job refuelJob = RefuelWorkGiverUtility.RefuelJob(pawn, targetBillGiver, false);
                         if (refuelJob != null)
                         {
-                            if (Prefs.DevMode)
-                            {
-                                Log.Message($"[PawnControl] {pawn.LabelShort} created job to refuel {targetBillGiver.def.label} first");
-                            }
+                            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel {targetBillGiver.def.label} first");
                             return refuelJob;
                         }
                     }
@@ -492,10 +481,7 @@ namespace emitbreaker.PawnControl
                                     Job finishJob = FinishUnfinishedThingJob(pawn, billProduction.BoundUft, billProduction);
                                     if (finishJob != null)
                                     {
-                                        if (Prefs.DevMode)
-                                        {
-                                            Log.Message($"[PawnControl] {pawn.LabelShort} created job to finish {bill.recipe?.defName ?? "unfinished task"}");
-                                        }
+                                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to finish {bill.recipe?.defName ?? "unfinished task"}");
                                         return finishJob;
                                     }
                                 }
@@ -509,10 +495,7 @@ namespace emitbreaker.PawnControl
                                 Job finishJob = FinishUnfinishedThingJob(pawn, uft, billProduction);
                                 if (finishJob != null)
                                 {
-                                    if (Prefs.DevMode)
-                                    {
-                                        Log.Message($"[PawnControl] {pawn.LabelShort} created job to finish {bill.recipe?.defName ?? "unfinished task"}");
-                                    }
+                                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to finish {bill.recipe?.defName ?? "unfinished task"}");
                                     return finishJob;
                                 }
                             }
@@ -525,10 +508,7 @@ namespace emitbreaker.PawnControl
                             Job billJob = CreateStartBillJob(pawn, bill, targetBillGiver, chosenIngredients);
                             if (billJob != null)
                             {
-                                if (Prefs.DevMode)
-                                {
-                                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to work on {bill.recipe?.defName ?? "bill"} at {targetBillGiver.def.label}");
-                                }
+                                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to work on {bill.recipe?.defName ?? "bill"} at {targetBillGiver.def.label}");
                                 return billJob;
                             }
                         }
@@ -540,13 +520,112 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
+        /// Creates a job for warden to interact with a prisoner
+        /// </summary>
+        public static Job TryCreatePrisonerInteractionJob(
+            Pawn warden,
+            Dictionary<int, List<Pawn>> prisonerCache,
+            Dictionary<int, Dictionary<Pawn, bool>> reachabilityCache,
+            Func<Pawn, Pawn, bool> validator,
+            Func<Pawn, Pawn, Job> jobCreator,
+            float[] distanceThresholds = null)
+        {
+            if (warden?.Map == null || warden.Faction == null) return null;
+
+            int mapId = warden.Map.uniqueID;
+            if (!prisonerCache.ContainsKey(mapId) || prisonerCache[mapId].Count == 0)
+                return null;
+
+            // Use distance bucketing
+            var buckets = CreateDistanceBuckets(
+                warden,
+                prisonerCache[mapId],
+                prisoner => (prisoner.Position - warden.Position).LengthHorizontalSquared,
+                distanceThresholds ?? new float[] { 100f, 400f, 900f }
+            );
+
+            // Find best prisoner to interact with
+            Pawn targetPrisoner = FindFirstValidTargetInBuckets(
+                buckets,
+                warden,
+                (prisoner, p) => {
+                    // Base validation checks
+                    if (!IsValidFactionInteraction(prisoner, p, requiresDesignator: false))
+                        return false;
+
+                    if (prisoner?.guest == null || !prisoner.IsPrisoner)
+                        return false;
+
+                    // Custom validation from caller
+                    return validator(prisoner, p);
+                },
+                reachabilityCache
+            );
+
+            // Create job if we found a valid target
+            if (targetPrisoner != null)
+            {
+                return jobCreator(warden, targetPrisoner);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Updates a cache of prisoners matching specific criteria
+        /// </summary>
+        public static void UpdatePrisonerCache(
+            Map map,
+            ref int lastUpdateTick,
+            int updateInterval,
+            Dictionary<int, List<Pawn>> prisonerCache,
+            Dictionary<int, Dictionary<Pawn, bool>> reachabilityCache,
+            Func<Pawn, bool> prisonerFilter)
+        {
+            if (map == null) return;
+
+            int currentTick = Find.TickManager.TicksGame;
+            int mapId = map.uniqueID;
+
+            if (currentTick > lastUpdateTick + updateInterval ||
+                !prisonerCache.ContainsKey(mapId))
+            {
+                // Clear outdated cache
+                if (prisonerCache.ContainsKey(mapId))
+                    prisonerCache[mapId].Clear();
+                else
+                    prisonerCache[mapId] = new List<Pawn>();
+
+                // Clear reachability cache too
+                if (reachabilityCache.ContainsKey(mapId))
+                    reachabilityCache[mapId].Clear();
+                else
+                    reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
+
+                // Find all matching prisoners using the provided filter
+                foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
+                {
+                    if (prisoner == null || prisoner.Destroyed || !prisoner.Spawned)
+                        continue;
+
+                    if (prisonerFilter(prisoner))
+                    {
+                        prisonerCache[mapId].Add(prisoner);
+                    }
+                }
+
+                lastUpdateTick = currentTick;
+            }
+        }
+
+        /// <summary>
         /// Creates a job to finish an unfinished thing
         /// </summary>
         public static Job FinishUnfinishedThingJob(Pawn pawn, UnfinishedThing uft, Bill_ProductionWithUft bill)
         {
             if (uft.Creator != pawn)
             {
-                Log.Error("Tried to get FinishUftJob for " + pawn + " finishing " + uft + " but its creator is " + uft.Creator);
+                Utility_DebugManager.LogError("Tried to get FinishUftJob for " + pawn + " finishing " + uft + " but its creator is " + uft.Creator);
                 return null;
             }
 
@@ -784,6 +863,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static bool IsValidFactionInteraction(Thing target, Pawn pawn, bool requiresDesignator = false)
         {
+            // Handle null faction case first
+            if (pawn?.Faction == null)
+            {
+                return false;
+            }
+
             // For designator-oriented tasks, only player pawns can perform them
             if (requiresDesignator && pawn.Faction != Faction.OfPlayer)
             {

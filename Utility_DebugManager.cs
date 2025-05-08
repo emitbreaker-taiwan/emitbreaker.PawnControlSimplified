@@ -14,6 +14,38 @@ namespace emitbreaker.PawnControl
 {
     public static class Utility_DebugManager
     {
+        public static bool ShouldLog()
+        {
+            // Only log if both RimWorld DevMode AND our mod's debug mode are enabled
+            var settings = LoadedModManager.GetMod<Mod_SimpleNonHumanlikePawnControl>().GetSettings<ModSettings_SimpleNonHumanlikePawnControl>();
+            return Prefs.DevMode && settings.debugMode;
+        }
+
+        // Helper method for consistent logging
+        public static void LogNormal(string message)
+        {
+            if (ShouldLog())
+            {
+                Log.Message($"[PawnControl] {message}");
+            }
+        }
+
+        // Helper method for warning logs
+        public static void LogWarning(string message)
+        {
+            if (ShouldLog())
+            {
+                Log.Warning($"[PawnControl] {message}");
+            }
+        }
+
+        // Helper method for error logs (these often should show regardless of debug mode)
+        public static void LogError(string message)
+        {
+            // Errors usually should be logged regardless of debug mode
+            Log.Error($"[PawnControl] {message}");
+        }
+
         /// <summary>
         /// Dump Class use-cases
         /// </summary>
@@ -40,7 +72,7 @@ namespace emitbreaker.PawnControl
         {
             if (rootNode == null)
             {
-                Log.Warning("[PawnControl] ThinkTreeDumper: Root node is null.");
+                LogWarning("ThinkTreeDumper: Root node is null.");
                 return;
             }
 
@@ -49,7 +81,7 @@ namespace emitbreaker.PawnControl
             DumpNodeRecursive(rootNode, builder, 0);
             builder.AppendLine($"[PawnControl] ThinkTree Dump End - {rootName}");
 
-            Log.Message(builder.ToString());
+            LogNormal(builder.ToString());
         }
 
         /// <summary>
@@ -85,7 +117,7 @@ namespace emitbreaker.PawnControl
         {
             if (rootNode == null)
             {
-                Log.Warning("[PawnControl] ThinkTreeDumper: ExpandSubtrees called with null rootNode.");
+                LogWarning("ThinkTreeDumper: ExpandSubtrees called with null rootNode.");
                 return;
             }
 
@@ -112,11 +144,11 @@ namespace emitbreaker.PawnControl
 
                     if (treeDef == null || treeDef.thinkRoot == null)
                     {
-                        Log.Warning($"[PawnControl] ThinkTreeDumper: Found ThinkNode_Subtree with missing thinkRoot at {node.GetType().Name}.");
+                        LogWarning($"ThinkTreeDumper: Found ThinkNode_Subtree with missing thinkRoot at {node.GetType().Name}.");
                         continue;
                     }
 
-                    Log.Message($"[PawnControl] ThinkTreeDumper: Expanding subtree '{treeDef.defName}' into parent '{node.GetType().Name}'.");
+                    LogNormal($"ThinkTreeDumper: Expanding subtree '{treeDef.defName}' into parent '{node.GetType().Name}'.");
 
                     node.subNodes[i] = treeDef.thinkRoot;
 
@@ -139,14 +171,14 @@ namespace emitbreaker.PawnControl
         {
             if (originalRoot == null)
             {
-                Log.Warning("[PawnControl] ThinkTreeDumper: SafeExpandAndDump called with null originalRoot.");
+                LogWarning("ThinkTreeDumper: SafeExpandAndDump called with null originalRoot.");
                 return;
             }
 
             ThinkNode clonedTree = CloneThinkTree(originalRoot);
             if (clonedTree == null)
             {
-                Log.Warning("[PawnControl] ThinkTreeDumper: SafeExpandAndDump failed to clone original tree.");
+                LogWarning("ThinkTreeDumper: SafeExpandAndDump failed to clone original tree.");
                 return;
             }
 
@@ -161,7 +193,7 @@ namespace emitbreaker.PawnControl
             }
             else
             {
-                Log.Message($"[PawnControl] ThinkTree Dump: Successfully dumped ({label}), full output suppressed.");
+                LogWarning($"ThinkTree Dump: Successfully dumped ({label}), full output suppressed.");
             }
         }
 
@@ -175,20 +207,20 @@ namespace emitbreaker.PawnControl
         {
             if (originalRoot == null)
             {
-                Log.Warning("[PawnControl] ThinkTreeDumper: SafeExpandAndDumpToFile called with null originalRoot.");
+                LogWarning("ThinkTreeDumper: SafeExpandAndDumpToFile called with null originalRoot.");
                 return;
             }
 
             if (string.IsNullOrEmpty(filePath))
             {
-                Log.Warning("[PawnControl] ThinkTreeDumper: SafeExpandAndDumpToFile called with invalid file path.");
+                LogWarning("ThinkTreeDumper: SafeExpandAndDumpToFile called with invalid file path.");
                 return;
             }
 
             ThinkNode clonedTree = CloneThinkTree(originalRoot);
             if (clonedTree == null)
             {
-                Log.Warning("[PawnControl] ThinkTreeDumper: SafeExpandAndDumpToFile failed to clone original tree.");
+                LogWarning("ThinkTreeDumper: SafeExpandAndDumpToFile failed to clone original tree.");
                 return;
             }
 
@@ -208,11 +240,11 @@ namespace emitbreaker.PawnControl
 
                 System.IO.File.WriteAllText(filePath, builder.ToString());
 
-                Log.Message($"[PawnControl] ThinkTreeDumper: Dump written to file: {filePath}");
+                LogNormal($"ThinkTreeDumper: Dump written to file: {filePath}");
             }
             catch (System.Exception ex)
             {
-                Log.Error($"[PawnControl] ThinkTreeDumper: Failed to write dump to file: {filePath}\n{ex}");
+                LogError($"ThinkTreeDumper: Failed to write dump to file: {filePath}\n{ex}");
             }
         }
 
@@ -226,13 +258,13 @@ namespace emitbreaker.PawnControl
         {
             if (pawn == null)
             {
-                Log.Warning("[PawnControl] DumpPawnThinkTree: Pawn is null.");
+                LogWarning("DumpPawnThinkTree: Pawn is null.");
                 return;
             }
 
             if (pawn.thinker == null || pawn.thinker.MainThinkNodeRoot == null)
             {
-                Log.Warning($"[PawnControl] DumpPawnThinkTree: {pawn.LabelShort} has no thinker or MainThinkNodeRoot.");
+                LogWarning($"DumpPawnThinkTree: {pawn.LabelShort} has no thinker or MainThinkNodeRoot.");
                 return;
             }
 
@@ -258,18 +290,18 @@ namespace emitbreaker.PawnControl
         {
             if (pawn == null)
             {
-                Log.Warning("[PawnControl] DumpPawnThinkTreeDetailed: Pawn is null.");
+                LogWarning("DumpPawnThinkTreeDetailed: Pawn is null.");
                 return;
             }
 
             if (pawn.thinker == null)
             {
-                Log.Warning($"[PawnControl] DumpPawnThinkTreeDetailed: {pawn.LabelShort} has no thinker.");
+                LogWarning($"DumpPawnThinkTreeDetailed: {pawn.LabelShort} has no thinker.");
                 return;
             }
 
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine($"[PawnControl] Detailed ThinkTree Dump for {pawn.LabelShort} ({pawn.def.defName})");
+            builder.AppendLine($"Detailed ThinkTree Dump for {pawn.LabelShort} ({pawn.def.defName})");
             builder.AppendLine("=====================================");
 
             // Dump basic pawn information
@@ -322,7 +354,7 @@ namespace emitbreaker.PawnControl
             builder.AppendLine($"Current Activity: {pawn.CurJobDef?.reportString ?? "None"}");
 
             // Output the full log
-            Log.Message(builder.ToString());
+            LogNormal(builder.ToString());
         }
 
         /// <summary>
@@ -366,7 +398,7 @@ namespace emitbreaker.PawnControl
         {
             if (pawn == null || pawn.workSettings == null)
             {
-                Log.Warning("[PawnControl] DumpWorkGiversForPawn: Pawn or WorkSettings is null.");
+                LogWarning("DumpWorkGiversForPawn: Pawn or WorkSettings is null.");
                 return;
             }
 
@@ -386,7 +418,7 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            Log.Message(builder.ToString());
+            LogNormal(builder.ToString());
         }
 
         /// <summary>
@@ -394,21 +426,21 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void DumpThinkerStatus(Pawn pawn)
         {
-            Log.Message($"[PawnControl Debug] {pawn.LabelShort} thinker status:");
-            Log.Message($"- thinker is null? {pawn.thinker == null}");
-            Log.Message($"- thinker.MainThinkNodeRoot null? {pawn.thinker?.MainThinkNodeRoot == null}");
-            Log.Message($"- pawn.downed? {pawn.Downed}");
-            Log.Message($"- pawn.RaceProps.Animal? {pawn.RaceProps.Animal}");
-            Log.Message($"- pawn.RaceProps.ToolUser? {pawn.RaceProps.ToolUser}");
-            Log.Message($"- pawn.RaceProps.Humanlike? {pawn.RaceProps.Humanlike}");
-            Log.Message($"- pawn.RaceProps.IsMechanoid? {pawn.RaceProps.IsMechanoid}");
-            Log.Message($"- pawn.IsColonist? {pawn.IsColonist}");
-            Log.Message($"- pawn.IsPrisoner? {pawn.IsPrisoner}");
-            Log.Message($"- pawn.IsSlave? {pawn.IsSlave}");
-            Log.Message($"- pawn.IsColonyMech? {pawn.IsColonyMech}");
-            Log.Message($"- pawn.IsWildMan? {pawn.IsWildMan()}");
-            Log.Message($"- pawn.jobs.curDriver? {(pawn.jobs?.curDriver != null ? pawn.jobs.curDriver.ToString() : "null")}");
-            Log.Message($"- pawn.jobs.curJob? {(pawn.jobs?.curJob != null ? pawn.jobs.curJob.def.defName : "null")}");
+            LogNormal($"{pawn.LabelShort} thinker status:");
+            LogNormal($"- thinker is null? {pawn.thinker == null}");
+            LogNormal($"- thinker.MainThinkNodeRoot null? {pawn.thinker?.MainThinkNodeRoot == null}");
+            LogNormal($"- pawn.downed? {pawn.Downed}");
+            LogNormal($"- pawn.RaceProps.Animal? {pawn.RaceProps.Animal}");
+            LogNormal($"- pawn.RaceProps.ToolUser? {pawn.RaceProps.ToolUser}");
+            LogNormal($"- pawn.RaceProps.Humanlike? {pawn.RaceProps.Humanlike}");
+            LogNormal($"- pawn.RaceProps.IsMechanoid? {pawn.RaceProps.IsMechanoid}");
+            LogNormal($"- pawn.IsColonist? {pawn.IsColonist}");
+            LogNormal($"- pawn.IsPrisoner? {pawn.IsPrisoner}");
+            LogNormal($"- pawn.IsSlave? {pawn.IsSlave}");
+            LogNormal($"- pawn.IsColonyMech? {pawn.IsColonyMech}");
+            LogNormal($"- pawn.IsWildMan? {pawn.IsWildMan()}");
+            LogNormal($"- pawn.jobs.curDriver? {(pawn.jobs?.curDriver != null ? pawn.jobs.curDriver.ToString() : "null")}");
+            LogNormal($"- pawn.jobs.curJob? {(pawn.jobs?.curJob != null ? pawn.jobs.curJob.def.defName : "null")}");
         }
 
         /// <summary>
@@ -416,7 +448,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void TagManager_HasTag_HasTag(ThingDef def, string tag, bool hasTag)
         {
-            //Log.Message($"[PawnControl] Checking tag '{tag}' for def={def.defName}: {hasTag}");
+            LogNormal($"Checking tag '{tag}' for def={def.defName}: {hasTag}");
         }
 
         /// <summary>
@@ -424,7 +456,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void ThinkTreeManager_HasTag(ThingDef def, bool result)
         {
-            //Log.Message($"[PawnControl] Computed HasAllowOrBlockWorkTag for {def.defName}: {result}");
+            LogNormal($"Computed HasAllowOrBlockWorkTag for {def.defName}: {result}");
         }
 
         public static class StatMutationLogger
@@ -440,9 +472,8 @@ namespace emitbreaker.PawnControl
                     pawnStatMutations[pawn] = dict = new Dictionary<StatDef, float>();
 
                 dict[statDef] = value;
-
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] Stat mutation: {pawn.LabelShort} -> {statDef.defName} = {value:F2}");
+                
+                LogNormal($"Stat mutation: {pawn.LabelShort} -> {statDef.defName} = {value:F2}");
             }
 
             public static void LogRaceBase(Pawn pawn)
@@ -455,16 +486,13 @@ namespace emitbreaker.PawnControl
                     try { dict[stat] = pawn.GetStatValue(stat, false); } catch { }
                 }
                 raceStatBaseCache[pawn.def] = dict;
-
-                if (Prefs.DevMode)
-                    Log.Message($"[PawnControl] Cached base stats for race {pawn.def.defName}");
+                
+                LogNormal($"Cached base stats for race {pawn.def.defName}");
             }
 
-            public static IReadOnlyDictionary<StatDef, float> GetPawnStats(Pawn pawn)
-                => pawnStatMutations.TryGetValue(pawn, out var dict) ? dict : null;
+            public static IReadOnlyDictionary<StatDef, float> GetPawnStats(Pawn pawn) => pawnStatMutations.TryGetValue(pawn, out var dict) ? dict : null;
 
-            public static IReadOnlyDictionary<StatDef, float> GetRaceStats(ThingDef race)
-                => raceStatBaseCache.TryGetValue(race, out var dict) ? dict : null;
+            public static IReadOnlyDictionary<StatDef, float> GetRaceStats(ThingDef race) => raceStatBaseCache.TryGetValue(race, out var dict) ? dict : null;
         }
 
         public static class StatMutationValidator
@@ -477,11 +505,11 @@ namespace emitbreaker.PawnControl
             {
                 if (pawn == null || pawn.def == null || pawn.RaceProps == null)
                 {
-                    Log.Warning("[PawnControl] Validation failed: null pawn or pawn.def.");
+                    LogWarning("Validation failed: null pawn or pawn.def.");
                     return;
                 }
 
-                Log.Message($"[PawnControl] === Stat Mutation Validation for {pawn.LabelShort} ({pawn.def.defName}) ===");
+                LogNormal($"=== Stat Mutation Validation for {pawn.LabelShort} ({pawn.def.defName}) ===");
 
                 foreach (var stat in DefDatabase<StatDef>.AllDefs)
                 {
@@ -500,15 +528,15 @@ namespace emitbreaker.PawnControl
                     {
                         float value = pawn.GetStatValue(stat, applyPostProcess: false);
                         float raceValue = pawn.def.GetStatValueAbstract(stat, null);
-                        Log.Message($" - {stat.defName}: {value} (Race Base: {raceValue})");
+                        LogNormal($" - {stat.defName}: {value} (Race Base: {raceValue})");
                     }
                     catch (Exception ex)
                     {
-                        Log.Warning($"[PawnControl] Stat '{stat.defName}' failed on {pawn.LabelShort}: {ex.Message}");
+                        LogWarning($"Stat '{stat.defName}' failed on {pawn.LabelShort}: {ex.Message}");
                     }
                 }
 
-                Log.Message("[PawnControl] === End of Validation ===");
+                LogNormal("=== End of Validation ===");
             }
 
 
@@ -524,11 +552,11 @@ namespace emitbreaker.PawnControl
         {
             if (pawn == null || pawn.def == null || pawn.RaceProps == null)
             {
-                Log.Warning("[PawnControl] LogRaceAndPawnStats failed: pawn or def is null.");
+                LogWarning("LogRaceAndPawnStats failed: pawn or def is null.");
                 return;
             }
 
-            Log.Message($"[PawnControl] === Logging Race and Pawn Stat Differences for {pawn.LabelShort} ({pawn.def.defName}) ===");
+            LogNormal($"=== Logging Race and Pawn Stat Differences for {pawn.LabelShort} ({pawn.def.defName}) ===");
 
             foreach (var stat in DefDatabase<StatDef>.AllDefs)
             {
@@ -550,16 +578,16 @@ namespace emitbreaker.PawnControl
 
                     if (!Mathf.Approximately(pawnValue, raceValue))
                     {
-                        Log.Message($" - {stat.defName}: Pawn = {pawnValue}, Race Base = {raceValue}");
+                        LogNormal($" - {stat.defName}: Pawn = {pawnValue}, Race Base = {raceValue}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Warning($"[PawnControl] Failed reading stat '{stat.defName}' for {pawn.LabelShort}: {ex.Message}");
+                    LogWarning($"Failed reading stat '{stat.defName}' for {pawn.LabelShort}: {ex.Message}");
                 }
             }
 
-            Log.Message("[PawnControl] === End Log ===");
+            LogNormal("=== End Log ===");
         }
 
         public static void RunStatValidator()
@@ -583,29 +611,29 @@ namespace emitbreaker.PawnControl
                 var normalList = pawn.workSettings.WorkGiversInOrderNormal;
                 var emergencyList = pawn.workSettings.WorkGiversInOrderEmergency;
 
-                Log.Message($"[DEBUG] Work scan diagnostic for {pawn.LabelCap}:");
-                Log.Message($"- Initialized: {pawn.workSettings.Initialized}");
-                Log.Message($"- EverWork: {pawn.workSettings.EverWork}");
-                Log.Message($"- Normal list count: {normalList?.Count ?? 0}");
-                Log.Message($"- Emergency list count: {emergencyList?.Count ?? 0}");
+                LogNormal($"[DEBUG] Work scan diagnostic for {pawn.LabelCap}:");
+                LogNormal($"- Initialized: {pawn.workSettings.Initialized}");
+                LogNormal($"- EverWork: {pawn.workSettings.EverWork}");
+                LogNormal($"- Normal list count: {normalList?.Count ?? 0}");
+                LogNormal($"- Emergency list count: {emergencyList?.Count ?? 0}");
 
                 // Check if the pawn has valid mod extension
-                var modExt = Utility_CacheManager.GetModExtension(pawn.def);
-                Log.Message($"- Has mod extension: {modExt != null}");
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                LogNormal($"- Has mod extension: {modExtension != null}");
 
                 // Check if ThinkTree is properly configured
-                Log.Message($"- Main ThinkTree: {pawn.def.race?.thinkTreeMain?.defName}");
+                LogNormal($"- Main ThinkTree: {pawn.def.race?.thinkTreeMain?.defName}");
 
                 // Verify if HasAllowWorkTag returns the expected value
-                Log.Message($"- HasAllowWorkTag: {Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def)}");
+                LogNormal($"- HasAllowWorkTag: {Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def)}");
 
                 // Check think tree status
-                Log.Message($"- Pawn thinker: {pawn.thinker != null}");
-                Log.Message($"- Current job: {pawn.jobs?.curJob?.def?.defName ?? "none"}");
+                LogNormal($"- Pawn thinker: {pawn.thinker != null}");
+                LogNormal($"- Current job: {pawn.jobs?.curJob?.def?.defName ?? "none"}");
             }
             catch (Exception ex)
             {
-                Log.Error($"[ERROR] Diagnostic failed: {ex}");
+                LogError($"[ERROR] Diagnostic failed: {ex}");
             }
         }
 
@@ -615,33 +643,33 @@ namespace emitbreaker.PawnControl
             if (!Prefs.DevMode || pawn == null)
                 return;
 
-            Log.Message($"[PawnControl] Starting comprehensive diagnostic for {pawn.LabelCap}");
+            LogNormal($"Starting comprehensive diagnostic for {pawn.LabelCap}");
 
             // Log basic pawn info
-            Log.Message($"- Race: {pawn.def.defName}");
-            Log.Message($"- Mod extension: {(Utility_CacheManager.GetModExtension(pawn.def) != null ? "Present" : "Missing")}");
-            Log.Message($"- Work tags: AllowWork={Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def)}, HasBlock={Utility_ThinkTreeManager.HasBlockWorkTag(pawn.def)}");
+            LogNormal($"- Race: {pawn.def.defName}");
+            LogNormal($"- Mod extension: {(Utility_CacheManager.GetModExtension(pawn.def) != null ? "Present" : "Missing")}");
+            LogNormal($"- Work tags: AllowWork={Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def)}, HasBlock={Utility_ThinkTreeManager.HasBlockWorkTag(pawn.def)}");
 
             // Check WorkSettings
             if (pawn.workSettings != null)
             {
-                Log.Message($"- WorkSettings initialized: {pawn.workSettings.Initialized}");
-                Log.Message($"- EverWork: {pawn.workSettings.EverWork}");
-                Log.Message($"- WorkGiversNormal count: {pawn.workSettings.WorkGiversInOrderNormal?.Count ?? 0}");
+                LogNormal($"- WorkSettings initialized: {pawn.workSettings.Initialized}");
+                LogNormal($"- EverWork: {pawn.workSettings.EverWork}");
+                LogNormal($"- WorkGiversNormal count: {pawn.workSettings.WorkGiversInOrderNormal?.Count ?? 0}");
             }
             else
             {
-                Log.Message("- WorkSettings: NULL");
+                LogNormal("- WorkSettings: NULL");
             }
 
             // Validate ThinkTree
             Utility_ThinkTreeManager.ValidateThinkTree(pawn);
 
             // Check current job state
-            Log.Message($"- Current job: {pawn.jobs?.curJob?.def?.defName ?? "None"}");
-            Log.Message($"- Job queue: {pawn.jobs?.jobQueue?.Count ?? 0} items");
+            LogNormal($"- Current job: {pawn.jobs?.curJob?.def?.defName ?? "None"}");
+            LogNormal($"- Job queue: {pawn.jobs?.jobQueue?.Count ?? 0} items");
 
-            Log.Message("[PawnControl] Comprehensive diagnostic complete");
+            LogNormal("Comprehensive diagnostic complete");
         }
     }
 }

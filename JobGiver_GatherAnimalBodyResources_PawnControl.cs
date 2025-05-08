@@ -183,10 +183,7 @@ namespace emitbreaker.PawnControl
 
             // Create job if target found
             Job job = JobMaker.MakeJob(JobDef, targetAnimal);
-
-            if (Prefs.DevMode)
-                Log.Message($"[PawnControl] {pawn.LabelShort} created job to gather resources from {targetAnimal.LabelShort}");
-
+            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to gather resources from {targetAnimal.LabelShort}");
             return job;
         }
 

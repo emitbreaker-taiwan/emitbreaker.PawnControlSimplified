@@ -50,9 +50,9 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            if (updated && Prefs.DevMode)
+            if (updated)
             {
-                Log.Message($"[PawnControl] StatBase updated for {pawn.def.defName} via HediffComp_StatBridge");
+                Utility_DebugManager.LogNormal($"StatBase updated for {pawn.def.defName} via HediffComp_StatBridge");
             }
 
             pawn.health.RemoveHediff(parent); // ✅ Remove self immediately

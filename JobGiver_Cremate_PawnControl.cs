@@ -29,7 +29,7 @@ namespace emitbreaker.PawnControl
             }
             else
             {
-                Log.Error("WorkGiverDef DoBillsCremate not found.");
+                Utility_DebugManager.LogError("WorkGiverDef DoBillsCremate not found.");
                 return null;
             }
         }
@@ -123,10 +123,7 @@ namespace emitbreaker.PawnControl
                         }
                     }
 
-                    if (Prefs.DevMode)
-                    {
-                        Log.Warning("[PawnControl] Could not find DoBillsCremate WorkGiverDef, using fallback method for crematoriums");
-                    }
+                    Utility_DebugManager.LogWarning("Could not find DoBillsCremate WorkGiverDef, using fallback method for crematoriums");
                 }
 
                 _lastCacheUpdateTick = currentTick;

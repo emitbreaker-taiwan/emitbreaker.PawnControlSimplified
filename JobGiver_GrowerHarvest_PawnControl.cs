@@ -239,11 +239,7 @@ namespace emitbreaker.PawnControl
                     job.targetQueueA.SortBy<LocalTargetInfo, int>((targ) => targ.Cell.DistanceToSquared(pawn.Position));
                 }
 
-                if (Prefs.DevMode)
-                {
-                    Log.Message($"[PawnControl] {pawn.LabelShort} created job to harvest {plantsAdded} plants starting with {targetPlant.Label}");
-                }
-
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to harvest {plantsAdded} plants starting with {targetPlant.Label}");
                 return job;
             }
 
