@@ -13,6 +13,12 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public static class Utility_ThinkTreeManager
     {
+        public static ThinkTreeDef ThinkTreeDefNamed(string defName)
+        {
+            return DefDatabase<ThinkTreeDef>.GetNamed(defName);
+        }
+
+
         /// <summary>Cached reflection access to the ResolveSubnodes method</summary>
         private static readonly MethodInfo resolveMethod = AccessTools.Method(typeof(ThinkNode), "ResolveSubnodes");
 
@@ -300,9 +306,9 @@ namespace emitbreaker.PawnControl
                 {
                     // If no race-specific tree, use appropriate default
                     mainThinkTree = pawn.RaceProps.Humanlike
-                        ? Utility_Common.ThinkTreeDefNamed("Humanlike")
-                        : (pawn.RaceProps.Animal ? Utility_Common.ThinkTreeDefNamed("Animal")
-                        : (pawn.RaceProps.IsMechanoid ? Utility_Common.ThinkTreeDefNamed("Mechanoid")
+                        ? ThinkTreeDefNamed("Humanlike")
+                        : (pawn.RaceProps.Animal ? ThinkTreeDefNamed("Animal")
+                        : (pawn.RaceProps.IsMechanoid ? ThinkTreeDefNamed("Mechanoid")
                         : null));
 
                     // Ultimate fallback - try to find ANY think tree if all else fails
@@ -380,8 +386,8 @@ namespace emitbreaker.PawnControl
                 if (constantThinkTree == null)
                 {
                     constantThinkTree = pawn.RaceProps.Humanlike
-                        ? Utility_Common.ThinkTreeDefNamed("HumanlikeConstant")
-                        : (pawn.RaceProps.Animal ? Utility_Common.ThinkTreeDefNamed("AnimalConstant")
+                        ? ThinkTreeDefNamed("HumanlikeConstant")
+                        : (pawn.RaceProps.Animal ? ThinkTreeDefNamed("AnimalConstant")
                         : null);
                 }
 

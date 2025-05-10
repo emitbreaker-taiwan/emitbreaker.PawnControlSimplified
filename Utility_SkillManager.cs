@@ -81,94 +81,87 @@ namespace emitbreaker.PawnControl
             return 0; // Generic fallback
         }
 
-        private static int CalculateInjectedSkillLevel(Pawn pawn, NonHumanlikePawnControlExtension modExtension, SkillDef skill, SkillRecord record)
+        private static int CalculateInjectedSkillLevel(
+            Pawn pawn,
+            NonHumanlikePawnControlExtension modExtension,
+            SkillDef skill,
+            SkillRecord record)
         {
             if (pawn == null || pawn.RaceProps == null || modExtension == null)
-            {
                 return 0;
-            }
 
-            RaceProperties raceProps = pawn.RaceProps;
-
-            // First check for global override
-            if (modExtension?.baseSkillLevelOverride.HasValue == true)
-            {
+            // 1) global override
+            if (modExtension.baseSkillLevelOverride.HasValue)
                 return modExtension.baseSkillLevelOverride.Value;
-            }
 
-            // Then check for existing skill record
-            else if (record != null && record.levelInt > 0)
-            {
-                return (int)record.Level;
-            }
+            // 2) existing human skill
+            if (record != null && record.levelInt > 0)
+                return record.levelInt;
 
-            // Check for specific skill in injected skills
-            else if (skill != null && modExtension.injectedSkills != null && modExtension.injectedSkills.Count > 0)
+            // 3) specific injection for this skill
+            if (skill != null && modExtension.injectedSkills != null && modExtension.injectedSkills.Count > 0)
             {
+                // a) explicit injected entry
                 foreach (var entry in modExtension.injectedSkills)
-                {
                     if (Utility_Common.SkillDefNamed(entry.skill) == skill)
-                    {
                         return entry.level;
-                    }
+
+                // b) fallback to SimulatedSkillDict if it’s been built
+                if (modExtension.SimulatedSkillDict != null
+                    && modExtension.SimulatedSkillDict.TryGetValue(skill, out int lvl))
+                {
+                    return lvl;
                 }
 
-                // NEW: Check if SimulatedSkillDict is already populated and use that
-                if (modExtension.SimulatedSkillDict != null &&
-                    modExtension.SimulatedSkillDict.TryGetValue(skill, out int level))
-                {
-                    return level;
-                }
+                // c) NO `return 0` here—let it fall through to race-based fallback
             }
 
-            // For general skill checks (when no specific skill is requested)
-            // First check if the dictionary is populated at all
-            else if (skill == null && modExtension.injectedSkills != null && modExtension.injectedSkills.Count > 0)
+            // 4) “no specific skill requested” path
+            if (skill == null && modExtension.injectedSkills?.Count > 0)
             {
-                // If no specific skill requested, use the average of all injected skills
-                if (modExtension.SimulatedSkillDict != null && modExtension.SimulatedSkillDict.Count > 0)
+                var dict = modExtension.SimulatedSkillDict;
+                if (dict != null && dict.Count > 0)
                 {
                     int sum = 0;
-                    int cnt = 0;
-                    foreach (var kv in modExtension.SimulatedSkillDict)
-                    {
-                        sum += kv.Value;
-                        cnt++;
-                    }
-                    if (cnt > 0)
-                        return sum / cnt;
+                    foreach (var kv in dict) sum += kv.Value;
+                    return sum / dict.Count;
                 }
-
-                // Fallback to first skill in the list if dictionary not populated
                 return modExtension.injectedSkills[0].level;
             }
 
-            // Traditional race-based fallbacks
-            else if (raceProps.Humanlike)
+            // 5) race-based fallbacks
+            var rp = pawn.RaceProps;
+            if (rp.Humanlike)
+                return (int)(pawn.skills?.GetSkill(skill)?.Level ?? 0);
+
+            if (rp.IsMechanoid)
+                return modExtension.skillLevelToolUser > 0
+                    ? modExtension.skillLevelToolUser
+                    : 0;   // or your chosen default
+
+            if (rp.ToolUser)
+                return modExtension.skillLevelToolUser > 0
+                    ? modExtension.skillLevelToolUser
+                    : 10;
+
+            if (rp.Animal)
             {
-                return skill != null ? (int)pawn.skills?.GetSkill(skill)?.Level : 0;
-            }
-            else if (raceProps.ToolUser)
-            {
-                return modExtension.skillLevelToolUser > 0 ? modExtension.skillLevelToolUser : 10;
-            }
-            else if (raceProps.Animal)
-            {
-                if (raceProps.trainability == TrainabilityDefOf.Advanced)
-                {
-                    return modExtension.skillLevelAnimalAdvanced > 0 ? modExtension.skillLevelAnimalAdvanced : 5;
-                }
-                if (raceProps.trainability == TrainabilityDefOf.Intermediate)
-                {
-                    return modExtension.skillLevelAnimalIntermediate > 0 ? modExtension.skillLevelAnimalIntermediate : 3;
-                }
-                else
-                {
-                    return modExtension.skillLevelAnimalBasic > 0 ? modExtension.skillLevelAnimalBasic : 3;
-                }
+                if (rp.trainability == TrainabilityDefOf.Advanced)
+                    return modExtension.skillLevelAnimalAdvanced > 0
+                        ? modExtension.skillLevelAnimalAdvanced
+                        : 5;
+                if (rp.trainability == TrainabilityDefOf.Intermediate)
+                    return modExtension.skillLevelAnimalIntermediate > 0
+                        ? modExtension.skillLevelAnimalIntermediate
+                        : 3;
+
+                return modExtension.skillLevelAnimalBasic > 0
+                    ? modExtension.skillLevelAnimalBasic
+                    : 3;
             }
 
-            return 0; // Fallback to default skill level
+            // 6) ultimate fallback
+            return 0;
         }
 
         public static Passion SetInjectedPassion(ThingDef def, SkillDef skillDef)

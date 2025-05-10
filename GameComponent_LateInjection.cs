@@ -215,6 +215,16 @@ namespace emitbreaker.PawnControl
 
             Utility_CacheManager._bioTabVisibilityCache.Clear();
 
+            // Reset global system caches first
+            Utility_JobGiverTickManager.ResetAll();
+            Utility_TargetPrefilteringManager.ResetAllCaches();
+            Utility_PathfindingManager.ResetAllCaches();
+            Utility_GlobalStateManager.ResetAllData();
+
+
+            // JobGiver_PawnControl base class caches
+            JobGiver_PawnControl.ResetAllCaches();
+
             // General job giver caches
             JobGiver_WorkNonHumanlike.ResetCache();
 

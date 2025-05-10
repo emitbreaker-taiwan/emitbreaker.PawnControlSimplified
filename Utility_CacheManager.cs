@@ -25,8 +25,10 @@ namespace emitbreaker.PawnControl
         private static readonly Dictionary<string, DutyDef> _dutyCache = new Dictionary<string, DutyDef>();
         // Cache to store the tag-check result per ThingDef
         private static readonly Dictionary<ThingDef, bool> _apparelRestrictionCache = new Dictionary<ThingDef, bool>();
-        
+
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _workEnabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool> _workTypeEnabledCache = new Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool> _workTypeSettingEnabledCache = new Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _workDisabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceDraftableCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceEquipWeaponCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();

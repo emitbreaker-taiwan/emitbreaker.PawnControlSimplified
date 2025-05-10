@@ -210,11 +210,12 @@ namespace emitbreaker.PawnControl
             //}
         }
 
-        public static class Patch_Iteration2_WorkTabInjection
+        public static class Patch_WorkTabInjection
         {
+            #region Work Tab Pawn List
+
             /// <summary>
-            /// Patch #2 Work Tab Injection
-            /// Step 1: Inject Work Tab (with Scoped IsColonist Override)
+            /// Injects custom pawns into the work tab, allowing non-humanlike pawns to be shown
             /// </summary>
             [HarmonyPatch(typeof(MainTabWindow_Work), "Pawns", MethodType.Getter)]
             public static class Patch_MainTabWindow_Work_Pawns
@@ -225,15 +226,16 @@ namespace emitbreaker.PawnControl
                     {
                         var taggedPawns = Utility_CacheManager.GetEffectiveColonistLikePawns(Find.CurrentMap);
 
-                        // If all are vanilla humanlike and have no mod extension — fully fallback to vanilla
-                        bool isPureVanillaHumanlike = taggedPawns.All(p => p.RaceProps.Humanlike && Utility_CacheManager.GetModExtension(p.def) == null);
+                        // If all are vanilla humanlike without mod extension, fall back to vanilla logic
+                        bool isPureVanillaHumanlike = taggedPawns.All(p =>
+                            p.RaceProps.Humanlike && Utility_CacheManager.GetModExtension(p.def) == null);
 
                         if (isPureVanillaHumanlike)
                         {
-                            return true; // ✅ Let vanilla logic handle both pawn list and columns
+                            return true; // Let vanilla handle both pawn list and columns
                         }
 
-                        // Otherwise, use injected pawn list
+                        // Otherwise, inject our custom pawn list
                         foreach (var pawn in taggedPawns)
                         {
                             if (pawn != null && pawn.guest == null)
@@ -244,20 +246,7 @@ namespace emitbreaker.PawnControl
 
                         __result = taggedPawns;
 
-                        // CRITICAL FIX: Don't filter work columns at all!
-                        // This ensures all work types remain visible in the work tab
-
-                        /* ⛔ REMOVED FILTERING: 
-                        var workTableDef = DefDatabase<PawnTableDef>.GetNamedSilentFail("Work");
-                        if (workTableDef != null)
-                        {
-                            workTableDef.columns = workTableDef.columns
-                                .Where(col => IsWorkColumnSupported(col, taggedPawns))
-                                .ToList();
-                        }
-                        */
-
-                        // Instead, make sure all pawns have proper work settings initialized
+                        // Make sure all pawns have proper work settings initialized
                         foreach (var pawn in taggedPawns)
                         {
                             if (pawn != null && Utility_CacheManager.GetModExtension(pawn.def) != null)
@@ -267,48 +256,19 @@ namespace emitbreaker.PawnControl
                         }
 
                         Utility_DebugManager.LogNormal("Work tab showing all work columns for mixed colony");
-                        return false; // ✅ Skip vanilla only when we injected __result
+                        return false; // Skip vanilla logic - we've provided our own pawn list
                     }
                 }
-
-                //private static bool IsWorkColumnSupported(PawnColumnDef col, IEnumerable<Pawn> taggedPawns)
-                //{
-                //    if (col == null || col.workType == null)
-                //    {
-                //        return true; // ✅ Allow non-work columns always
-                //    }
-
-                //    string tag = ManagedTags.AllowWorkPrefix + col.workType.defName;
-                //    bool columnEnabled = false;
-
-                //    foreach (Pawn pawn in taggedPawns)
-                //    {
-                //        if (pawn == null || pawn.def == null || pawn.def.race == null)
-                //        {
-                //            continue;
-                //        }
-
-                //        if (pawn.workSettings?.WorkIsActive(col.workType) == true)
-                //        {
-                //            columnEnabled = true;
-                //        }
-
-                //        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                //        if (modExtension != null)
-                //        {
-                //            if (pawn.workSettings == null || !pawn.workSettings.EverWork)
-                //            {
-                //                Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
-                //                columnEnabled = true;
-                //            }
-                //        }
-                //    }
-
-                //    return columnEnabled;
-                //}
             }
 
-            // Step 2: Hook WrokTypeIsDisabled since modded pawn does not have actual skill.
+            #endregion
+
+            #region Work Type Capability
+
+            /// <summary>
+            /// Handles work type disabling for modded pawns using tag-based permissions
+            /// instead of vanilla skill-based capability checks
+            /// </summary>
             [HarmonyPatch(typeof(Pawn), nameof(Pawn.WorkTypeIsDisabled))]
             public static class Patch_Pawn_WorkTypeIsDisabled
             {
@@ -318,22 +278,19 @@ namespace emitbreaker.PawnControl
                     var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null)
                     {
-                        return true; // ✅ No mod extension, proceed with vanilla logic
+                        return true; // No mod extension, proceed with vanilla logic
                     }
 
-                    if (modExtension != null)
-                    {
-                        var allowed = Utility_TagManager.WorkEnabled(__instance.def, w.defName.ToString());
-
-                        __result = !allowed;
-                        return false; // ⛔ Skip vanilla logic
-                    }
-
-                    return true; // ✅ Use vanilla fallback
+                    // For modded pawns, use our tag system to determine work capability
+                    bool allowed = Utility_TagManager.WorkEnabled(__instance.def, w.defName.ToString());
+                    __result = !allowed;
+                    return false; // Skip vanilla logic
                 }
             }
 
-            // Step 3: Hook IsIncapableOfWholeWorkType since modded pawn has no capabilities.
+            /// <summary>
+            /// Handles work capability detection for modded pawns in the work tab UI
+            /// </summary>
             [HarmonyPatch(typeof(PawnColumnWorker_WorkPriority), "IsIncapableOfWholeWorkType")]
             public static class Patch_IsIncapableOfWholeWorkType_ByTag
             {
@@ -341,27 +298,33 @@ namespace emitbreaker.PawnControl
                 {
                     if (p == null || work == null) return true;
 
-                    // ✅ Respect identity system
+                    // Only handle pawns matching our identity system
                     if (!Utility_IdentityManager.MatchesIdentityFlags(p, PawnIdentityFlags.IsColonist))
                         return true;
 
-                    // ✅ If work is allowed via tags, override incapability
+                    // For modded pawns, check tag system instead of standard capability checks
                     var modExtension = Utility_CacheManager.GetModExtension(p.def);
                     if (modExtension != null)
                     {
                         string tag = ManagedTags.AllowWorkPrefix + work.defName;
                         if (Utility_TagManager.WorkEnabled(p.def, tag))
                         {
-                            __result = false; // ✅ Not incapable
-                            return false;
+                            __result = false; // Not incapable
+                            return false; // Skip vanilla checks
                         }
                     }
 
-                    return true; // Fall back to vanilla check
+                    return true; // Fall back to vanilla checks
                 }
             }
 
-            // Step 4: Tooltip Consistency
+            #endregion
+
+            #region Work Tab UI
+
+            /// <summary>
+            /// Provides consistent tooltips for modded pawns without skill trackers 
+            /// </summary>
             [HarmonyPatch(typeof(WidgetsWork), nameof(WidgetsWork.TipForPawnWorker))]
             public static class Patch_WidgetsWork_TipForPawnWorker
             {
@@ -372,79 +335,76 @@ namespace emitbreaker.PawnControl
                         __result = $"Simulated {wDef.label} skill: {Utility_SkillManager.SetInjectedSkillLevel(p)}";
                         return false;
                     }
-                    return true;
+                    return true; // Vanilla tooltip for normal pawns
                 }
             }
 
-            // Step 5: Unified safe rendering + sorting + initialization
+            /// <summary>
+            /// Ensures safe initialization and proper rendering of work priority cells for modded pawns
+            /// </summary>
             [HarmonyPatch(typeof(PawnColumnWorker_WorkPriority))]
             public static class Patch_PawnColumnWorker_WorkPriority_SafeAccess
             {
-                // Patch 1: Safe DoCell for non-humanlike pawns
+                /// <summary>
+                /// Ensures work settings are initialized before attempting to draw UI elements
+                /// </summary>
                 [HarmonyPrefix]
                 [HarmonyPatch(nameof(PawnColumnWorker_WorkPriority.DoCell))]
                 public static bool DoCell_Prefix(PawnColumnWorker_WorkPriority __instance, Rect rect, Pawn pawn, PawnTable table)
                 {
                     if (pawn == null || pawn.def?.race == null)
-                    {
-                        return true; // ✅ Not a modded colonist-like pawn, proceed vanilla
-                    }
+                        return true; // Not a valid pawn
 
                     if (!Utility_IdentityManager.MatchesIdentityFlags(pawn, PawnIdentityFlags.IsColonist))
-                    {
-                        return true; // ✅ Not eligible
-                    }
+                        return true; // Not a colony pawn
 
                     if (!pawn.Spawned || pawn.Dead)
-                    {
-                        return true; // ✅ Skip dead or unspawned pawns
-                    }
+                        return true; // Skip unspawned or dead pawns
 
-                    // ✅ Full safe initialization, including ThinkTree and WorkSettings
+                    // Ensure work settings are properly initialized
                     Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
-
-                    return true; // ✅ Allow vanilla to continue drawing priority box
+                    return true; // Continue with vanilla drawing
                 }
 
-                // Patch 2: Safe Compare
+                /// <summary>
+                /// Provides safe comparison for sorting modded pawns in the work tab
+                /// </summary>
                 [HarmonyPrefix]
                 [HarmonyPatch(nameof(PawnColumnWorker_WorkPriority.Compare))]
                 public static bool Compare_Prefix(PawnColumnWorker_WorkPriority __instance, Pawn a, Pawn b, ref int __result)
                 {
                     if (a.skills != null && b.skills != null)
-                    {
-                        return true;
-                    }
+                        return true; // Both have normal skills, use vanilla comparison
 
                     var modExtensionPawnA = Utility_CacheManager.GetModExtension(a.def);
                     var modExtensionPawnB = Utility_CacheManager.GetModExtension(b.def);
 
                     if (modExtensionPawnA == null && modExtensionPawnB == null)
-                    {
-                        return true;
-                    }
+                        return true; // Neither are modded pawns
 
+                    // Use our custom skill/priority value calculation
                     float valA = Utility_SkillManager.GetWorkPrioritySortingValue(a, __instance.def.workType);
                     float valB = Utility_SkillManager.GetWorkPrioritySortingValue(b, __instance.def.workType);
                     __result = valA.CompareTo(valB);
-                    return false;
+                    return false; // Skip vanilla comparison
                 }
             }
 
-            // Step 6: Force render image if pawn is not pure Humanlike
+            /// <summary>
+            /// Handles drawing work box backgrounds for modded pawns with simulated skills
+            /// </summary>
             [HarmonyPatch(typeof(WidgetsWork), "DrawWorkBoxBackground")]
             public static class Patch_WidgetsWork_DrawWorkBoxBackground
             {
                 public static bool Prefix(Rect rect, Pawn p, WorkTypeDef workDef)
                 {
                     if (p == null || workDef == null)
-                    {
                         return true;
-                    }
 
+                    // Get simulated skill value
                     float skillAvg = Utility_SkillManager.SafeAverageOfRelevantSkillsFor(p, workDef);
 
-                    // === Background interpolation
+                    // Background texture selection based on skill level
                     Texture2D baseTex;
                     Texture2D blendTex;
                     float blendFactor;
@@ -468,18 +428,20 @@ namespace emitbreaker.PawnControl
                         blendFactor = (skillAvg - 14f) / 6f;
                     }
 
+                    // Draw background textures with blending
                     GUI.DrawTexture(rect, baseTex);
                     GUI.color = new Color(1f, 1f, 1f, blendFactor);
                     GUI.DrawTexture(rect, blendTex);
 
-                    // === Dangerous work warning (only for Humanlike pawns with Ideo)
-                    if (p.RaceProps != null && p.RaceProps.Humanlike && p.Ideo != null && p.Ideo.IsWorkTypeConsideredDangerous(workDef))
+                    // Handle ideology warnings for humanlike pawns
+                    if (p.RaceProps != null && p.RaceProps.Humanlike && p.Ideo != null &&
+                        p.Ideo.IsWorkTypeConsideredDangerous(workDef))
                     {
                         GUI.color = Color.white;
                         GUI.DrawTexture(rect, WidgetsWork.WorkBoxOverlay_PreceptWarning);
                     }
 
-                    // === Incompetent skill warning (if active but skill is low)
+                    // Show warning for low skill with active work
                     if (workDef.relevantSkills != null && workDef.relevantSkills.Count > 0 && skillAvg <= 2f)
                     {
                         if (p.workSettings != null && p.workSettings.WorkIsActive(workDef))
@@ -489,7 +451,7 @@ namespace emitbreaker.PawnControl
                         }
                     }
 
-                    // === Passion icon
+                    // Draw passion indicators
                     Passion passion = Passion.None;
 
                     if (p.skills != null)
@@ -501,7 +463,7 @@ namespace emitbreaker.PawnControl
                         SkillDef skill = null;
                         if (workDef.relevantSkills != null && workDef.relevantSkills.Count > 0)
                         {
-                            skill = workDef.relevantSkills[0]; // no LINQ FirstOrDefault
+                            skill = workDef.relevantSkills[0];
                         }
                         passion = Utility_SkillManager.SetInjectedPassion(p.def, skill);
                     }
@@ -513,53 +475,49 @@ namespace emitbreaker.PawnControl
                         passionRect.xMin = rect.center.x;
                         passionRect.yMin = rect.center.y;
 
-                        if (passion == Passion.Minor)
-                        {
-                            GUI.DrawTexture(passionRect, WidgetsWork.PassionWorkboxMinorIcon);
-                        }
-                        else if (passion == Passion.Major)
-                        {
-                            GUI.DrawTexture(passionRect, WidgetsWork.PassionWorkboxMajorIcon);
-                        }
+                        GUI.DrawTexture(passionRect, passion == Passion.Minor ?
+                            WidgetsWork.PassionWorkboxMinorIcon :
+                            WidgetsWork.PassionWorkboxMajorIcon);
                     }
 
                     GUI.color = Color.white;
-                    return false; // Skip original
+                    return false; // Skip original method
                 }
             }
 
+            /// <summary>
+            /// Handles drawing work priority boxes and implements mouse interactions
+            /// for modded pawns in the work tab
+            /// </summary>
             [HarmonyPatch(typeof(WidgetsWork), nameof(WidgetsWork.DrawWorkBoxFor))]
             public static class Patch_WidgetsWork_DrawWorkBoxFor
             {
                 public static bool Prefix(float x, float y, Pawn p, WorkTypeDef wType, bool incapableBecauseOfCapacities)
                 {
                     if (p == null || p.def == null || p.def.race == null)
-                    {
-                        return true; // Allow vanilla drawing if invalid
-                    }
+                        return true; // Allow vanilla drawing for invalid pawns
 
                     var modExtension = Utility_CacheManager.GetModExtension(p.def);
                     if (modExtension == null)
-                    {
-                        return true; // Allow vanilla drawing if no mod extension
-                    }
+                        return true; // Allow vanilla drawing for non-modded pawns
 
                     if (!Utility_ThinkTreeManager.HasAllowWorkTag(p.def))
-                    {
-                        return true; // Allow vanilla drawing if not PawnControl target
-                    }
+                        return true; // Allow vanilla drawing if not using our work system
 
-                    // ✅ Always rescue pawn's workSettings before any access
+                    // Ensure work settings are initialized
                     Utility_WorkSettingsManager.SafeEnsurePawnReadyForWork(p);
 
+                    // Handle disabled work types
                     if (p.WorkTypeIsDisabled(wType))
                     {
+                        // Special case for age-disabled work
                         if (p.IsWorkTypeDisabledByAge(wType, out var minAgeRequired))
                         {
                             Rect rect = new Rect(x, y, 25f, 25f);
                             if (Event.current.type == EventType.MouseDown && Mouse.IsOver(rect))
                             {
-                                Messages.Message("MessageWorkTypeDisabledAge".Translate(p, p.ageTracker.AgeBiologicalYears, wType.labelShort, minAgeRequired), p, MessageTypeDefOf.RejectInput, historical: false);
+                                Messages.Message("MessageWorkTypeDisabledAge".Translate(p, p.ageTracker.AgeBiologicalYears, wType.labelShort, minAgeRequired),
+                                    p, MessageTypeDefOf.RejectInput, historical: false);
                                 SoundDefOf.ClickReject.PlayOneShotOnCamera();
                             }
                             GUI.DrawTexture(rect, ContentFinder<Texture2D>.Get("UI/Widgets/WorkBoxBG_AgeDisabled"));
@@ -567,16 +525,19 @@ namespace emitbreaker.PawnControl
                         return false;
                     }
 
+                    // Draw the work box
                     Rect rect2 = new Rect(x, y, 25f, 25f);
                     if (incapableBecauseOfCapacities)
                     {
                         GUI.color = new Color(1f, 0.3f, 0.3f);
                     }
 
+                    // Use reflection to call DrawWorkBoxBackground
                     var method = AccessTools.Method(typeof(WidgetsWork), "DrawWorkBoxBackground");
                     method.Invoke(null, new object[] { rect2, p, wType });
                     GUI.color = Color.white;
 
+                    // Handle numeric priorities if enabled
                     if (Find.PlaySettings.useWorkPriorities)
                     {
                         int priority = p.workSettings.GetPriority(wType);
@@ -589,33 +550,41 @@ namespace emitbreaker.PawnControl
                             Text.Anchor = TextAnchor.UpperLeft;
                         }
 
+                        // Handle mouse interactions
                         if (Event.current.type == EventType.MouseDown && Mouse.IsOver(rect2))
                         {
                             int newPriority = priority;
 
-                            if (Event.current.button == 0) // Left click
+                            // Left click decreases priority (or loops back to 4)
+                            if (Event.current.button == 0)
                             {
                                 newPriority = (priority - 1 + 5) % 5;
                             }
-                            else if (Event.current.button == 1) // Right click
+                            // Right click increases priority (or loops back to 0)
+                            else if (Event.current.button == 1)
                             {
                                 newPriority = (priority + 1) % 5;
                             }
 
+                            // Apply the new priority
                             p.workSettings.SetPriority(wType, newPriority);
                             SoundDefOf.DragSlider.PlayOneShotOnCamera();
 
+                            // Special feedback for activated work
                             if (newPriority > 0)
                             {
+                                // Warning sound for low skill
                                 float avgSkill = Utility_SkillManager.SafeAverageOfRelevantSkillsFor(p, wType);
                                 if (wType.relevantSkills.Any() && avgSkill <= 2f)
                                 {
                                     SoundDefOf.Crunch.PlayOneShotOnCamera();
                                 }
 
+                                // Ideology warnings
                                 if (p.Ideo != null && p.Ideo.IsWorkTypeConsideredDangerous(wType))
                                 {
-                                    Messages.Message("PawnControl_MessageIdeoOpposedWorkTypeSelected".Translate(p, wType.gerundLabel), p, MessageTypeDefOf.CautionInput, historical: false);
+                                    Messages.Message("PawnControl_MessageIdeoOpposedWorkTypeSelected"
+                                        .Translate(p, wType.gerundLabel), p, MessageTypeDefOf.CautionInput, historical: false);
                                     SoundDefOf.DislikedWorkTypeActivated.PlayOneShotOnCamera();
                                 }
                             }
@@ -628,16 +597,16 @@ namespace emitbreaker.PawnControl
                         return false;
                     }
 
+                    // Handle checkbox mode (no manual priorities)
                     if (p.workSettings.GetPriority(wType) > 0)
                     {
                         GUI.DrawTexture(rect2, WidgetsWork.WorkBoxCheckTex);
                     }
 
                     if (!Widgets.ButtonInvisible(rect2))
-                    {
                         return false;
-                    }
 
+                    // Toggle work on/off
                     if (p.workSettings.GetPriority(wType) > 0)
                     {
                         p.workSettings.SetPriority(wType, 0);
@@ -647,51 +616,54 @@ namespace emitbreaker.PawnControl
                     {
                         p.workSettings.SetPriority(wType, 3);
                         SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
+
+                        // Warning for low skill level
                         if (wType.relevantSkills.Any())
                         {
-                            // Get the simulated average skill for the pawn
                             float avgSkill = Utility_SkillManager.SafeAverageOfRelevantSkillsFor(p, wType);
-
-                            // Check if the simulated skill is below the threshold
                             if (avgSkill <= 2f)
                             {
                                 SoundDefOf.Crunch.PlayOneShotOnCamera();
                             }
                         }
 
+                        // Ideology warning
                         if (p.Ideo != null && p.Ideo.IsWorkTypeConsideredDangerous(wType))
                         {
-                            Messages.Message("PawnControl_MessageIdeoOpposedWorkTypeSelected".Translate(p, wType.gerundLabel), p, MessageTypeDefOf.CautionInput, historical: false);
+                            Messages.Message("PawnControl_MessageIdeoOpposedWorkTypeSelected"
+                                .Translate(p, wType.gerundLabel), p, MessageTypeDefOf.CautionInput, historical: false);
                             SoundDefOf.DislikedWorkTypeActivated.PlayOneShotOnCamera();
                         }
                     }
 
                     PlayerKnowledgeDatabase.KnowledgeDemonstrated(ConceptDefOf.WorkTab, KnowledgeAmount.SpecificInteraction);
-
-                    return false; // Fully replace
+                    return false; // Skip vanilla implementation
                 }
             }
 
-            // Step 7: Think Tree Injection patches
+            #endregion
+
+            #region Map Initialization
+
+            /// <summary>
+            /// Ensures all eligible pawns have their work settings initialized when a map is created or loaded
+            /// </summary>
             [HarmonyPatch(typeof(Map), nameof(Map.FinalizeInit))]
             public static class Patch_Map_FinalizeInit_FullInitialize
             {
-                // Outline: Ensure FullInitializeAllEligiblePawns runs once after each map finishes initializing
                 [HarmonyPostfix]
                 public static void Postfix(Map __instance)
                 {
                     if (__instance == null)
-                    {
                         return;
-                    }
 
-                    // 🔥 Force rebuild identity flags if somehow not yet preloaded
+                    // Force rebuild identity flags if needed
                     if (!Utility_IdentityManager.IsIdentityFlagsPreloaded)
                     {
                         Utility_IdentityManager.BuildIdentityFlagCache(true);
                     }
 
-                    // ✅ Safe-guard: Only if identity flags were already preloaded
+                    // Initialize pawns only if identity flags are ready
                     if (Utility_IdentityManager.IsIdentityFlagsPreloaded)
                     {
                         Utility_WorkSettingsManager.FullInitializeAllEligiblePawns(__instance, forceLock: true);
@@ -704,89 +676,84 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            // Step 8: Disable Bio tab specifically for non-humanlike pawns with our mod extension
+            #endregion
+
+            #region Bio Tab Management
+
+            /// <summary>
+            /// Controls visibility of Bio tab for modded non-humanlike pawns
+            /// </summary>
             [HarmonyPatch(typeof(ITab_Pawn_Character), nameof(ITab_Pawn_Character.IsVisible), MethodType.Getter)]
             public static class Patch_ITab_Pawn_Character_IsVisible
             {
-                // Cache the FieldInfo for ITab.selThing to avoid repeated reflection lookups
+                // Cache the PropertyInfo for ITab.selThing to avoid repeated reflection lookups
                 private static readonly PropertyInfo selThingProp = AccessTools.Property(typeof(ITab), "SelThing");
 
-                // Prefix: if we decide to hide, set __result=false and skip the original
                 [HarmonyPrefix]
                 public static bool Prefix(ITab_Pawn_Character __instance, ref bool __result)
                 {
                     try
                     {
-                        // If we couldn't find the field, bail out to vanilla
                         if (selThingProp == null)
                             return true;
 
                         // Get the selected thing (Pawn or Corpse)
                         var thing = selThingProp.GetValue(__instance) as Thing;
                         if (thing == null)
-                            return true; // no selection, let vanilla decide
+                            return true;
 
-                        // Unwrap Pawn from either direct selection or corpse
+                        // Extract pawn from either direct selection or corpse
                         var pawn = thing as Pawn ?? (thing as Corpse)?.InnerPawn;
                         if (pawn == null || pawn.def == null)
-                        {
-                            return true; // not a pawn, or something's wrong
-                        }
+                            return true;
 
                         var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                         if (modExtension == null)
-                        {
-                            return true; // not our modded pawn
-                        }
+                            return true; // Not our modded pawn
 
                         int pawnId = pawn.thingIDNumber;
 
-                        // Check cache first
+                        // Check visibility cache
                         if (Utility_CacheManager._bioTabVisibilityCache.TryGetValue(pawnId, out bool shouldHide))
                         {
                             if (shouldHide)
                             {
-                                // If cache says hide, set result to false and return false to skip original
                                 __result = false;
                                 return false;
                             }
-                            // If cache says don't hide, return true to proceed with vanilla
                             return true;
                         }
 
-                        // Not in cache, need to compute                        
+                        // Not in cache, decide visibility
                         bool hideBioTab = modExtension != null && !pawn.RaceProps.Humanlike;
 
                         // Cache the result
                         Utility_CacheManager._bioTabVisibilityCache[pawnId] = hideBioTab;
 
-                        // Log only once when we make the determination
+                        // Log and set result for hidden tabs
                         if (hideBioTab)
                         {
                             if (modExtension.debugMode)
                                 Utility_DebugManager.LogNormal($"Hidden Bio tab for modded non-humanlike pawn: {pawn.LabelShort}");
 
-                            // Set result and skip vanilla method
                             __result = false;
                             return false;
                         }
 
-                        // Not hiding, proceed with vanilla
-                        return true;
+                        return true; // Not hidden, proceed with vanilla logic
                     }
                     catch (Exception ex)
                     {
-                        // Log error but don't change tab visibility - maintain compatibility
+                        // Log error but maintain compatibility
                         Utility_DebugManager.LogError($"Error checking Bio tab visibility: {ex}");
                         return true;
                     }
                 }
 
-                // Minimal postfix as backup only to catch missed cases of our specific pawns
                 [HarmonyPostfix]
                 public static void Postfix(ITab_Pawn_Character __instance, ref bool __result)
                 {
-                    // Only run if the tab is being shown
+                    // Only run if the tab is currently shown
                     if (!__result)
                         return;
 
@@ -801,23 +768,21 @@ namespace emitbreaker.PawnControl
 
                         int pawnId = pawn.thingIDNumber;
 
-                        // Check cache first - avoids redundant GetModExtension calls
+                        // Check cached visibility
                         if (Utility_CacheManager._bioTabVisibilityCache.TryGetValue(pawnId, out bool shouldHide) && shouldHide)
                         {
                             __result = false;
                             return;
                         }
 
-                        // Not in cache or not hidden according to cache
-                        // FOCUSED SCOPE: Double-check only non-humanlike with our mod extension
+                        // Focus on non-humanlike modded pawns only
                         var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                         if (modExtension == null) return;
 
                         bool hideBioTab = !pawn.RaceProps.Humanlike;
 
-                        // Update cache with this result
+                        // Update cache and hide if needed
                         Utility_CacheManager._bioTabVisibilityCache[pawnId] = hideBioTab;
-
                         if (hideBioTab)
                         {
                             __result = false;
@@ -827,12 +792,18 @@ namespace emitbreaker.PawnControl
                     }
                     catch
                     {
-                        // Ignore any errors in the postfix - maintain compatibility
+                        // Ignore errors in postfix for compatibility
                     }
                 }
             }
 
-            // Step 9: Inject stat hediff during pawn generation
+            #endregion
+
+            #region Pawn Generation
+
+            /// <summary>
+            /// Injects stats and capabilities for modded pawns during generation
+            /// </summary>
             [HarmonyPatch(typeof(PawnGenerator))]
             [HarmonyPatch("GeneratePawn")]
             [HarmonyPatch(new Type[] { typeof(PawnGenerationRequest) })]
@@ -846,23 +817,25 @@ namespace emitbreaker.PawnControl
 
                     var modExtension = Utility_CacheManager.GetModExtension(__result.def);
                     if (modExtension == null)
-                    {
                         return;
-                    }
 
                     Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__result);
 
-                    if (!__result.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub")) && !Utility_StatManager.HasAlreadyInjected(__result))
+                    if (!__result.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub")) &&
+                        !Utility_StatManager.HasAlreadyInjected(__result))
                     {
+                        // Attach skill tracker and inject stats
                         Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__result);
                         Utility_StatManager.InjectConsolidatedStatHediff(__result);
-                        Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__result); // ✅ centralized
+                        Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__result);
                     }
                 }
             }
 
-            [HarmonyPatch(typeof(Pawn))]
-            [HarmonyPatch("SpawnSetup")]
+            /// <summary>
+            /// Initializes modded pawns when they are spawned
+            /// </summary>
+            [HarmonyPatch(typeof(Pawn), "SpawnSetup")]
             [HarmonyPatch(new Type[] { typeof(Map), typeof(bool) })]
             public static class Patch_Pawn_SpawnSetup
             {
@@ -870,233 +843,56 @@ namespace emitbreaker.PawnControl
                 public static void Postfix(Pawn __instance)
                 {
                     if (__instance == null || __instance.Dead || __instance.Destroyed)
-                    {
                         return;
-                    }
 
-                    // Skip the rest of processing for humanlike pawns
+                    // Skip humanlike pawns
                     if (__instance.RaceProps.Humanlike)
-                    {
                         return;
-                    }
 
-                    // Check for both mod extension and work tags
+                    // Check for mod extension and work tags
                     var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
-                    // Skip if no mod extension (but we've still handled mind activation above if it had tags)
                     if (modExtension == null)
-                    {
                         return;
-                    }
 
                     bool hasTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def);
                     if (!hasTags)
-                    {
-                        return; // No tags, skip further processing
-                    }
+                        return;
 
-                    // CRITICAL FIX: Ensure mind state is active for any eligible pawn immediately
+                    // Ensure mind state is active for any eligible pawn
                     if (__instance.mindState != null &&
                         __instance.workSettings != null &&
-                        __instance.workSettings.EverWork &&
-                        (modExtension != null || hasTags))
+                        __instance.workSettings.EverWork)
                     {
                         __instance.mindState.Active = true;
-
                         Utility_DebugManager.LogNormal($"Activated {__instance.LabelShort}'s mind during SpawnSetup");
                     }
 
+                    // Delayed setup to ensure all components are initialized
                     LongEventHandler.ExecuteWhenFinished(() =>
                     {
                         if (__instance.health?.hediffSet == null || !__instance.Spawned)
-                        {
                             return;
-                        }
 
-                        // ✅ Ensure hediff is injected only once, and allow mutation/removal logic to run inside the HediffComp
+                        // Inject stats if needed
                         if (!__instance.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub")))
                         {
                             Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__instance);
 
                             if (Utility_DebugManager.ShouldLog())
                             {
-                                // ✅ Log thinker state
+                                // Debug info
                                 Utility_DebugManager.DumpThinkerStatus(__instance);
-
-                                // ✅ Add diagnostic information for work givers
                                 Utility_DebugManager.DiagnoseWorkGiversForPawn(__instance);
                             }
 
                             Utility_StatManager.InjectConsolidatedStatHediff(__instance);
-                            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__instance); // ✅ centralized
+                            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__instance);
                         }
                     });
                 }
             }
 
-            // Step 10: Individual patches for necessary WorkGiver, JobGiver or JobDriver overrides
-            /// <summary>
-            /// Outline: If a pawn has no native BeatFire verb (e.g. non‐humanlike),
-            /// fall back to our custom Verb_BeatFire via TryStartCastOn.
-            /// </summary>
-            [HarmonyPatch(typeof(Pawn_NativeVerbs), "CheckCreateVerbProperties", MethodType.Normal)]
-            public static class Patch_NativeVerbs_InjectBeatFire
-            {
-                // ─── Outline: cache FieldInfo and VerbProperties once ───────────────────────
-                private static readonly FieldInfo CachedPropsField =
-                    AccessTools.Field(typeof(Pawn_NativeVerbs), "cachedVerbProperties");
-                private static readonly FieldInfo CachedBeatFireField =
-                    AccessTools.Field(typeof(Pawn_NativeVerbs), "cachedBeatFireVerb");
-                private static readonly VerbProperties FireProps =
-                    NativeVerbPropertiesDatabase.VerbWithCategory(VerbCategory.BeatFire);
-
-                // ─── Postfix runs only when vanilla CheckCreateVerbProperties would ──────────
-                public static void Postfix(Pawn_NativeVerbs __instance)
-                {
-                    // 1️⃣ Early-exit if we already injected
-                    var currentProps = (List<VerbProperties>)CachedPropsField.GetValue(__instance);
-                    var currentVerb = (Verb_BeatFire)CachedBeatFireField.GetValue(__instance);
-                    if (currentVerb != null || currentProps?.Contains(FireProps) == true)
-                        return;
-
-                    // 2️⃣ Get your pawn and skip humanlikes or non-tagged defs
-                    var pawn = ((IVerbOwner)__instance).ConstantCaster as Pawn;
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                    bool hasTags = Utility_TagManager.HasTag(pawn.def, PawnEnumTags.AllowWork_Firefighter.ToString());
-                    if (pawn.RaceProps.Humanlike || modExtension == null || !hasTags)
-                        return;
-
-                    // 3️⃣ Build or append the verb properties list
-                    if (currentProps == null)
-                        currentProps = new List<VerbProperties>();
-                    currentProps.Add(FireProps);
-                    CachedPropsField.SetValue(__instance, currentProps);
-
-                    // 4️⃣ Instantiate & cache the real BeatFireVerb
-                    var realVerb = __instance.verbTracker.GetVerb(VerbCategory.BeatFire) as Verb_BeatFire;
-                    CachedBeatFireField.SetValue(__instance, realVerb);
-                }
-            }
-
-            // Step 11: Inject plant-cut override inside GenConstruct.HandleBlockingThingJob
-            [HarmonyPatch(typeof(GenConstruct), nameof(GenConstruct.HandleBlockingThingJob))]
-            public static class Patch_GenConstruct_HandleBlockingThingJob_PlantCutOverride
-            {
-                [HarmonyPostfix]
-                public static void Postfix(ref Job __result, Thing constructible, Pawn worker, bool forced = false)
-                {
-                    // ✅ Skip if vanilla already assigned a job
-                    if (__result != null || constructible == null || worker == null)
-                        return;
-
-                    // ✅ Only apply to modded non-humanlike pawns
-                    if (worker.RaceProps.Humanlike || !Utility_TagManager.WorkEnabled(worker.def, "CutPlant"))
-                        return;
-
-                    // ✅ Scan for blocking thing and check plant
-                    Thing blocker = GenConstruct.FirstBlockingThing(constructible, worker);
-                    if (blocker == null || blocker.def.category != ThingCategory.Plant)
-                        return;
-
-                    // ✅ Respect reachability
-                    if (!worker.CanReserveAndReach(blocker, PathEndMode.ClosestTouch, worker.NormalMaxDanger(), 1, -1, null, forced))
-                        return;
-
-                    // ✅ Allow cutting plant as override
-                    __result = JobMaker.MakeJob(JobDefOf.CutPlant, blocker);
-                    Utility_DebugManager.LogNormal($"Forced CutPlant job for {worker.LabelShort} on {blocker.Label}");
-                }
-            }
-
-            [HarmonyPatch(typeof(Toils_Haul), "JumpToCarryToNextContainerIfPossible")]
-            public static class Patch_Toils_Haul_JumpToCarryToNextContainerIfPossible
-            {
-                [HarmonyPrefix]
-                public static bool Prefix(ref Toil __result, Toil carryToContainerToil, TargetIndex primaryTargetInd)
-                {
-                    __result = Utility_JobManager.GeneratePatchedToil(carryToContainerToil, primaryTargetInd);
-                    return false; // Skip vanilla
-                }
-            }
-
-            [HarmonyPatch(typeof(GenConstruct), nameof(GenConstruct.CanConstruct), new Type[]
-            { typeof(Thing), typeof(Pawn), typeof(bool), typeof(bool), typeof(JobDef) })]
-            public static class Patch_GenConstruct_CanConstruct
-            {
-                [HarmonyPrefix]
-                public static bool Prefix(
-                    Thing t,
-                    Pawn p,
-                    bool checkSkills,
-                    bool forced,
-                    JobDef jobForReservation,
-                    ref bool __result)
-                {
-                    if (p.RaceProps.Humanlike || Utility_CacheManager.GetModExtension(p.def) == null)
-                        return true; // ✅ Let vanilla run if humanlike or no mod extension
-
-                    // ⛔ Skip workSettings requirement check, as modded animals may not have any
-                    if (GenConstruct.FirstBlockingThing(t, p) != null)
-                    {
-                        __result = false;
-                        return false;
-                    }
-
-                    // Reservation logic
-                    if (jobForReservation != null)
-                    {
-                        if (!p.Spawned || !p.Map.reservationManager.OnlyReservationsForJobDef(t, jobForReservation) ||
-                            !p.CanReach(t, PathEndMode.Touch, forced ? Danger.Deadly : p.NormalMaxDanger()))
-                        {
-                            __result = false;
-                            return false;
-                        }
-                    }
-                    else if (!p.CanReserveAndReach(t, PathEndMode.Touch, forced ? Danger.Deadly : p.NormalMaxDanger(), 1, -1, null, forced))
-                    {
-                        __result = false;
-                        return false;
-                    }
-
-                    // Burning check
-                    if (t.IsBurning())
-                    {
-                        __result = false;
-                        return false;
-                    }
-
-                    // Skip skill checks for animals unless explicitly supported
-                    if (checkSkills && !p.RaceProps.Humanlike)
-                    {
-                        // Skip silently: animals often have no skills
-                    }
-
-                    // Ideology: skip check for animals (avoiding JobFailReason spam)
-                    if (!p.RaceProps.Humanlike)
-                    {
-                        // Example: building religious altar might block colonists, but not modded pawns
-                    }
-
-                    // Blueprint-specific checks (turret, attachment, etc.)
-                    if ((t.def.IsBlueprint || t.def.IsFrame) && t.def.entityDefToBuild is ThingDef thingDef)
-                    {
-                        if (thingDef.building != null && thingDef.building.isAttachment)
-                        {
-                            Thing wallAttachedTo = GenConstruct.GetWallAttachedTo(t);
-                            if (wallAttachedTo == null || wallAttachedTo.def.IsBlueprint || wallAttachedTo.def.IsFrame)
-                            {
-                                __result = false;
-                                return false;
-                            }
-                        }
-
-                        // History event checks (skip for animals)
-                        // Not needed: animals aren't tracked for tales
-                    }
-
-                    __result = true;
-                    return false; // ✅ Skip vanilla fully, after full checks
-                }
-            }
+            #endregion
         }
 
         public static class Patch_Iteration3_DrafterInjection

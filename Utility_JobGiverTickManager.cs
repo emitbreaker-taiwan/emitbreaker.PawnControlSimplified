@@ -14,22 +14,25 @@ namespace emitbreaker.PawnControl
     {
         // Map JobGiver types to their configured update intervals (in ticks)
         private static readonly Dictionary<Type, int> _updateIntervals = new Dictionary<Type, int>();
-        
+
         // Map JobGiver types to the last tick they were executed
         private static readonly Dictionary<Type, int> _lastExecutionTicks = new Dictionary<Type, int>();
 
         // Tracks JobGivers by their work types for grouped execution
         private static readonly Dictionary<string, List<Type>> _jobGiversByWorkType = new Dictionary<string, List<Type>>();
-        
+
         // Staggered offset per JobGiver to prevent execution clustering
         private static readonly Dictionary<Type, int> _executionOffsets = new Dictionary<Type, int>();
-        
+
         // Priority levels used to determine execution frequency
         private static readonly Dictionary<Type, int> _priorityLevels = new Dictionary<Type, int>();
-        
+
         // Map-specific tracking for conditional JobGiver activation
-        private static readonly Dictionary<int, HashSet<Type>> _activeJobGiversByMapId = 
-            new Dictionary<int, HashSet<Type>>();
+        private static readonly Dictionary<int, HashSet<Type>> _activeJobGiversByMapId = new Dictionary<int, HashSet<Type>>();
+
+        // Store base intervals and dynamic intervals for JobGivers
+        private static readonly Dictionary<Type, int> _baseIntervals = new Dictionary<Type, int>();
+        private static readonly Dictionary<Type, int> _dynamicIntervals = new Dictionary<Type, int>();
 
         // Base update interval constants
         public const int HIGH_PRIORITY_INTERVAL = 30;   // Critical tasks like firefighting (0.5 sec)
@@ -47,17 +50,17 @@ namespace emitbreaker.PawnControl
         public static void RegisterJobGiver(Type jobGiverType, string workTypeName, int priority, int? customInterval = null)
         {
             if (jobGiverType == null) return;
-            
+
             // Set priority for this JobGiver
             _priorityLevels[jobGiverType] = priority;
-            
+
             // Calculate execution interval based on priority
             int interval = customInterval ?? GetIntervalFromPriority(priority);
             _updateIntervals[jobGiverType] = interval;
-            
+
             // Generate a stable but unique offset for this JobGiver to stagger execution
             _executionOffsets[jobGiverType] = Math.Abs(jobGiverType.GetHashCode() % interval);
-            
+
             // Group by work type
             if (!string.IsNullOrEmpty(workTypeName))
             {
@@ -66,13 +69,13 @@ namespace emitbreaker.PawnControl
                     list = new List<Type>();
                     _jobGiversByWorkType[workTypeName] = list;
                 }
-                
+
                 if (!list.Contains(jobGiverType))
                 {
                     list.Add(jobGiverType);
                 }
             }
-            
+
             if (Prefs.DevMode)
             {
                 Utility_DebugManager.LogNormal($"Registered JobGiver {jobGiverType.Name} (WorkType: {workTypeName}, Priority: {priority}, Interval: {interval} ticks)");
@@ -89,44 +92,53 @@ namespace emitbreaker.PawnControl
         public static bool ShouldExecute(Type jobGiverType, int mapId, bool forceExecute = false)
         {
             int currentTick = Find.TickManager.TicksGame;
-            
+
             // Force execution if requested
             if (forceExecute)
             {
                 _lastExecutionTicks[jobGiverType] = currentTick;
                 return true;
             }
-            
+
             // Get configured update interval (default to medium if not set)
             int interval = _updateIntervals.GetValueSafe(jobGiverType, MEDIUM_PRIORITY_INTERVAL);
-            
+
             // Get offset for this JobGiver (ensures staggered execution)
             int offset = _executionOffsets.GetValueSafe(jobGiverType, 0);
-            
+
             // Get last execution tick (default to far past to ensure first run)
             int lastTick = _lastExecutionTicks.GetValueSafe(jobGiverType, -interval);
-            
+
             // Determine if enough time has passed since last execution
             bool intervalElapsed = (currentTick - lastTick) >= interval;
-            
+
             // Check if this is the right tick within the interval based on offset
             bool offsetMatches = (currentTick + offset) % interval == 0;
-            
+
             // Special handling for dynamic JobGiver activation per map
             bool isActiveOnMap = IsJobGiverActiveOnMap(jobGiverType, mapId);
-            
+
             // JobGiver should execute if interval elapsed AND it's active on this map
             bool shouldExecute = (intervalElapsed && offsetMatches && isActiveOnMap);
-            
+
             // Update last execution time if executing now
             if (shouldExecute)
             {
                 _lastExecutionTicks[jobGiverType] = currentTick;
             }
-            
+
             return shouldExecute;
         }
-        
+
+        /// <summary>
+        /// Gets the appropriate interval value for a priority level (for ThinkNode integration)
+        /// </summary>
+        public static int GetIntervalForPriority(int priority)
+        {
+            // Use the existing priority-to-interval logic
+            return GetIntervalFromPriority(priority);
+        }
+
         /// <summary>
         /// Dynamically adjusts execution intervals based on colony size and performance
         /// </summary>
@@ -135,7 +147,7 @@ namespace emitbreaker.PawnControl
             // Count total pawns across all maps to gauge complexity
             int totalPawns = 0;
             int totalMaps = 0;
-            
+
             if (Current.Game?.Maps != null)
             {
                 foreach (var map in Current.Game.Maps)
@@ -144,33 +156,33 @@ namespace emitbreaker.PawnControl
                     totalMaps++;
                 }
             }
-            
+
             // Scale factor based on pawn count (more pawns = longer intervals)
             float scaleFactor = 1f;
-            
+
             if (totalPawns > 50) scaleFactor = 1.5f;
             if (totalPawns > 100) scaleFactor = 2f;
             if (totalPawns > 200) scaleFactor = 2.5f;
             if (totalPawns > 500) scaleFactor = 3f;
             if (totalPawns > 1000) scaleFactor = 4f;
-            
+
             // Apply scaled intervals to all registered JobGivers
             foreach (var jobGiverType in _priorityLevels.Keys.ToList())
             {
                 int priority = _priorityLevels[jobGiverType];
-                int baseInterval = GetIntervalFromPriority(priority); 
+                int baseInterval = GetIntervalFromPriority(priority);
                 int scaledInterval = (int)(baseInterval * scaleFactor);
-                
+
                 // Update interval
                 _updateIntervals[jobGiverType] = scaledInterval;
             }
-            
+
             if (Prefs.DevMode)
             {
                 Utility_DebugManager.LogNormal($"Adjusted JobGiver intervals for {totalPawns} pawns across {totalMaps} maps (scale: {scaleFactor:F2}x)");
             }
         }
-        
+
         /// <summary>
         /// Sets a JobGiver as active or inactive for a specific map
         /// </summary>
@@ -181,7 +193,7 @@ namespace emitbreaker.PawnControl
                 activeJobGivers = new HashSet<Type>();
                 _activeJobGiversByMapId[mapId] = activeJobGivers;
             }
-            
+
             if (active)
             {
                 activeJobGivers.Add(jobGiverType);
@@ -191,7 +203,7 @@ namespace emitbreaker.PawnControl
                 activeJobGivers.Remove(jobGiverType);
             }
         }
-        
+
         /// <summary>
         /// Checks if a JobGiver is active on a specific map
         /// </summary>
@@ -202,11 +214,11 @@ namespace emitbreaker.PawnControl
             {
                 return true;
             }
-            
+
             // If tracked but not in set, it's inactive
             return activeJobGivers.Contains(jobGiverType);
         }
-        
+
         /// <summary>
         /// Gets the appropriate execution interval based on priority level
         /// </summary>
@@ -217,7 +229,7 @@ namespace emitbreaker.PawnControl
             if (priority >= 3) return LOW_PRIORITY_INTERVAL;       // Standard tasks
             return BACKGROUND_PRIORITY_INTERVAL;                   // Low priority tasks
         }
-        
+
         /// <summary>
         /// Resets all tracking data (for loading a new game)
         /// </summary>
@@ -226,7 +238,7 @@ namespace emitbreaker.PawnControl
             _lastExecutionTicks.Clear();
             _activeJobGiversByMapId.Clear();
         }
-        
+
         /// <summary>
         /// Gets the next scheduled execution tick for a JobGiver
         /// </summary>
@@ -236,11 +248,39 @@ namespace emitbreaker.PawnControl
             int lastTick = _lastExecutionTicks.GetValueSafe(jobGiverType, currentTick);
             int interval = _updateIntervals.GetValueSafe(jobGiverType, MEDIUM_PRIORITY_INTERVAL);
             int offset = _executionOffsets.GetValueSafe(jobGiverType, 0);
-            
+
             // Calculate next execution tick based on interval and offset
             return lastTick + interval - ((currentTick + offset) % interval);
         }
-        
+
+        /// <summary>
+        /// Cleans up data for a specific map that is no longer needed
+        /// </summary>
+        public static void CleanupMap(int mapId)
+        {
+            // Remove this map from active maps tracking
+            if (_activeJobGiversByMapId.TryGetValue(mapId, out _))
+            {
+                _activeJobGiversByMapId.Remove(mapId);
+            }
+
+            // Reset execution ticks for all JobGivers on this map
+            // This ensures they will run immediately when the map is next accessed
+            foreach (var jobGiverType in _updateIntervals.Keys.ToList())
+            {
+                if (_lastExecutionTicks.ContainsKey(jobGiverType))
+                {
+                    _lastExecutionTicks[jobGiverType] = -999;
+                }
+            }
+
+            if (Prefs.DevMode)
+            {
+                int jobGiverCount = _jobGiversByWorkType.Values.Sum(list => list.Count);
+                Utility_DebugManager.LogNormal($"Cleaned up tick manager data for map {mapId} with {jobGiverCount} registered JobGivers");
+            }
+        }
+
         /// <summary>
         /// Gets all JobGiver types associated with a specific work type
         /// </summary>
@@ -250,8 +290,80 @@ namespace emitbreaker.PawnControl
             {
                 return Enumerable.Empty<Type>();
             }
-            
+
             return list;
+        }
+
+        /// <summary>
+        /// Gets the base interval for a JobGiver
+        /// </summary>
+        public static int GetBaseInterval(Type jobGiverType)
+        {
+            if (jobGiverType == null)
+                return MEDIUM_PRIORITY_INTERVAL;
+
+            if (_baseIntervals.TryGetValue(jobGiverType, out int interval))
+                return interval;
+
+            // If no specific base interval is set, calculate from priority
+            return GetIntervalFromPriority(GetJobGiverPriority(jobGiverType));
+        }
+
+        /// <summary>
+        /// Sets the base interval for a JobGiver
+        /// </summary>
+        public static void SetBaseInterval(Type jobGiverType, int interval)
+        {
+            if (jobGiverType == null || interval <= 0)
+                return;
+
+            _baseIntervals[jobGiverType] = interval;
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Set base interval for {jobGiverType.Name}: {interval} ticks");
+            }
+        }
+
+        /// <summary>
+        /// Sets a dynamic interval for a JobGiver based on runtime profiling
+        /// </summary>
+        public static void SetDynamicInterval(Type jobGiverType, int interval)
+        {
+            if (jobGiverType == null || interval <= 0)
+                return;
+
+            _dynamicIntervals[jobGiverType] = interval;
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Set dynamic interval for {jobGiverType.Name}: {interval} ticks");
+            }
+        }
+
+        /// <summary>
+        /// Gets the current interval for a JobGiver, considering dynamic adjustments
+        /// </summary>
+        public static int GetCurrentInterval(Type jobGiverType)
+        {
+            // Prefer dynamic interval if available
+            if (_dynamicIntervals.TryGetValue(jobGiverType, out int dynInterval))
+                return dynInterval;
+
+            // Fall back to base interval
+            return GetBaseInterval(jobGiverType);
+        }
+
+        /// <summary>
+        /// Gets the priority level for a JobGiver
+        /// </summary>
+        private static int GetJobGiverPriority(Type jobGiverType)
+        {
+            // Look up the priority from our registry
+            if (_priorityLevels.TryGetValue(jobGiverType, out int priority))
+                return priority;
+
+            return 5; // Default medium priority
         }
     }
 }

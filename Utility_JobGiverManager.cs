@@ -1,9 +1,11 @@
 using RimWorld;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using Verse;
 using Verse.AI;
+using static emitbreaker.PawnControl.JobGiver_PawnControl;
 
 namespace emitbreaker.PawnControl
 {
@@ -12,6 +14,29 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public static class Utility_JobGiverManager
     {
+        #region Registry Data Structures
+
+        // Registry of all JobGivers with their basic data (for scheduling)
+        private static readonly Dictionary<Type, object> _jobGiversRegistry = new Dictionary<Type, object>();
+
+        // JobGivers that have been explicitly deactivated for specific maps
+        private static readonly Dictionary<int, HashSet<Type>> _deactivatedJobGivers = new Dictionary<int, HashSet<Type>>();
+
+        // Central registry of all JobGiver types
+        private static readonly Dictionary<Type, JobGiverRegistryEntry> _jobGiverRegistry = new Dictionary<Type, JobGiverRegistryEntry>();
+
+        // JobGivers grouped by work type
+        private static readonly Dictionary<string, List<Type>> _jobGiversByWorkType = new Dictionary<string, List<Type>>(StringComparer.OrdinalIgnoreCase);
+
+        // JobGiver dependencies (which JobGivers depend on which others)
+        private static readonly Dictionary<Type, HashSet<Type>> _jobGiverDependencies = new Dictionary<Type, HashSet<Type>>();
+
+        // JobGivers that provide resources for other JobGivers
+        private static readonly Dictionary<Type, HashSet<Type>> _resourceProviderJobGivers = new Dictionary<Type, HashSet<Type>>();
+
+        // Storage for bypass conditions
+        private static readonly Dictionary<Type, Utility_ThinkTreeOptimizationManager.BypassCondition[]> _bypassConditions = new Dictionary<Type, Utility_ThinkTreeOptimizationManager.BypassCondition[]>();
+
         /// <summary>
         /// A delegate type for check functions that may set JobFailReason
         /// </summary>
@@ -20,61 +45,485 @@ namespace emitbreaker.PawnControl
         /// <returns>True if the check passes, false otherwise</returns>
         public delegate bool JobEligibilityCheck(Pawn pawn, bool setFailReason = true);
 
+        #endregion
+
+        #region JobGiver Registry Entry
+        /// <summary>
+        /// Storage class for JobGiver metadata and runtime statistics
+        /// </summary>
+        public class JobGiverRegistryEntry
+        {
+            // Basic identification
+            public Type JobGiverType { get; }
+            public string WorkTypeName { get; }
+            public int BasePriority { get; set; }
+            public int? CustomTickInterval { get; set; }
+
+            // Extended metadata
+            public Utility_GlobalStateManager.JobCategory JobCategory { get; set; }
+            public Utility_GlobalStateManager.PawnCapabilityFlags RequiredCapabilities { get; set; }
+            public Dictionary<Utility_GlobalStateManager.ColonyNeedType, float> NeedResponsiveness { get; set; }
+
+            // Runtime statistics
+            public int TotalExecutions { get; private set; }
+            public int SuccessfulExecutions { get; private set; }
+            public float TotalExecutionTime { get; private set; }
+            public float MaxExecutionTime { get; private set; }
+            public int LastExecutionTick { get; private set; }
+            public float AverageExecutionTime => TotalExecutions > 0 ? TotalExecutionTime / TotalExecutions : 0f;
+            public float SuccessRate => TotalExecutions > 0 ? (float)SuccessfulExecutions / TotalExecutions : 0f;
+
+            // Dependency tracking
+            public HashSet<Type> DependsOn { get; } = new HashSet<Type>();
+            public HashSet<Type> RequiredBy { get; } = new HashSet<Type>();
+
+            public JobGiverRegistryEntry(Type jobGiverType, string workTypeName, int basePriority = 5, int? customTickInterval = null)
+            {
+                JobGiverType = jobGiverType;
+                WorkTypeName = workTypeName;
+                BasePriority = basePriority;
+                CustomTickInterval = customTickInterval;
+
+                // Default values for metadata
+                JobCategory = Utility_GlobalStateManager.JobCategory.Basic;
+                RequiredCapabilities = Utility_GlobalStateManager.PawnCapabilityFlags.None;
+                NeedResponsiveness = new Dictionary<Utility_GlobalStateManager.ColonyNeedType, float>();
+
+                // Initialize statistics
+                TotalExecutions = 0;
+                SuccessfulExecutions = 0;
+                TotalExecutionTime = 0f;
+                MaxExecutionTime = 0f;
+            }
+
+            /// <summary>
+            /// Records execution metrics for this JobGiver
+            /// </summary>
+            public void RecordExecution(bool successful, float executionTimeMs, int tick)
+            {
+                TotalExecutions++;
+                if (successful) SuccessfulExecutions++;
+
+                TotalExecutionTime += executionTimeMs;
+                LastExecutionTick = tick;
+
+                if (executionTimeMs > MaxExecutionTime)
+                    MaxExecutionTime = executionTimeMs;
+            }
+
+            public override string ToString()
+            {
+                return $"{JobGiverType.Name}: {WorkTypeName ?? "no work type"}, Priority: {BasePriority}, " +
+                       $"Success rate: {SuccessRate * 100:F1}%, Avg time: {AverageExecutionTime:F2}ms";
+            }
+        }
+
+        #endregion
+
+        #region Registration Methods
+
+        /// <summary>
+        /// Registers a JobGiver with the registry system
+        /// </summary>
+        public static void RegisterJobGiver(
+            Type jobGiverType,
+            string workTypeName = null,
+            int basePriority = 5,
+            int? customTickInterval = null,
+            Utility_GlobalStateManager.JobCategory jobCategory = Utility_GlobalStateManager.JobCategory.Basic,
+            Utility_GlobalStateManager.PawnCapabilityFlags requiredCapabilities = Utility_GlobalStateManager.PawnCapabilityFlags.None,
+            Dictionary<Utility_GlobalStateManager.ColonyNeedType, float> needResponsiveness = null,
+            Type[] dependsOnJobGivers = null)
+        {
+            if (jobGiverType == null) return;
+
+            // Create or update registry entry
+            if (!_jobGiverRegistry.TryGetValue(jobGiverType, out JobGiverRegistryEntry entry))
+            {
+                // Create new entry
+                entry = new JobGiverRegistryEntry(jobGiverType, workTypeName, basePriority, customTickInterval);
+                _jobGiverRegistry[jobGiverType] = entry;
+
+                // Register with JobGiverTickManager for scheduling
+                Utility_JobGiverTickManager.RegisterJobGiver(jobGiverType, workTypeName, basePriority, customTickInterval);
+
+                // Log registration in dev mode
+                if (Prefs.DevMode)
+                {
+                    Utility_DebugManager.LogNormal($"Registered JobGiver: {jobGiverType.Name} (WorkType: {workTypeName ?? "none"})");
+                }
+            }
+            else
+            {
+                // Update existing entry (keeping statistics)
+                entry.BasePriority = basePriority;
+                entry.CustomTickInterval = customTickInterval;
+            }
+
+            // Set extended metadata
+            entry.JobCategory = jobCategory;
+            entry.RequiredCapabilities = requiredCapabilities;
+
+            if (needResponsiveness != null)
+            {
+                entry.NeedResponsiveness = new Dictionary<Utility_GlobalStateManager.ColonyNeedType, float>(needResponsiveness);
+            }
+
+            // Register with GlobalStateManager
+            Utility_GlobalStateManager.RegisterJobGiverMetadata(
+                jobGiverType, jobCategory, requiredCapabilities, needResponsiveness);
+
+            // Add to work type grouping
+            if (!string.IsNullOrEmpty(workTypeName))
+            {
+                if (!_jobGiversByWorkType.TryGetValue(workTypeName, out var workTypeGroup))
+                {
+                    workTypeGroup = new List<Type>();
+                    _jobGiversByWorkType[workTypeName] = workTypeGroup;
+                }
+
+                if (!workTypeGroup.Contains(jobGiverType))
+                {
+                    workTypeGroup.Add(jobGiverType);
+                }
+            }
+
+            // Register dependencies
+            if (dependsOnJobGivers != null && dependsOnJobGivers.Length > 0)
+            {
+                RegisterDependencies(jobGiverType, dependsOnJobGivers);
+            }
+        }
+
+        /// <summary>
+        /// Registers dependencies between JobGivers
+        /// </summary>
+        public static void RegisterDependencies(Type jobGiverType, params Type[] dependsOnTypes)
+        {
+            if (jobGiverType == null || dependsOnTypes == null || dependsOnTypes.Length == 0)
+                return;
+
+            // Get or create dependency set
+            if (!_jobGiverDependencies.TryGetValue(jobGiverType, out var dependencies))
+            {
+                dependencies = new HashSet<Type>();
+                _jobGiverDependencies[jobGiverType] = dependencies;
+            }
+
+            // Register each dependency
+            foreach (Type dependsOn in dependsOnTypes)
+            {
+                if (dependsOn == null || dependsOn == jobGiverType)
+                    continue;
+
+                // Add to dependencies
+                dependencies.Add(dependsOn);
+
+                // Add this JobGiver to the "required by" set of the dependency
+                if (!_resourceProviderJobGivers.TryGetValue(dependsOn, out var requiredBy))
+                {
+                    requiredBy = new HashSet<Type>();
+                    _resourceProviderJobGivers[dependsOn] = requiredBy;
+                }
+
+                requiredBy.Add(jobGiverType);
+
+                // Add to registry entry if it exists
+                if (_jobGiverRegistry.TryGetValue(jobGiverType, out var entry))
+                {
+                    entry.DependsOn.Add(dependsOn);
+                }
+
+                if (_jobGiverRegistry.TryGetValue(dependsOn, out var depEntry))
+                {
+                    depEntry.RequiredBy.Add(jobGiverType);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Registry Query Methods
+
+        /// <summary>
+        /// Gets all registered JobGivers
+        /// </summary>
+        public static IEnumerable<Type> GetAllRegisteredJobGivers()
+        {
+            return _jobGiverRegistry.Keys;
+        }
+
+        /// <summary>
+        /// Gets all JobGivers for a specific work type
+        /// </summary>
+        public static IEnumerable<Type> GetJobGiversByWorkType(string workTypeName)
+        {
+            if (string.IsNullOrEmpty(workTypeName))
+                return Enumerable.Empty<Type>();
+
+            if (_jobGiversByWorkType.TryGetValue(workTypeName, out var jobGivers))
+                return jobGivers;
+
+            return Enumerable.Empty<Type>();
+        }
+
+        /// <summary>
+        /// Gets the registry entry for a JobGiver
+        /// </summary>
+        public static JobGiverRegistryEntry GetJobGiverInfo(Type jobGiverType)
+        {
+            if (jobGiverType == null)
+                return null;
+
+            _jobGiverRegistry.TryGetValue(jobGiverType, out var entry);
+            return entry;
+        }
+
+        /// <summary>
+        /// Gets all JobGivers this JobGiver depends on
+        /// </summary>
+        public static IEnumerable<Type> GetJobGiverDependencies(Type jobGiverType)
+        {
+            if (jobGiverType == null)
+                return Enumerable.Empty<Type>();
+
+            if (_jobGiverDependencies.TryGetValue(jobGiverType, out var dependencies))
+                return dependencies;
+
+            return Enumerable.Empty<Type>();
+        }
+
+        /// <summary>
+        /// Gets all JobGivers that depend on this JobGiver
+        /// </summary>
+        public static IEnumerable<Type> GetJobGiverDependents(Type jobGiverType)
+        {
+            if (jobGiverType == null)
+                return Enumerable.Empty<Type>();
+
+            if (_resourceProviderJobGivers.TryGetValue(jobGiverType, out var dependents))
+                return dependents;
+
+            return Enumerable.Empty<Type>();
+        }
+
+        /// <summary>
+        /// Checks if one JobGiver depends on another
+        /// </summary>
+        public static bool DependsOn(Type jobGiverType, Type dependencyType)
+        {
+            if (jobGiverType == null || dependencyType == null)
+                return false;
+
+            if (_jobGiverDependencies.TryGetValue(jobGiverType, out var dependencies))
+                return dependencies.Contains(dependencyType);
+
+            return false;
+        }
+
+        /// <summary>
+        /// Gets JobGivers that respond to a specific colony need
+        /// </summary>
+        public static IEnumerable<Type> GetJobGiversForNeed(Utility_GlobalStateManager.ColonyNeedType needType)
+        {
+            return _jobGiverRegistry
+                .Where(kvp => kvp.Value.NeedResponsiveness != null &&
+                       kvp.Value.NeedResponsiveness.TryGetValue(needType, out float response) &&
+                       response > 0)
+                .Select(kvp => kvp.Key);
+        }
+
+        /// <summary>
+        /// Gets all JobGivers that require specific capabilities
+        /// </summary>
+        public static IEnumerable<Type> GetJobGiversRequiringCapabilities(Utility_GlobalStateManager.PawnCapabilityFlags capabilities)
+        {
+            return _jobGiverRegistry
+                .Where(kvp => (kvp.Value.RequiredCapabilities & capabilities) == capabilities)
+                .Select(kvp => kvp.Key);
+        }
+
+        #endregion
+
+        #region Performance Tracking
+
+        /// <summary>
+        /// Records execution metrics for a JobGiver
+        /// </summary>
+        public static void RecordJobGiverExecution(Type jobGiverType, bool successful, float executionTimeMs)
+        {
+            if (jobGiverType == null)
+                return;
+
+            int currentTick = Find.TickManager.TicksGame;
+
+            // Record in registry
+            if (_jobGiverRegistry.TryGetValue(jobGiverType, out var entry))
+            {
+                entry.RecordExecution(successful, executionTimeMs, currentTick);
+            }
+
+            // Integrate with adaptive profiler if enabled
+            if (Utility_AdaptiveProfilingManager.IsProfilingEnabled)
+            {
+                Utility_AdaptiveProfilingManager.RecordJobGiverExecution(jobGiverType, executionTimeMs, successful);
+            }
+        }
+
+        /// <summary>
+        /// Gets the most efficient JobGivers by success rate and execution time
+        /// </summary>
+        public static IEnumerable<JobGiverRegistryEntry> GetMostEfficientJobGivers(int count = 10)
+        {
+            return _jobGiverRegistry.Values
+                .Where(entry => entry.TotalExecutions > 5)  // Only consider JobGivers with enough data
+                .OrderByDescending(entry => entry.SuccessRate / (Math.Max(0.1f, entry.AverageExecutionTime)))
+                .Take(count);
+        }
+
+        /// <summary>
+        /// Gets the slowest JobGivers by execution time
+        /// </summary>
+        public static IEnumerable<JobGiverRegistryEntry> GetSlowestJobGivers(int count = 10)
+        {
+            return _jobGiverRegistry.Values
+                .Where(entry => entry.TotalExecutions > 5)
+                .OrderByDescending(entry => entry.AverageExecutionTime)
+                .Take(count);
+        }
+
+        /// <summary>
+        /// Gets the most successful JobGivers by success rate
+        /// </summary>
+        public static IEnumerable<JobGiverRegistryEntry> GetMostSuccessfulJobGivers(int count = 10)
+        {
+            return _jobGiverRegistry.Values
+                .Where(entry => entry.TotalExecutions > 5)
+                .OrderByDescending(entry => entry.SuccessRate)
+                .Take(count);
+        }
+
+        #endregion
+
+        #region Dependency Management
+
+        /// <summary>
+        /// Validates that all dependencies of a JobGiver are satisfied for a pawn
+        /// </summary>
+        public static bool AreDependenciesSatisfied(Type jobGiverType, Pawn pawn)
+        {
+            if (jobGiverType == null || pawn == null)
+                return false;
+
+            // Skip dependency check if no dependencies registered
+            if (!_jobGiverDependencies.TryGetValue(jobGiverType, out var dependencies) ||
+                dependencies.Count == 0)
+                return true;
+
+            // Check each dependency
+            foreach (Type dependencyType in dependencies)
+            {
+                // Skip if dependency check is registered
+                bool bypassAllow = false;
+                Utility_ThinkTreeOptimizationManager.BypassCondition[] conditions = GetBypassConditions(dependencyType);
+                if (conditions != null)
+                {
+                    foreach (var condition in conditions)
+                    {
+                        if (condition(pawn))
+                        {
+                            bypassAllow = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If bypass conditions allow it, skip this dependency check
+                if (bypassAllow)
+                    continue;
+
+                // Check if resources from this dependency exist
+                // This would be dependency-specific logic, possibly through a delegate system
+                // Here we just check if the dependency is active for this pawn's map
+                if (!IsJobGiverActive(dependencyType, pawn.Map.uniqueID))
+                {
+                    if (Prefs.DevMode)
+                    {
+                        Utility_DebugManager.LogNormal($"JobGiver {jobGiverType.Name} skipped for {pawn.LabelShort} - " +
+                                                     $"dependency {dependencyType.Name} not active");
+                    }
+                    return false;
+                }
+
+                // Additional dependency validation would go here
+            }
+
+            return true;
+        }
+
+        #endregion
+
+        #region Standardized Job Creation
+
         /// <summary>
         /// Standardized job-giving method wrapper to be used by all JobGiver classes for consistent behavior
         /// </summary>
-        /// <typeparam name="T">The type of things being processed (e.g., Plant, Thing, Pawn)</typeparam>
-        /// <param name="pawn">The pawn trying to get a job</param>
-        /// <param name="workTag">Work tag required for this job (e.g., "PlantCutting", "Warden")</param>
-        /// <param name="jobCreator">Function that creates the actual job if eligibility checks pass</param>
-        /// <param name="additionalChecks">Optional list of additional conditions that must be satisfied, with ability to set JobFailReasons</param>
-        /// <param name="debugJobDesc">Description of the job type for logging (e.g., "plant cutting")</param>
-        /// <param name="skipEmergencyCheck">Whether to skip the emergency check (set to true for emergency JobGivers)</param>
-        /// <returns>A Job if one can be created, otherwise null</returns>
         public static Job StandardTryGiveJob<T>(
             Pawn pawn,
             string workTag,
             Func<Pawn, bool, Job> jobCreator,
             List<JobEligibilityCheck> additionalChecks = null,
             string debugJobDesc = null,
-            bool skipEmergencyCheck = false) where T : class
+            bool skipEmergencyCheck = false,
+            Type jobGiverType = null) where T : class
         {
-            // Early exit if pawn is drafted
-            if (pawn.drafter != null && pawn.drafter.Drafted)
-            {
-                Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} is drafted, skipping {debugJobDesc ?? workTag} job");
-                return null;
-            }
+            // Start timing for profiling
+            var stopwatch = new System.Diagnostics.Stopwatch();
+            stopwatch.Start();
 
-            // 1. Emergency check - yield to firefighting if there's a fire (unless we should skip it)
-            if (!skipEmergencyCheck && ShouldYieldToEmergencyJob(pawn))
-            {
-                Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} yielding from {debugJobDesc ?? workTag} to handle emergency");
-                return null;
-            }
-
-            // The rest of the method remains the same...
-            // 2. Basic eligibility check with the specified work tag
-            if (!IsEligibleForSpecializedJobGiver(pawn, workTag))
-                return null;
-
-            // 3. Perform any additional checks provided by the specific JobGiver
-            if (additionalChecks != null)
-            {
-                foreach (var check in additionalChecks)
-                {
-                    if (!check(pawn))
-                        return null;
-                }
-            }
-
-            // 4. Call the job creator function with the pawn and forced=false
             try
             {
+                // Early exit if pawn is drafted
+                if (pawn?.drafter != null && pawn.drafter.Drafted)
+                {
+                    Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} is drafted, skipping {debugJobDesc ?? workTag} job");
+                    return null;
+                }
+
+                // 1. Emergency check - yield to firefighting if there's a fire (unless we should skip it)
+                if (!skipEmergencyCheck && ShouldYieldToEmergencyJob(pawn))
+                {
+                    Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} yielding from {debugJobDesc ?? workTag} to handle emergency");
+                    return null;
+                }
+
+                // 2. Basic eligibility check with the specified work tag
+                if (!IsEligibleForSpecializedJobGiver(pawn, workTag))
+                    return null;
+
+                // 3. Check global state flags if available
+                if (jobGiverType != null && Utility_GlobalStateManager.ShouldSkipJobGiverDueToGlobalState(null, pawn))
+                    return null;
+
+                // 4. Check dependencies if available
+                if (jobGiverType != null && !AreDependenciesSatisfied(jobGiverType, pawn))
+                    return null;
+
+                // 5. Perform any additional checks provided by the specific JobGiver
+                if (additionalChecks != null)
+                {
+                    foreach (var check in additionalChecks)
+                    {
+                        if (!check(pawn))
+                            return null;
+                    }
+                }
+
+                // 6. Call the job creator function with the pawn and forced=false
                 Job job = jobCreator(pawn, false);
 
-                // 5. Debug logging if a job was found
-                if (job != null)
+                // 7. Debug logging if a job was found
+                if (job != null && Prefs.DevMode)
                 {
                     Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} created {debugJobDesc ?? workTag} job: {job.def.defName}");
                 }
@@ -85,6 +534,15 @@ namespace emitbreaker.PawnControl
             {
                 Utility_DebugManager.LogError($"Error creating {debugJobDesc ?? workTag} job for {pawn.LabelShort}: {ex}");
                 return null;
+            }
+            finally
+            {
+                // Stop timing and record metrics
+                stopwatch.Stop();
+                if (jobGiverType != null)
+                {
+                    RecordJobGiverExecution(jobGiverType, stopwatch.Elapsed.TotalMilliseconds > 0, (float)stopwatch.Elapsed.TotalMilliseconds);
+                }
             }
         }
 
@@ -196,7 +654,38 @@ namespace emitbreaker.PawnControl
 
             return true;
         }
-        
+
+        #endregion
+
+        #region Cleanup Methods
+
+        /// <summary>
+        /// Resets all JobGiver registry data
+        /// </summary>
+        public static void ResetRegistry()
+        {
+            _jobGiverRegistry.Clear();
+            _jobGiversByWorkType.Clear();
+            _jobGiverDependencies.Clear();
+            _resourceProviderJobGivers.Clear();
+            _bypassConditions.Clear();
+
+            // Also reset related systems
+            Utility_JobGiverTickManager.ResetAll();
+        }
+
+        /// <summary>
+        /// Cleans up data for a specific map
+        /// </summary>
+        public static void CleanupMapData(int mapId)
+        {
+            // Nothing specific to clean up here since data is not stored per-map
+            // Just forward the call to other systems
+            Utility_JobGiverTickManager.CleanupMap(mapId);
+        }
+
+        #endregion
+
         /// <summary>
         /// Creates a distance-based buckets system for optimized job target selection
         /// </summary>
@@ -931,6 +1420,51 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
+            return true;
+        }
+
+        /// <summary>
+        /// Registers bypass conditions for a JobGiver
+        /// </summary>
+        public static void RegisterBypassConditions(Type jobGiverType, Utility_ThinkTreeOptimizationManager.BypassCondition[] conditions)
+        {
+            if (jobGiverType == null || conditions == null) return;
+
+            _bypassConditions[jobGiverType] = conditions;
+        }
+
+        /// <summary>
+        /// Gets the registered bypass conditions for a JobGiver
+        /// </summary>
+        public static Utility_ThinkTreeOptimizationManager.BypassCondition[] GetBypassConditions(Type jobGiverType)
+        {
+            if (jobGiverType == null) return null;
+
+            if (_bypassConditions.TryGetValue(jobGiverType, out var conditions))
+                return conditions;
+
+            return null;
+        }
+
+        /// <summary>
+        /// Checks if a JobGiver is active for a specific map
+        /// </summary>
+        public static bool IsJobGiverActive(Type jobGiverType, int mapId)
+        {
+            if (jobGiverType == null)
+                return true; // Default to active if not found
+
+            // Check if jobGiver is registered
+            bool isRegistered = _jobGiversRegistry.ContainsKey(jobGiverType);
+            if (!isRegistered)
+                return true; // If not registered, consider it active
+
+            // Check if explicitly deactivated for this map
+            if (_deactivatedJobGivers.TryGetValue(mapId, out var deactivated) &&
+                deactivated.Contains(jobGiverType))
+                return false;
+
+            // Otherwise, it's active
             return true;
         }
     }

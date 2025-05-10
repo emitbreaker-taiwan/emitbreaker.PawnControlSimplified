@@ -98,7 +98,69 @@ namespace emitbreaker.PawnControl
 
             return result;
         }
-        
+
+        public static bool WorkTypeEnabled(ThingDef def, WorkTypeDef workTypeDef)
+        {
+            if (def == null || workTypeDef == null)
+            {
+                return false; // Invalid input
+            }
+
+            var key = new ValueTuple<ThingDef, WorkTypeDef>(def, workTypeDef);
+
+            // Try to get from cache first
+            if (Utility_CacheManager._workTypeEnabledCache.TryGetValue(key, out bool result))
+            {
+                return result;
+            }
+
+            // Compute result
+            result = HasTag(def, ManagedTags.AllowAllWork) ||
+                     HasTag(def, (ManagedTags.AllowWorkPrefix + workTypeDef.defName));
+
+            // Store in cache
+            Utility_CacheManager._workTypeEnabledCache[key] = result;
+
+            return result;
+        }
+
+        public static bool WorkTypeSettingEnabled(Pawn pawn, WorkTypeDef workTypeDef)
+        {
+            if (pawn == null || workTypeDef == null)
+            {
+                return false; // Invalid input
+            }
+
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null)
+            {
+                return false; // No mod extension found
+            }
+
+            // Check if the pawn is allowed to do the work type
+            if (!WorkTypeEnabled(pawn.def, workTypeDef))
+            {
+                return false;
+            }
+
+            var key = new ValueTuple<ThingDef, WorkTypeDef>(pawn.def, workTypeDef);
+
+            // Try to get from cache first
+            if (Utility_CacheManager._workTypeSettingEnabledCache.TryGetValue(key, out bool result))
+            {
+                return result;
+            }
+
+            // Compute result
+            result = pawn.workSettings.WorkIsActive(workTypeDef);
+
+            // Store in cache
+            Utility_CacheManager._workTypeSettingEnabledCache[key] = result;
+
+            // Check if the pawn's work settings allow this work type
+            return result;
+        }
+
         public static bool ForceDraftable(ThingDef def, string tag = ManagedTags.ForceDraftable)
         {
             if (def == null)

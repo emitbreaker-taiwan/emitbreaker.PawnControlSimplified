@@ -13,6 +13,30 @@ namespace emitbreaker.PawnControl
 {
     public class Utility_CompatibilityManager
     {
+        public static object TryGetModExtensionNoDependency(ThingDef def, string defModExtensionTypeOf)
+        {
+            if (def == null || def.modExtensions == null)
+            {
+                return null;
+            }
+
+            foreach (var modExtension in def.modExtensions)
+            {
+                var modExtensionType = modExtension?.GetType();
+                if (modExtensionType == null)
+                {
+                    continue;
+                }
+
+                if (modExtensionType.FullName == defModExtensionTypeOf || modExtensionType.Name == defModExtensionTypeOf)
+                {
+                    return modExtension;
+                }
+            }
+
+            return null;
+        }
+
         public static class HumanoidAlienRaces
         {
             private static readonly Dictionary<ThingDef, bool> _harRaceCache = new Dictionary<ThingDef, bool>();

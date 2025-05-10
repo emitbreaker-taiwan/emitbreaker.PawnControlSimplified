@@ -66,6 +66,14 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="PawnPathExtensions.cs" />
+    <Compile Include="MapComponent_JobGiverCacheCleanup.cs" />
+    <Compile Include="Utility_AdaptiveProfilingManager.cs" />
+    <Compile Include="Utility_GlobalStateManager.cs" />
+    <Compile Include="Utility_PathfindingManager.cs" />
+    <Compile Include="Utility_TargetPrefilteringManager.cs" />
+    <Compile Include="Utility_ThinkTreeOptimizationManager.cs" />
+    <Compile Include="Utility_WorkTypeManager.cs" />
     <Compile Include="JobGiver_PawnControl.cs" />
     <Compile Include="MainTabWindow_PawnControl.cs" />
     <Compile Include="Startup_GlobalPresetApplier.cs" />
@@ -171,7 +179,6 @@
     <Compile Include="Utility_IdentityManager_IsColonistScopedContext.cs" />
     <Compile Include="Utility_SkillManager.cs" />
     <Compile Include="Utility_IdentityManager.cs" />
-    <Compile Include="Utility_Compatibility.cs" />
     <Compile Include="GameComponent_LateInjection.cs" />
     <Compile Include="LordDutyMapping.cs" />
     <Compile Include="Mod_SimpleNonHumanlikePawnControl.cs" />
