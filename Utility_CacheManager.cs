@@ -27,6 +27,8 @@ namespace emitbreaker.PawnControl
         private static readonly Dictionary<ThingDef, bool> _apparelRestrictionCache = new Dictionary<ThingDef, bool>();
         
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _workEnabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool> _workTypeEnabledCache = new Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool>();
+        public static readonly Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool> _workTypeSettingEnabledCache = new Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _workDisabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceDraftableCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceEquipWeaponCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
@@ -391,6 +393,63 @@ namespace emitbreaker.PawnControl
                     cache[mapId].RemoveRange(maxCacheEntries, cache[mapId].Count - maxCacheEntries);
                 }
             }
+        }
+
+        /// <summary>
+        /// Centralized method to reset all job module caches across the system.
+        /// This should be called whenever work settings change, map changes, or after game load.
+        /// </summary>
+        /// <param name="pawn">Optional - if provided, only log cache reset for this specific pawn</param>
+        /// <param name="scope">Determines which caches to reset (All, WorkSettings, SpawnSetup)</param>
+        public static void ResetAllJobModuleCaches(Pawn pawn = null, JobModuleCacheResetScope scope = JobModuleCacheResetScope.All)
+        {
+            // Reset the global tracking system
+            Utility_JobGiverManager.ResetModuleCaches();
+
+            // Reset each specialized JobGiver's cache with a single call
+            ClearAllUnifiedJobGiverJobModuleCache();
+
+            // Log based on the context
+            string message;
+            if (pawn != null)
+            {
+                message = $"Reset job module caches for {pawn.LabelShort} ({scope})";
+            }
+            else
+            {
+                message = $"Reset ALL job module caches ({scope})";
+            }
+
+            Utility_DebugManager.LogNormal(message);
+        }
+
+        public static void ClearAllUnifiedJobGiverJobModuleCache()
+        {
+            // Reset each specialized JobGiver's cache with a single call
+            JobGiver_Unified_Growing_PawnControl.ResetJobModuleCache();
+            JobGiver_Unified_PlantCutting_PawnControl.ResetJobModuleCache();
+            JobGiver_Unified_Construction_PawnControl.ResetJobModuleCache();
+            JobGiver_Unified_Hauling_PawnControl.ResetJobModuleCache();
+            JobGiver_Unified_Cleaning_PawnControl.ResetJobModuleCache();
+            JobGiver_Unified_Handling_PawnControl.ResetJobModuleCache();
+            JobGiver_Unified_Doctor_PawnControl.ResetJobModuleCache();
+            JobGiver_Unified_Firefighter_PawnControl.ResetJobModuleCache();
+        }
+
+        public static void ClearAllUnifiedJobGiverCache()
+        {
+            // Reset each specialized JobGiver's cache with a single call
+            JobGiver_Unified_Growing_PawnControl.ResetCache();
+            JobGiver_Unified_PlantCutting_PawnControl.ResetCache();
+            JobGiver_Unified_Construction_PawnControl.ResetCache();
+            JobGiver_Unified_Hauling_PawnControl.ResetCache();
+            JobGiver_Unified_Cleaning_PawnControl.ResetCache();
+            JobGiver_Unified_Handling_PawnControl.ResetCache();
+            JobGiver_Unified_Doctor_PawnControl.ResetCache();
+            JobGiver_Unified_Firefighter_PawnControl.ResetCache();
+
+            // Also handle any non-unified job givers that need resetting
+            JobGiver_WorkNonHumanlike.ResetCache();
         }
     }
 }

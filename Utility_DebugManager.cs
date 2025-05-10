@@ -671,5 +671,114 @@ namespace emitbreaker.PawnControl
 
             LogNormal("Comprehensive diagnostic complete");
         }
+
+        /// <summary>
+        /// Logs a detailed job assignment debug report for a given pawn
+        /// </summary>
+        public static void LogJobAssignmentDiagnostic(Pawn pawn, string jobGiverName)
+        {
+            if (!Prefs.DevMode) return;
+
+            if (pawn?.def == null)
+            {
+                LogWarning("Cannot log job assignment for null pawn");
+                return;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"=== Job Assignment Diagnostic for {pawn.LabelShort} ({jobGiverName}) ===");
+            sb.AppendLine($"- Race: {pawn.def.defName}");
+            sb.AppendLine($"- Faction: {pawn.Faction?.Name ?? "None"}");
+            sb.AppendLine($"- Is Humanlike: {pawn.RaceProps.Humanlike}");
+            sb.AppendLine($"- Is Tool User: {pawn.RaceProps.ToolUser}");
+            sb.AppendLine($"- Has Mod Extension: {Utility_CacheManager.GetModExtension(pawn.def) != null}");
+
+            // Check work type settings if available
+            var modExt = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExt != null)
+            {
+                sb.AppendLine("- Work Types from extension:");
+                if (modExt.tags != null)
+                {
+                    foreach (var workTag in modExt.tags)
+                    {
+                        bool allowed = Utility_TagManager.WorkEnabled(pawn.def, workTag);
+                        sb.AppendLine($"  - {workTag} (allowed: {allowed})");
+                        bool canDo = Utility_JobGiverManager.PawnCanDoWorkType(pawn, workTag);
+                        sb.AppendLine($"    Can do: {canDo}");
+                    }
+                }
+                else
+                {
+                    sb.AppendLine("  - No allowed work types defined");
+                }
+            }
+
+            // Check current job status
+            sb.AppendLine($"- Current job: {pawn.jobs?.curJob?.def?.defName ?? "None"}");
+            sb.AppendLine($"- Is drafted: {pawn.Drafted}");
+            sb.AppendLine($"- Mind state active: {pawn.mindState?.Active}");
+
+            // Log the diagnostic
+            LogNormal(sb.ToString());
+        }
+        
+        /// <summary>
+        /// Logs debug information about job module target caches for a specific map
+        /// </summary>
+        public static void LogJobModuleTargetCaches<TModule, TTarget>(
+            List<TModule> modules,
+            Dictionary<int, Dictionary<string, List<TTarget>>> targetCache,
+            int mapId)
+            where TModule : JobModule<TTarget>
+            where TTarget : Thing
+        {
+            if (!Prefs.DevMode) return;
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"=== Job Module Target Caches for Map {mapId} ===");
+
+            // Check if the map has any caches
+            if (!targetCache.ContainsKey(mapId))
+            {
+                sb.AppendLine("  No target caches found for this map!");
+                LogWarning(sb.ToString());
+                return;
+            }
+
+            // Get modules with empty caches
+            List<string> emptyModules = new List<string>();
+            List<string> populatedModules = new List<string>();
+
+            // Check each module
+            foreach (var module in modules)
+            {
+                string moduleId = module.UniqueID;
+                string workType = module.WorkTypeName;
+
+                if (!targetCache[mapId].ContainsKey(moduleId) ||
+                    targetCache[mapId][moduleId].Count == 0)
+                {
+                    emptyModules.Add($"{moduleId} ({workType})");
+
+                    // Check if request groups are defined
+                    var requestGroups = module.RelevantThingRequestGroups;
+                    sb.AppendLine($"  [EMPTY] {moduleId} ({workType}) - RelevantThingRequestGroups: {(requestGroups == null ? "null" : requestGroups.Count.ToString())}");
+                }
+                else
+                {
+                    int count = targetCache[mapId][moduleId].Count;
+                    populatedModules.Add($"{moduleId} ({count} targets)");
+                    sb.AppendLine($"  [POPULATED] {moduleId} ({workType}) - {count} targets");
+                }
+            }
+
+            // Summary
+            sb.AppendLine($"Total modules: {modules.Count}");
+            sb.AppendLine($"Empty caches: {emptyModules.Count}");
+            sb.AppendLine($"Populated caches: {populatedModules.Count}");
+
+            LogNormal(sb.ToString());
+        }
     }
 }

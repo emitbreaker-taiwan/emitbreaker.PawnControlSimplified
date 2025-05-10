@@ -672,26 +672,22 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            // Step 7: Think Tree Injection patches
+            // Step 7: Think Tree and Cache Management - Unified Approach
             [HarmonyPatch(typeof(Map), nameof(Map.FinalizeInit))]
             public static class Patch_Map_FinalizeInit_FullInitialize
             {
-                // Outline: Ensure FullInitializeAllEligiblePawns runs once after each map finishes initializing
                 [HarmonyPostfix]
                 public static void Postfix(Map __instance)
                 {
-                    if (__instance == null)
-                    {
-                        return;
-                    }
+                    if (__instance == null) return;
 
-                    // 🔥 Force rebuild identity flags if somehow not yet preloaded
+                    // Force rebuild identity flags if somehow not yet preloaded
                     if (!Utility_IdentityManager.IsIdentityFlagsPreloaded)
                     {
                         Utility_IdentityManager.BuildIdentityFlagCache(true);
                     }
 
-                    // ✅ Safe-guard: Only if identity flags were already preloaded
+                    // Safe-guard: Only if identity flags were already preloaded
                     if (Utility_IdentityManager.IsIdentityFlagsPreloaded)
                     {
                         Utility_WorkSettingsManager.FullInitializeAllEligiblePawns(__instance, forceLock: true);
@@ -832,148 +828,132 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            // Step 9: Inject stat hediff during pawn generation
-            [HarmonyPatch(typeof(PawnGenerator))]
-            [HarmonyPatch("GeneratePawn")]
-            [HarmonyPatch(new Type[] { typeof(PawnGenerationRequest) })]
-            public static class Patch_PawnGenerator_GeneratePawn
-            {
-                [HarmonyPostfix]
-                public static void Postfix(Pawn __result)
-                {
-                    if (__result == null || __result.def == null || __result.RaceProps.Humanlike)
-                        return;
-
-                    var modExtension = Utility_CacheManager.GetModExtension(__result.def);
-                    if (modExtension == null)
-                    {
-                        return;
-                    }
-
-                    Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__result);
-
-                    if (!__result.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub")) && !Utility_StatManager.HasAlreadyInjected(__result))
-                    {
-                        Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__result);
-                        Utility_StatManager.InjectConsolidatedStatHediff(__result);
-                        Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__result); // ✅ centralized
-                    }
-                }
-            }
-
+            // Step 9-10: Unified Pawn Setup - Combined patches for cleaner management
             [HarmonyPatch(typeof(Pawn))]
             [HarmonyPatch("SpawnSetup")]
             [HarmonyPatch(new Type[] { typeof(Map), typeof(bool) })]
-            public static class Patch_Pawn_SpawnSetup
+            public static class Patch_Pawn_SpawnSetup_Unified
             {
                 [HarmonyPostfix]
-                public static void Postfix(Pawn __instance)
+                public static void Postfix(Pawn __instance, Map map, bool respawningAfterLoad)
                 {
-                    if (__instance == null || __instance.Dead || __instance.Destroyed)
+                    // Early exit conditions
+                    if (__instance == null ||
+                        __instance.Dead ||
+                        __instance.Destroyed ||
+                        __instance.RaceProps.Humanlike ||
+                        map == null)
                     {
                         return;
                     }
 
-                    // Skip the rest of processing for humanlike pawns
-                    if (__instance.RaceProps.Humanlike)
-                    {
-                        return;
-                    }
-
-                    // Check for both mod extension and work tags
+                    // Check for mod extension - required for all our patches
                     var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
-                    // Skip if no mod extension (but we've still handled mind activation above if it had tags)
-                    if (modExtension == null)
+                    if (modExtension == null) return;
+
+                    // --- Part 1: WorkSettings attachment ---
+                    if (__instance.workSettings != null)
                     {
-                        return;
+                        // Attach work settings listener
+                        Utility_WorkSettingsManager.GetCachedMapPawns(map);
+                        Utility_WorkSettingsManager.AttachWorkSettingsChangeListener(__instance);
                     }
 
+                    // --- Part 2: Mind state activation ---
                     bool hasTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def);
-                    if (!hasTags)
-                    {
-                        return; // No tags, skip further processing
-                    }
 
-                    // CRITICAL FIX: Ensure mind state is active for any eligible pawn immediately
-                    if (__instance.mindState != null &&
+                    // Ensure mind state is active for any eligible pawn immediately
+                    if (hasTags &&
+                        __instance.mindState != null &&
                         __instance.workSettings != null &&
-                        __instance.workSettings.EverWork &&
-                        (modExtension != null || hasTags))
+                        __instance.workSettings.EverWork)
                     {
                         __instance.mindState.Active = true;
-
                         Utility_DebugManager.LogNormal($"Activated {__instance.LabelShort}'s mind during SpawnSetup");
                     }
 
-                    LongEventHandler.ExecuteWhenFinished(() =>
-                    {
-                        if (__instance.health?.hediffSet == null || !__instance.Spawned)
-                        {
-                            return;
-                        }
+                    // --- Part 3: Stats and hediffs injection ---
+                    LongEventHandler.ExecuteWhenFinished(() => {
+                        if (__instance == null || !__instance.Spawned || __instance.health?.hediffSet == null) return;
 
-                        // ✅ Ensure hediff is injected only once, and allow mutation/removal logic to run inside the HediffComp
+                        // Ensure hediff is injected only once
                         if (!__instance.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub")))
                         {
                             Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__instance);
 
                             if (Utility_DebugManager.ShouldLog())
                             {
-                                // ✅ Log thinker state
                                 Utility_DebugManager.DumpThinkerStatus(__instance);
-
-                                // ✅ Add diagnostic information for work givers
                                 Utility_DebugManager.DiagnoseWorkGiversForPawn(__instance);
                             }
 
                             Utility_StatManager.InjectConsolidatedStatHediff(__instance);
-                            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__instance); // ✅ centralized
+                            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__instance);
+                        }
+
+                        // --- Part 4: Job cache resetting ---
+                        // Only process pawns with work-related tags
+                        if (!hasTags) return;
+
+                        // Check if pawn is dynamically injected (special processing needed)
+                        bool isDynamicallyInjected = modExtension.mainWorkThinkTreeDefName == null;
+
+                        // Always reset caches for dynamically injected pawns
+                        if (isDynamicallyInjected || respawningAfterLoad)
+                        {
+                            ResetAllJobCaches();
+
+                            if (Prefs.DevMode)
+                            {
+                                string pawnType = isDynamicallyInjected ? "dynamically injected" : "respawning";
+                                Utility_DebugManager.LogNormal($"Reset job caches for {pawnType} pawn: {__instance.LabelShort}");
+                            }
                         }
                     });
+
+                    // --- Part 5: Work settings manager ---
+                    try
+                    {
+                        if (__instance?.workSettings != null && !respawningAfterLoad)
+                        {
+                            Utility_WorkSettingsManager.NotifyPawnSpawned(__instance);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Utility_DebugManager.LogError($"Error in Pawn_SpawnSetup patch: {ex}");
+                    }
+                }
+
+                /// <summary>
+                /// Helper method to reset all job giver caches
+                /// </summary>
+                private static void ResetAllJobCaches()
+                {
+                    // Reset job module caches
+                    Utility_CacheManager.ClearAllUnifiedJobGiverJobModuleCache();
+
+                    // Force job cache update in next tick
+                    Utility_CacheManager.ClearAllUnifiedJobGiverCache();
                 }
             }
 
-            // Step 10: Individual patches for necessary WorkGiver, JobGiver or JobDriver overrides
-            /// <summary>
-            /// Outline: If a pawn has no native BeatFire verb (e.g. non‐humanlike),
-            /// fall back to our custom Verb_BeatFire via TryStartCastOn.
-            /// </summary>
-            [HarmonyPatch(typeof(Pawn_NativeVerbs), "CheckCreateVerbProperties", MethodType.Normal)]
-            public static class Patch_NativeVerbs_InjectBeatFire
+            [HarmonyPatch(typeof(Pawn), nameof(Pawn.DeSpawn))]
+            public static class Patch_Pawn_DeSpawn_CleanupWorkCache
             {
-                // ─── Outline: cache FieldInfo and VerbProperties once ───────────────────────
-                private static readonly FieldInfo CachedPropsField =
-                    AccessTools.Field(typeof(Pawn_NativeVerbs), "cachedVerbProperties");
-                private static readonly FieldInfo CachedBeatFireField =
-                    AccessTools.Field(typeof(Pawn_NativeVerbs), "cachedBeatFireVerb");
-                private static readonly VerbProperties FireProps =
-                    NativeVerbPropertiesDatabase.VerbWithCategory(VerbCategory.BeatFire);
-
-                // ─── Postfix runs only when vanilla CheckCreateVerbProperties would ──────────
-                public static void Postfix(Pawn_NativeVerbs __instance)
+                public static void Prefix(Pawn __instance)
                 {
-                    // 1️⃣ Early-exit if we already injected
-                    var currentProps = (List<VerbProperties>)CachedPropsField.GetValue(__instance);
-                    var currentVerb = (Verb_BeatFire)CachedBeatFireField.GetValue(__instance);
-                    if (currentVerb != null || currentProps?.Contains(FireProps) == true)
-                        return;
+                    // Clean up the pawn's cache when it despawns
+                    Utility_WorkSettingsManager.CleanupPawnCache(__instance);
 
-                    // 2️⃣ Get your pawn and skip humanlikes or non-tagged defs
-                    var pawn = ((IVerbOwner)__instance).ConstantCaster as Pawn;
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                    bool hasTags = Utility_TagManager.HasTag(pawn.def, PawnEnumTags.AllowWork_Firefighter.ToString());
-                    if (pawn.RaceProps.Humanlike || modExtension == null || !hasTags)
-                        return;
-
-                    // 3️⃣ Build or append the verb properties list
-                    if (currentProps == null)
-                        currentProps = new List<VerbProperties>();
-                    currentProps.Add(FireProps);
-                    CachedPropsField.SetValue(__instance, currentProps);
-
-                    // 4️⃣ Instantiate & cache the real BeatFireVerb
-                    var realVerb = __instance.verbTracker.GetVerb(VerbCategory.BeatFire) as Verb_BeatFire;
-                    CachedBeatFireField.SetValue(__instance, realVerb);
+                    // Also reset job module caches to ensure they're updated on next scan
+                    if (__instance?.def != null && Utility_CacheManager.GetModExtension(__instance.def) != null)
+                    {
+                        Utility_CacheManager.ResetAllJobModuleCaches(
+                            __instance,
+                            JobModuleCacheResetScope.SpawnSetup
+                        );
+                    }
                 }
             }
 
@@ -1095,6 +1075,31 @@ namespace emitbreaker.PawnControl
 
                     __result = true;
                     return false; // ✅ Skip vanilla fully, after full checks
+                }
+            }
+
+            // Patch to detect work settings changes
+            [HarmonyPatch(typeof(Pawn_WorkSettings), nameof(Pawn_WorkSettings.SetPriority))]
+            public static class Patch_WorkSettings_SetPriority
+            {
+                public static void Postfix(Pawn_WorkSettings __instance, WorkTypeDef w, int priority)
+                {
+                    try
+                    {
+                        // Find the pawn that owns these work settings
+                        foreach (Pawn pawn in PawnsFinder.AllMapsCaravansAndTravelingTransportPods_Alive)
+                        {
+                            if (pawn.workSettings == __instance)
+                            {
+                                Utility_WorkSettingsManager.NotifyWorkSettingsChanged(pawn);
+                                break;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Utility_DebugManager.LogError($"Error in SetPriority patch: {ex}");
+                    }
                 }
             }
         }
@@ -1424,7 +1429,7 @@ namespace emitbreaker.PawnControl
                     }
 
                     // Mark this pawn as processed to prevent future logs for this pawn
-                    _processedPawns.Add(pawn.thingIDNumber);
+                    // _processedPawns.Add(pawn.thingIDNumber);
 
                     Utility_DebugManager.LogNormal($"{pawn.LabelShort} entering PrioritySorter (one-time debug log)...");
 
@@ -1650,6 +1655,90 @@ namespace emitbreaker.PawnControl
 
                             Dialog_MessageBox dialog = new Dialog_MessageBox(sb.ToString());
                             Find.WindowStack.Add(dialog);
+                        }
+                    };
+                }
+            }
+
+
+            // In your Patch_Debuggers class, add:
+            [HarmonyPatch(typeof(Pawn), nameof(Pawn.GetGizmos))]
+            public static class Patch_Pawn_GetGizmos_JobDiagnostics
+            {
+                [HarmonyPostfix]
+                public static IEnumerable<Gizmo> Postfix(IEnumerable<Gizmo> __result, Pawn __instance)
+                {
+                    foreach (var gizmo in __result)
+                    {
+                        yield return gizmo;
+                    }
+
+                    if (!Prefs.DevMode)
+                        yield break;
+
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance?.def);
+                    if (modExtension == null || !modExtension.debugMode)
+                        yield break;
+
+                    yield return new Command_Action
+                    {
+                        defaultLabel = "DEBUG: Work Status",
+                        defaultDesc = "Check work initialization status",
+                        action = delegate
+                        {
+                            StringBuilder sb = new StringBuilder();
+                            sb.AppendLine($"Work status for {__instance.LabelCap}:");
+                            sb.AppendLine($"- Has WorkSettings: {__instance.workSettings != null}");
+
+                            if (__instance.workSettings != null)
+                            {
+                                sb.AppendLine($"- Initialized: {__instance.workSettings.Initialized}");
+                                sb.AppendLine($"- EverWork: {__instance.workSettings.EverWork}");
+
+                                var normalWorkGivers = __instance.workSettings.WorkGiversInOrderNormal;
+                                var emergencyWorkGivers = __instance.workSettings.WorkGiversInOrderEmergency;
+
+                                sb.AppendLine($"- Normal WorkGivers count: {normalWorkGivers?.Count ?? 0}");
+                                sb.AppendLine($"- Emergency WorkGivers count: {emergencyWorkGivers?.Count ?? 0}");
+
+                                sb.AppendLine("\nEnabled Work Types:");
+                                foreach (WorkTypeDef workType in DefDatabase<WorkTypeDef>.AllDefsListForReading)
+                                {
+                                    if (__instance.workSettings.WorkIsActive(workType))
+                                        sb.AppendLine($"- {workType.defName} (Priority: {__instance.workSettings.GetPriority(workType)})");
+                                }
+
+                                sb.AppendLine("\nCurrent job:");
+                                sb.AppendLine($"- Has job: {__instance.jobs?.curJob != null}");
+                                if (__instance.jobs?.curJob != null)
+                                {
+                                    sb.AppendLine($"- Job: {__instance.jobs.curJob.def.defName}");
+                                    sb.AppendLine($"- Target: {__instance.jobs.curJob.targetA.Label ?? "none"}");
+                                    sb.AppendLine($"- Status: {__instance.jobs.curDriver?.GetReport() ?? "none"}");
+                                }
+                                else
+                                {
+                                    sb.AppendLine("- No current job");
+                                }
+                            }
+
+                            Dialog_MessageBox dialog = new Dialog_MessageBox(sb.ToString());
+                            Find.WindowStack.Add(dialog);
+                        }
+                    };
+
+                    yield return new Command_Action
+                    {
+                        defaultLabel = "DEBUG: Force Job",
+                        defaultDesc = "Force job evaluation for this pawn",
+                        action = delegate
+                        {
+                            __instance.mindState.Active = true;
+                            Utility_WorkSettingsManager.SafeEnsurePawnReadyForWork(__instance);
+                            Utility_WorkSettingsManager.EnsureWorkGiversPopulated(__instance);
+                            Utility_WorkSettingsManager.ForceJobAssignmentIfNeeded(__instance);
+
+                            Messages.Message($"Job evaluation forced for {__instance.LabelShort}", MessageTypeDefOf.TaskCompletion);
                         }
                     };
                 }

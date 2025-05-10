@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime;
 using UnityEngine;
 using Verse;
 
@@ -604,6 +605,12 @@ namespace emitbreaker.PawnControl
 
                 // Mark as runtime-added (not from XML)
                 newExtension.fromXML = false;
+
+                var settings = LoadedModManager.GetMod<Mod_SimpleNonHumanlikePawnControl>().GetSettings<ModSettings_SimpleNonHumanlikePawnControl>();
+                if (settings.debugMode)
+                {
+                    newExtension.debugMode = true;
+                }
 
                 // Log the cloned extension
                 Utility_DebugManager.LogNormal($"Cloned extension has forceDraftable={newExtension.forceDraftable}");

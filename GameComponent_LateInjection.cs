@@ -17,6 +17,7 @@ namespace emitbreaker.PawnControl
     {
         private bool drafterAlreadyInjected = false;
         private bool cleanupDone = false;
+        private int _forceJobCheckTick = 0;
 
         public GameComponent_LateInjection(Game game) 
         {
@@ -24,6 +25,40 @@ namespace emitbreaker.PawnControl
 
         public override void GameComponentTick()
         {
+            base.GameComponentTick();
+
+            int currentTick = Find.TickManager.TicksGame;
+
+            // Only check every 30 ticks (0.5 seconds) to minimize performance impact
+            if (currentTick % 30 == 0)
+            {
+                Utility_WorkSettingsManager.CheckForWorkSettingsChanges();
+            }
+
+            // Every 5 seconds, check for stuck pawns and force-inject jobs if needed
+            if (currentTick - _forceJobCheckTick >= 300)
+            {
+                _forceJobCheckTick = currentTick;
+
+                // For each map, find animal pawns with our mod extension that are idle
+                foreach (Map map in Find.Maps)
+                {
+                    foreach (Pawn pawn in map.mapPawns.AllPawnsSpawned)
+                    {
+                        var modExtension = Utility_CacheManager.GetModExtension(pawn?.def);
+                        if (modExtension == null || pawn.RaceProps.Humanlike)
+                            continue;
+
+                        if (pawn.jobs?.curJob == null && pawn.mindState != null &&
+                            !pawn.Downed && !pawn.Dead && Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def))
+                        {
+                            // This pawn should be working but isn't
+                            Utility_WorkSettingsManager.ForceJobAssignmentIfNeeded(pawn);
+                        }
+                    }
+                }
+            }
+
             if (drafterAlreadyInjected && Utility_IdentityManager.identityFlagsPreloaded && cleanupDone)
             {
                 return;
@@ -53,6 +88,16 @@ namespace emitbreaker.PawnControl
 
             // This is a good spot to ensure cache is clean before saving
             JobGiver_WorkNonHumanlike.ResetCache();
+
+            // Check if work-related windows are open and ensure work settings listeners are registered
+            // Replace the incorrect Dialog_Work and Dialog_PawnTabs with the correct RimWorld classes
+            if (Find.WindowStack.Windows.Any(w =>
+                   w is MainTabWindow_Work || // This is RimWorld's work tab
+                   w is MainTabWindow_Assign)) // This is for managing colonists
+            {
+                // Ensure WorkSettingsManager listeners are registered
+                Utility_WorkSettingsManager.EnsureWorkSettingsListenersRegistered();
+            }
         }
 
         /// <summary>
@@ -61,6 +106,16 @@ namespace emitbreaker.PawnControl
         public override void FinalizeInit()
         {
             base.FinalizeInit();
+
+            // Clear all caches when a game is loaded
+            Utility_JobGiverManager.ResetModuleCaches();
+            Utility_WorkSettingsManager.ClearAllWorkSettingsCache();
+
+            // Eagerly cache ThinkTreeDefs for better performance
+            Utility_ThinkTreeManager.EagerCacheThinkTreeDefs();
+
+            // Add this line before ResetAllCache
+            Utility_WorkSettingsManager.ResetAllCaches();
 
             // Process any pending removals first
             ProcessPendingRemovals();
@@ -74,6 +129,9 @@ namespace emitbreaker.PawnControl
             // Clear debug patch caches
             HarmonyPatches.Patch_Debuggers.Patch_ThinkNode_PrioritySorter_DebugJobs.ResetCache();
             HarmonyPatches.Patch_Debuggers.Patch_Pawn_SpawnSetup_DumpThinkTree.ResetCache();
+
+            // Reset the module tracking caches
+            Utility_JobGiverManager.ResetModuleCaches();
 
             // Reset caches to ensure no stale data is present
             ResetAllCache();
@@ -213,86 +271,43 @@ namespace emitbreaker.PawnControl
             Utility_TagManager.ResetCache();
             Utility_ThinkTreeManager.ResetCache();
 
+            // Clear WorkSettings caches
+            Utility_WorkSettingsManager.ClearCaches();
+
             Utility_CacheManager._bioTabVisibilityCache.Clear();
+
+            // Fire Fighting job givers
+            JobGiver_Unified_Firefighter_PawnControl.ResetCache();
+
+            // Plant cutting job givers
+            JobGiver_Unified_PlantCutting_PawnControl.ResetCache();
+
+            // Growing job givers
+            JobGiver_Unified_Growing_PawnControl.ResetCache();
+
+            // Doctor job givers
+            JobGiver_Unified_Doctor_PawnControl.ResetCache();
+
+            // Construction job givers
+            JobGiver_Unified_Construction_PawnControl.ResetCache();
+
+            // Cleaning job givers
+            JobGiver_Unified_Cleaning_PawnControl.ResetCache();
+
+            // Basic worker job givers
+            JobGiver_Unified_BasicWorker_PawnControl.ResetCache();
+
+            // Warden job givers
+            JobGiver_Unified_Warden_PawnControl.ResetCache();
+
+            // Handling job givers
+            JobGiver_Unified_Handling_PawnControl.ResetCache();
+
+            // Hauling job givers
+            JobGiver_Unified_Hauling_PawnControl.ResetCache();
 
             // General job giver caches
             JobGiver_WorkNonHumanlike.ResetCache();
-
-            // Plant cutting job givers
-            JobGiver_PlantsCut_PawnControl.ResetCache();
-            JobGiver_ExtractTree_PawnControl.ResetCache();
-
-            // Growing job givers
-            JobGiver_GrowerHarvest_PawnControl.ResetCache();
-            JobGiver_GrowerSow_PawnControl.ResetCache();
-            JobGiver_Replant_PawnControl.ResetCache();
-
-            // Fire Fighting job givers
-            JobGiver_FightFires_PawnControl.ResetCache();
-
-            // Doctor job givers
-            JobGiver_FeedPatient_PawnControl.ResetCache();
-
-            // Construction job givers
-            JobGiver_Deconstruct_PawnControl.ResetCache();
-            JobGiver_Uninstall_PawnControl.ResetCache();
-            JobGiver_FixBrokenDownBuilding_PawnControl.ResetCache();
-            JobGiver_ConstructDeliverResourcesToBlueprints_Construction_PawnControl.ResetCache();
-            JobGiver_ConstructDeliverResourcesToFrames_Construction_PawnControl.ResetCache();
-            JobGiver_BuildRoof_PawnControl.ResetCache();
-            JobGiver_RemoveRoof_PawnControl.ResetCache();
-            JobGiver_ConstructFinishFrames_PawnControl.ResetCache();
-            JobGiver_Repair_PawnControl.ResetCache();
-            JobGiver_SmoothFloor_PawnControl.ResetCache();
-            JobGiver_RemoveFloor_PawnControl.ResetCache();
-            JobGiver_SmoothWall_PawnControl.ResetCache();
-
-            // Cleaning job givers
-            JobGiver_CleanFilth_PawnControl.ResetCache();
-            JobGiver_ClearSnow_PawnControl.ResetCache();
-
-            // Basic worker job givers
-            JobGiver_Flick_PawnControl.ResetCache();
-            JobGiver_Open_PawnControl.ResetCache();
-            JobGiver_ExtractSkull_PawnControl.ResetCache();
-
-            // Warden job givers
-            JobGiver_Warden_DoExecution_PawnControl.ResetCache();
-            JobGiver_Warden_ExecuteGuilty_PawnControl.ResetCache();
-            JobGiver_Warden_ReleasePrisoner_PawnControl.ResetCache();
-            JobGiver_Warden_TakeToBed_PawnControl.ResetCache();
-            JobGiver_Warden_Feed_PawnControl.ResetCache();
-            JobGiver_Warden_DeliverFood_PawnControl.ResetCache();
-            JobGiver_Warden_Chat_PawnControl.ResetCache();
-
-            // Handling job givers
-            JobGiver_Tame_PawnControl.ResetCache();
-            JobGiver_Train_PawnControl.ResetCache();
-            JobGiver_TakeRoamingToPen_PawnControl.ResetCache();
-            JobGiver_RebalanceAnimalsInPens_PawnControl.ResetCache();
-            JobGiver_Slaughter_PawnControl.ResetCache();
-            JobGiver_ReleaseAnimalToWild_PawnControl.ResetCache();
-            JobGiver_Milk_PawnControl.ResetCache();
-            JobGiver_Shear_PawnControl.ResetCache();
-
-            // Hauling job givers
-            JobGiver_EmptyEggBox_PawnControl.ResetCache();
-            JobGiver_Merge_PawnControl.ResetCache();
-            JobGiver_ConstructDeliverResourcesToBlueprints_Hauling_PawnControl.ResetCache();
-            JobGiver_ConstructDeliverResourcesToFrames_Hauling_PawnControl.ResetCache();
-            JobGiver_HaulGeneral_PawnControl.ResetCache();
-            JobGiver_FillFermentingBarrel_PawnControl.ResetCache();
-            JobGiver_TakeBeerOutOfBarrel_PawnControl.ResetCache();
-            JobGiver_HaulCampfire_PawnControl.ResetCache();
-            JobGiver_Cremate_PawnControl.ResetCache();
-            JobGiver_HaulCorpses_PawnControl.ResetCache();
-            JobGiver_Strip_PawnControl.ResetCache();
-            JobGiver_HaulToPortal_PawnControl.ResetCache();
-            JobGiver_LoadTransporters_PawnControl.ResetCache();
-            JobGiver_GatherItemsForCaravan_PawnControl.ResetCache();
-            JobGiver_UnloadCarriers_PawnControl.ResetCache();
-            JobGiver_Refuel_PawnControl.ResetCache();
-            JobGiver_Refuel_Turret_PawnControl.ResetCache();
 
             Utility_DebugManager.LogNormal("Cleared job cache on game load");
         }

@@ -17,6 +17,10 @@ namespace emitbreaker.PawnControl
         public Dictionary<SkillDef, Passion> _skillPassionDict;
         public Dictionary<SkillDef, int> _simulatedSkillDict;
 
+        // Add direct references to cached ThinkTreeDefs to avoid repeated lookups
+        public ThinkTreeDef CachedMainThinkTree;
+        public ThinkTreeDef CachedConstantThinkTree;
+
         // In the constructor or a dedicated initialization method
         public NonHumanlikePawnControlExtension()
         {

@@ -20,6 +20,96 @@ namespace emitbreaker.PawnControl
         /// <summary>Cached reflection access to the ResolveSubnodes method</summary>
         private static readonly MethodInfo resolveMethod = AccessTools.Method(typeof(ThinkNode), "ResolveSubnodes");
 
+        // Add cache for ThinkTreeDefs to avoid repeated lookups
+        private static readonly Dictionary<string, ThinkTreeDef> _thinkTreeCache = new Dictionary<string, ThinkTreeDef>();
+
+        /// <summary>
+        /// Eagerly initializes ThinkTreeDef cache for all extensions
+        /// </summary>
+        public static void EagerCacheThinkTreeDefs()
+        {
+            // Clear existing cache
+            _thinkTreeCache.Clear();
+
+            // Cache all ThinkTreeDefs in the database
+            foreach (ThinkTreeDef def in DefDatabase<ThinkTreeDef>.AllDefsListForReading)
+            {
+                _thinkTreeCache[def.defName] = def;
+            }
+
+            // Pre-cache think tree references for all extensions
+            foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
+            {
+                if (def?.race == null)
+                    continue;
+
+                var modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
+                if (modExtension == null)
+                    continue;
+
+                // Cache MainWorkThinkTreeDef
+                if (!string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
+                {
+                    if (!_thinkTreeCache.ContainsKey(modExtension.mainWorkThinkTreeDefName))
+                    {
+                        var tree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.mainWorkThinkTreeDefName);
+                        if (tree != null)
+                        {
+                            _thinkTreeCache[modExtension.mainWorkThinkTreeDefName] = tree;
+                        }
+                    }
+                }
+
+                // Cache ConstantThinkTreeDef
+                if (!string.IsNullOrEmpty(modExtension.constantThinkTreeDefName))
+                {
+                    if (!_thinkTreeCache.ContainsKey(modExtension.constantThinkTreeDefName))
+                    {
+                        var tree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.constantThinkTreeDefName);
+                        if (tree != null)
+                        {
+                            _thinkTreeCache[modExtension.constantThinkTreeDefName] = tree;
+                        }
+                    }
+                }
+
+                // Store references directly in the extension for faster access
+                if (!string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
+                {
+                    modExtension.CachedMainThinkTree = GetCachedThinkTreeDef(modExtension.mainWorkThinkTreeDefName);
+                }
+
+                if (!string.IsNullOrEmpty(modExtension.constantThinkTreeDefName))
+                {
+                    modExtension.CachedConstantThinkTree = GetCachedThinkTreeDef(modExtension.constantThinkTreeDefName);
+                }
+            }
+
+            Utility_DebugManager.LogNormal($"Eagerly cached {_thinkTreeCache.Count} ThinkTreeDefs");
+        }
+
+        /// <summary>
+        /// Gets a ThinkTreeDef from cache, falling back to database lookup if needed
+        /// </summary>
+        public static ThinkTreeDef GetCachedThinkTreeDef(string defName)
+        {
+            if (string.IsNullOrEmpty(defName))
+                return null;
+
+            ThinkTreeDef result;
+            if (_thinkTreeCache.TryGetValue(defName, out result))
+                return result;
+
+            // If not in cache, try to get from database and cache the result
+            result = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(defName);
+            if (result != null)
+            {
+                _thinkTreeCache[defName] = result;
+            }
+
+            return result;
+        }
+
         /// <summary>
         /// Determines if a ThingDef has any allow or block work tags.
         /// </summary>
@@ -158,6 +248,9 @@ namespace emitbreaker.PawnControl
 
         public static void InjectPawnControlThinkTreesStaticRaceLevel()
         {
+            // First ensure all ThinkTreeDefs are cached
+            EagerCacheThinkTreeDefs();
+
             foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
                 if (def?.race == null)
@@ -170,10 +263,17 @@ namespace emitbreaker.PawnControl
                 if (!HasAllowOrBlockWorkTag(def))
                     continue;
 
-                // ✅ Replace Main Work ThinkTree if specified
+                // ✅ Replace Main Work ThinkTree if specified - use cached version
                 if (!string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
                 {
-                    var thinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.mainWorkThinkTreeDefName);
+                    // Use the cached version from the extension if available
+                    ThinkTreeDef thinkTree = modExtension.CachedMainThinkTree;
+                    if (thinkTree == null)
+                    {
+                        // Fall back to cache lookup
+                        thinkTree = GetCachedThinkTreeDef(modExtension.mainWorkThinkTreeDefName);
+                    }
+
                     if (thinkTree != null)
                     {
                         def.race.thinkTreeMain = thinkTree;
@@ -185,23 +285,17 @@ namespace emitbreaker.PawnControl
                     }
                 }
 
-                //// ✅ Inject additional Main ThinkTree subtrees
-                //if (modExtension.additionalMain != null && modExtension.additionalMain.Count > 0)
-                //{
-                //    foreach (string additionalDefName in modExtension.additionalMain)
-                //    {
-                //        if (!string.IsNullOrWhiteSpace(additionalDefName))
-                //        {
-                //            TryInjectSubtreeToRace(def, additionalDefName);
-                //            Utility_DebugManager.LogNormal($"Injected additional ThinkTree '{additionalDefName}' into '{def.race.thinkTreeMain?.defName}' for {def.defName}.");
-                //        }
-                //    }
-                //}
-
-                // ✅ Replace Constant ThinkTree if specified
+                // ✅ Replace Constant ThinkTree if specified - use cached version
                 if (!string.IsNullOrEmpty(modExtension.constantThinkTreeDefName))
                 {
-                    var constantTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.constantThinkTreeDefName);
+                    // Use the cached version from the extension if available
+                    ThinkTreeDef constantTree = modExtension.CachedConstantThinkTree;
+                    if (constantTree == null)
+                    {
+                        // Fall back to cache lookup
+                        constantTree = GetCachedThinkTreeDef(modExtension.constantThinkTreeDefName);
+                    }
+
                     if (constantTree != null)
                     {
                         def.race.thinkTreeConstant = constantTree;
@@ -494,6 +588,7 @@ namespace emitbreaker.PawnControl
             Utility_CacheManager._allowWorkTagCache.Clear();
             Utility_CacheManager._blockWorkTagCache.Clear();
             Utility_CacheManager._combinedWorkTagCache.Clear();
+            _thinkTreeCache.Clear();
         }
     }
 }

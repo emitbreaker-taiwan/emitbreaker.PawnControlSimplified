@@ -1,6 +1,8 @@
-﻿using System;
+﻿using RimWorld;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Verse;
@@ -101,7 +103,69 @@ namespace emitbreaker.PawnControl
 
             return result;
         }
-        
+
+        public static bool WorkTypeEnabled(ThingDef def, WorkTypeDef workTypeDef)
+        {
+            if (def == null || workTypeDef == null)
+            {
+                return false; // Invalid input
+            }
+
+            var key = new ValueTuple<ThingDef, WorkTypeDef>(def, workTypeDef);
+
+            // Try to get from cache first
+            if (Utility_CacheManager._workTypeEnabledCache.TryGetValue(key, out bool result))
+            {
+                return result;
+            }
+
+            // Compute result
+            result = HasTag(def, ManagedTags.AllowAllWork) ||
+                     HasTag(def, (ManagedTags.AllowWorkPrefix + workTypeDef.defName));
+
+            // Store in cache
+            Utility_CacheManager._workTypeEnabledCache[key] = result;
+
+            return result;
+        }
+
+        public static bool WorkTypeSettingEnabled(Pawn pawn, WorkTypeDef workTypeDef)
+        {
+            if (pawn == null || workTypeDef == null)
+            {
+                return false; // Invalid input
+            }
+
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null)
+            {
+                return false; // No mod extension found
+            }
+
+            // Check if the pawn is allowed to do the work type
+            if (!WorkTypeEnabled(pawn.def, workTypeDef))
+            {
+                return false;
+            }
+
+            var key = new ValueTuple<ThingDef, WorkTypeDef>(pawn.def, workTypeDef);
+
+            // Try to get from cache first
+            if (Utility_CacheManager._workTypeSettingEnabledCache.TryGetValue(key, out bool result))
+            {
+                return result;
+            }
+
+            // Compute result
+            result = pawn.workSettings.WorkIsActive(workTypeDef);
+
+            // Store in cache
+            Utility_CacheManager._workTypeSettingEnabledCache[key] = result;
+
+            // Check if the pawn's work settings allow this work type
+            return result;
+        }
+
         public static bool ForceDraftable(ThingDef def, string tag = ManagedTags.ForceDraftable)
         {
             if (def == null)
@@ -301,6 +365,27 @@ namespace emitbreaker.PawnControl
             foreach (var key in keysToRemove)
                 Utility_CacheManager._workEnabledCache.Remove(key);
 
+            var workTypeCacheToRemove = new List<ValueTuple<ThingDef, WorkTypeDef>>();
+            // Clear work enabled cache for this race
+            foreach (var key in Utility_CacheManager._workTypeEnabledCache.Keys)
+            {
+                if (key.Item1 == def)
+                    workTypeCacheToRemove.Add(key);
+            }
+            foreach (var key in workTypeCacheToRemove)
+                Utility_CacheManager._workTypeEnabledCache.Remove(key);
+
+            workTypeCacheToRemove.Clear();
+
+            // Clear work enabled cache for this race
+            foreach (var key in Utility_CacheManager._workTypeSettingEnabledCache.Keys)
+            {
+                if (key.Item1 == def)
+                    workTypeCacheToRemove.Add(key);
+            }
+            foreach (var key in workTypeCacheToRemove)
+                Utility_CacheManager._workTypeSettingEnabledCache.Remove(key);
+
             // Reset and reuse list for work disabled cache
             keysToRemove.Clear();
             foreach (var key in Utility_CacheManager._workDisabledCache.Keys)
@@ -353,6 +438,8 @@ namespace emitbreaker.PawnControl
         public static void ResetCache()
         {
             Utility_CacheManager._workEnabledCache.Clear();
+            Utility_CacheManager._workTypeEnabledCache.Clear();
+            Utility_CacheManager._workTypeSettingEnabledCache.Clear();
             Utility_CacheManager._workDisabledCache.Clear(); 
             Utility_CacheManager._forceDraftableCache.Clear();
             Utility_CacheManager._forceEquipWeaponCache.Clear();

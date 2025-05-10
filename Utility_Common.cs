@@ -1,9 +1,10 @@
-﻿using System;
+﻿using RimWorld;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
-using RimWorld;
 using Verse;
 
 namespace emitbreaker.PawnControl
@@ -65,9 +66,19 @@ namespace emitbreaker.PawnControl
             return DefDatabase<WorkGiverDef>.GetNamed(defName);
         }
 
+        public static WorkTypeDef WorkTypeDefNamed(string defName)
+        {
+            return DefDatabase<WorkTypeDef>.GetNamed(defName);
+        }
+
         public static ThinkTreeDef ThinkTreeDefNamed(string defName)
         {
             return DefDatabase<ThinkTreeDef>.GetNamed(defName);
+        }
+
+        public static BodyPartDef BodyPartDefNamed(string defName)
+        {
+            return DefDatabase<BodyPartDef>.GetNamed(defName);
         }
 
         // UPDATED: Cache the names on first access to avoid repeated reflection.
@@ -86,6 +97,23 @@ namespace emitbreaker.PawnControl
         public static HashSet<string> GetPawnEnumTagNamesHashSet()
         {
             return _pawnEnumTagNamesHashSetCache;
+        }
+
+        /// <summary>
+        /// Finds the pawn that owns the given work settings instance
+        /// </summary>
+        public static Pawn FindPawnWithWorkSettings(Pawn_WorkSettings workSettings)
+        {
+            if (workSettings == null)
+                return null;
+
+            foreach (Pawn pawn in PawnsFinder.AllMapsCaravansAndTravelingTransportPods_Alive)
+            {
+                if (pawn.workSettings == workSettings)
+                    return pawn;
+            }
+
+            return null;
         }
     }
 }

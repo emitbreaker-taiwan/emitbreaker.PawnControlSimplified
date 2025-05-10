@@ -1,10 +1,6 @@
 ﻿using RimWorld;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
 using UnityEngine;
 using Verse;
 using Verse.AI;
@@ -27,22 +23,32 @@ namespace emitbreaker.PawnControl
         {
             if (scanner.def.scanThings)
             {
-                foreach (var thing in scanner.PotentialWorkThingsGlobal(pawn))
+                var things = scanner.PotentialWorkThingsGlobal(pawn);
+                if (things != null)
                 {
-                    if (!thing.IsForbidden(pawn) && scanner.HasJobOnThing(pawn, thing))
+                    // Use foreach instead of LINQ operations
+                    foreach (var thing in things)
                     {
-                        return scanner.JobOnThing(pawn, thing);
+                        if (!thing.IsForbidden(pawn) && scanner.HasJobOnThing(pawn, thing))
+                        {
+                            return scanner.JobOnThing(pawn, thing);
+                        }
                     }
                 }
             }
 
             if (scanner.def.scanCells)
             {
-                foreach (var cell in scanner.PotentialWorkCellsGlobal(pawn))
+                var cells = scanner.PotentialWorkCellsGlobal(pawn);
+                if (cells != null)
                 {
-                    if (!cell.IsForbidden(pawn) && scanner.HasJobOnCell(pawn, cell))
+                    // Use foreach instead of LINQ operations
+                    foreach (var cell in cells)
                     {
-                        return scanner.JobOnCell(pawn, cell);
+                        if (!cell.IsForbidden(pawn) && scanner.HasJobOnCell(pawn, cell))
+                        {
+                            return scanner.JobOnCell(pawn, cell);
+                        }
                     }
                 }
             }
@@ -158,7 +164,22 @@ namespace emitbreaker.PawnControl
                     if (th is IConstructible c)
                     {
                         var costList = c.TotalMaterialCost();
-                        if (costList != null && costList.Any(m => m.thingDef == carried.def))
+
+                        // Hand-rolled replacement for costList.Any(m => m.thingDef == carried.def)
+                        bool foundMatch = false;
+                        if (costList != null)
+                        {
+                            for (int i = 0; i < costList.Count; i++)
+                            {
+                                if (costList[i].thingDef == carried.def)
+                                {
+                                    foundMatch = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (foundMatch)
                         {
                             return actor.CanReserveAndReach(th, PathEndMode.Touch, Danger.Some);
                         }
@@ -167,10 +188,23 @@ namespace emitbreaker.PawnControl
                     return false;
                 };
 
+                // The GenClosest method still uses LINQ internally but we can't change that
+                List<LocalTargetInfo> targetQueue = new List<LocalTargetInfo>(curJob.targetQueueB);
+                List<Thing> thingTargets = new List<Thing>(targetQueue.Count);
+
+                // Convert LocalTargetInfo to Things manually instead of using Select
+                for (int i = 0; i < targetQueue.Count; i++)
+                {
+                    if (targetQueue[i].Thing != null)
+                    {
+                        thingTargets.Add(targetQueue[i].Thing);
+                    }
+                }
+
                 Thing nextTarget = GenClosest.ClosestThing_Global_Reachable(
                     actor.Position,
                     actor.Map,
-                    curJob.targetQueueB.Select(t => t.Thing),
+                    thingTargets,
                     PathEndMode.Touch,
                     TraverseParms.For(actor),
                     99999f,
@@ -178,7 +212,15 @@ namespace emitbreaker.PawnControl
 
                 if (nextTarget != null)
                 {
-                    curJob.targetQueueB.RemoveAll(t => t.Thing == nextTarget);
+                    // Replace RemoveAll with a manual loop for better performance
+                    for (int i = curJob.targetQueueB.Count - 1; i >= 0; i--)
+                    {
+                        if (curJob.targetQueueB[i].Thing == nextTarget)
+                        {
+                            curJob.targetQueueB.RemoveAt(i);
+                        }
+                    }
+
                     curJob.targetB = nextTarget;
                     actor.jobs.curDriver.JumpToToil(carryToContainerToil);
                 }
