@@ -1,7 +1,6 @@
 using RimWorld;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using Verse;
 using Verse.AI;
@@ -125,21 +124,21 @@ namespace emitbreaker.PawnControl
         public static bool ShouldYieldToEmergencyJob(Pawn pawn)
         {
             if (pawn?.Map == null)
-            {
                 return false;
-            }
 
-            // Check for fires in home area - yield to firefighting JobGiver
-            if (pawn.Map.listerThings.ThingsOfDef(ThingDefOf.Fire).Any(f => f.Spawned && pawn.Map.areaManager.Home[f.Position]))
+            // Manually scan for spawned fires in the home area
+            List<Thing> fires = pawn.Map.listerThings.ThingsOfDef(ThingDefOf.Fire);
+            for (int i = 0, c = fires.Count; i < c; i++)
             {
-                // Also check if pawn can do firefighting work
-                if (Utility_TagManager.WorkEnabled(pawn.def, "Firefighter"))
+                var f = fires[i] as Fire;
+                if (f != null && f.Spawned && pawn.Map.areaManager.Home[f.Position])
                 {
-                    return true;
+                    // only yield if pawn can do firefighting work
+                    if (Utility_TagManager.WorkEnabled(pawn.def, "Firefighter"))
+                        return true;
+                    break;
                 }
             }
-
-            // Add more emergency checks if needed (e.g., threats, medical emergencies)
 
             return false;
         }
@@ -838,20 +837,34 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static bool IsEmergencyActive(Pawn pawn, string emergencyType)
         {
-            if (pawn?.Map == null) return false;
+            if (pawn?.Map == null)
+                return false;
 
             switch (emergencyType)
             {
                 case "Fire":
-                    return pawn.Map.listerThings.ThingsOfDef(ThingDefOf.Fire).Any(f =>
-                        f.Spawned && pawn.Map.areaManager.Home[f.Position]);
+                    {
+                        List<Thing> fires = pawn.Map.listerThings.ThingsOfDef(ThingDefOf.Fire);
+                        for (int i = 0, c = fires.Count; i < c; i++)
+                        {
+                            var f = fires[i] as Fire;
+                            if (f != null && f.Spawned && pawn.Map.areaManager.Home[f.Position])
+                                return true;
+                        }
+                        return false;
+                    }
 
                 case "MedicalEmergency":
-                    // Check for colonists needing urgent medical care
-                    return pawn.Map.mapPawns.FreeColonists.Any(p =>
-                        p != pawn && p.health.HasHediffsNeedingTend());
-
-                // Add more emergency types as needed
+                    {
+                        List<Pawn> colonists = pawn.Map.mapPawns.FreeColonists;
+                        for (int i = 0, c = colonists.Count; i < c; i++)
+                        {
+                            Pawn other = colonists[i];
+                            if (other != pawn && other.health.HasHediffsNeedingTend())
+                                return true;
+                        }
+                        return false;
+                    }
 
                 default:
                     return false;

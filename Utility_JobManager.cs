@@ -1,11 +1,6 @@
 ﻿using RimWorld;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
-using UnityEngine;
 using Verse;
 using Verse.AI;
 
@@ -158,7 +153,19 @@ namespace emitbreaker.PawnControl
                     if (th is IConstructible c)
                     {
                         var costList = c.TotalMaterialCost();
-                        if (costList != null && costList.Any(m => m.thingDef == carried.def))
+                        bool hasMatchingDef = false;
+                        if (costList != null)
+                        {
+                            for (int ci = 0, cc = costList.Count; ci < cc; ci++)
+                            {
+                                if (costList[ci].thingDef == carried.def)
+                                {
+                                    hasMatchingDef = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (hasMatchingDef)
                         {
                             return actor.CanReserveAndReach(th, PathEndMode.Touch, Danger.Some);
                         }
@@ -167,10 +174,19 @@ namespace emitbreaker.PawnControl
                     return false;
                 };
 
+                // Build a plain List<Thing> from the Job’s targetQueueB
+                List<Thing> thingSearchSet = new List<Thing>(curJob.targetQueueB.Count);
+                for (int qi = 0, qc = curJob.targetQueueB.Count; qi < qc; qi++)
+                {
+                    var q = curJob.targetQueueB[qi];
+                    if (q.Thing != null)
+                        thingSearchSet.Add(q.Thing);
+                }
+
                 Thing nextTarget = GenClosest.ClosestThing_Global_Reachable(
                     actor.Position,
                     actor.Map,
-                    curJob.targetQueueB.Select(t => t.Thing),
+                    thingSearchSet,                // now a List<Thing>, no LINQ
                     PathEndMode.Touch,
                     TraverseParms.For(actor),
                     99999f,

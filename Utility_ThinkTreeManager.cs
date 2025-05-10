@@ -1,11 +1,7 @@
 ﻿using HarmonyLib;
 using RimWorld;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
 using Verse;
 using Verse.AI;
 
@@ -312,13 +308,24 @@ namespace emitbreaker.PawnControl
                     // Ultimate fallback - try to find ANY think tree if all else fails
                     if (mainThinkTree == null)
                     {
-                        mainThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail("Animal") ??
-                                       DefDatabase<ThinkTreeDef>.AllDefsListForReading.FirstOrDefault();
+                        // First try the "Animal" tree
+                        var animalTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail("Animal");
+                        if (animalTree != null)
+                        {
+                            mainThinkTree = animalTree;
+                        }
+                        else
+                        {
+                            // Manual equivalent of FirstOrDefault()
+                            var allTrees = DefDatabase<ThinkTreeDef>.AllDefsListForReading;
+                            mainThinkTree = (allTrees.Count > 0) ? allTrees[0] : null;
+                        }
 
                         if (mainThinkTree != null)
                         {
                             if (debugLogging)
-                                Utility_DebugManager.LogWarning($"Using ultimate fallback think tree {mainThinkTree.defName} for {pawn.LabelShort}");
+                                Utility_DebugManager.LogWarning(
+                                    $"Using ultimate fallback think tree {mainThinkTree.defName} for {pawn.LabelShort}");
                         }
                     }
                 }

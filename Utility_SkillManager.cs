@@ -1,10 +1,5 @@
 ﻿using RimWorld;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Verse;
 
 namespace emitbreaker.PawnControl
@@ -130,10 +125,18 @@ namespace emitbreaker.PawnControl
             // First check if the dictionary is populated at all
             else if (skill == null && modExtension.injectedSkills != null && modExtension.injectedSkills.Count > 0)
             {
-                // If no specific skill requested, use the average or max of all injected skills
+                // If no specific skill requested, use the average of all injected skills
                 if (modExtension.SimulatedSkillDict != null && modExtension.SimulatedSkillDict.Count > 0)
                 {
-                    return (int)modExtension.SimulatedSkillDict.Values.Average();
+                    int sum = 0;
+                    int cnt = 0;
+                    foreach (var kv in modExtension.SimulatedSkillDict)
+                    {
+                        sum += kv.Value;
+                        cnt++;
+                    }
+                    if (cnt > 0)
+                        return sum / cnt;
                 }
 
                 // Fallback to first skill in the list if dictionary not populated

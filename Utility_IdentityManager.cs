@@ -1,13 +1,8 @@
 ﻿using RimWorld;
-using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
 using Verse;
-using Verse.AI;
 
 namespace emitbreaker.PawnControl
 {
@@ -15,6 +10,27 @@ namespace emitbreaker.PawnControl
     {
         public static bool identityFlagsPreloaded = false;
         public static bool IsIdentityFlagsPreloaded => identityFlagsPreloaded;
+
+        private static int CountTrueValues<TKey>(Dictionary<TKey, bool> dict)
+        {
+            int cnt = 0;
+            foreach (var kv in dict)
+                if (kv.Value) cnt++;
+            return cnt;
+        }
+
+        private static bool AnyTagStartsWith(ThingDef def, string prefix)
+        {
+            List<string> tags = Utility_TagManager.GetTags(def).ToList();
+            if (tags == null) return false;
+            for (int i = 0, c = tags.Count; i < c; i++)
+            {
+                string t = tags[i];
+                if (t != null && t.StartsWith(prefix))
+                    return true;
+            }
+            return false;
+        }
 
         public static void BuildIdentityFlagCache(bool reload = false)
         {
@@ -27,9 +43,9 @@ namespace emitbreaker.PawnControl
 
             if (reload)
             {
-                animalCount = Utility_CacheManager._isAnimalCache.Count(x => x.Value);
-                humanlikeCount = Utility_CacheManager._isHumanlikeCache.Count(x => x.Value);
-                mechanoidCount = Utility_CacheManager._isMechanoidCache.Count(x => x.Value);
+                animalCount = CountTrueValues(Utility_CacheManager._isAnimalCache);
+                humanlikeCount = CountTrueValues(Utility_CacheManager._isHumanlikeCache);
+                mechanoidCount = CountTrueValues(Utility_CacheManager._isMechanoidCache);
             }
 
             Utility_CacheManager._isAnimalCache.Clear();
@@ -61,9 +77,9 @@ namespace emitbreaker.PawnControl
 
             if (reload)
             {
-                animalCountNew = Utility_CacheManager._isAnimalCache.Count(x => x.Value);
-                humanlikeCountNew = Utility_CacheManager._isHumanlikeCache.Count(x => x.Value);
-                mechanoidCountNew = Utility_CacheManager._isMechanoidCache.Count(x => x.Value);
+                animalCountNew = CountTrueValues(Utility_CacheManager._isAnimalCache);
+                humanlikeCountNew = CountTrueValues(Utility_CacheManager._isHumanlikeCache);
+                mechanoidCountNew = CountTrueValues(Utility_CacheManager._isMechanoidCache);
 
                 if ((animalCount != animalCountNew) || (humanlikeCount != humanlikeCountNew) || (mechanoidCount != mechanoidCountNew))
                 {
@@ -97,9 +113,9 @@ namespace emitbreaker.PawnControl
             if (modExtension.forceDraftable
                        || Utility_TagManager.HasTag(def, ManagedTags.ForceDraftable)
                        || Utility_TagManager.HasTag(def, ManagedTags.AllowAllWork)
-                       || Utility_TagManager.GetTags(def).Any(t => t != null && t.StartsWith(ManagedTags.AllowWorkPrefix))
+                       || AnyTagStartsWith(def, ManagedTags.AllowWorkPrefix)
                        || Utility_TagManager.HasTag(def, ManagedTags.BlockAllWork)
-                       || Utility_TagManager.GetTags(def).Any(tag => tag != null && tag.StartsWith(ManagedTags.BlockWorkPrefix)))
+                       || AnyTagStartsWith(def, ManagedTags.BlockWorkPrefix))
             {
                 result = true;
             }
@@ -241,9 +257,9 @@ namespace emitbreaker.PawnControl
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.AllowWorkPrefix)) ||
+                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.BlockWorkPrefix))
+                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
                     ))
                 {
                     return true;
@@ -265,9 +281,9 @@ namespace emitbreaker.PawnControl
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.AllowWorkPrefix)) ||
+                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.BlockWorkPrefix))
+                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
                     ))
                 {
                     return true;
@@ -289,9 +305,9 @@ namespace emitbreaker.PawnControl
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.AllowWorkPrefix)) ||
+                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.BlockWorkPrefix))
+                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
                     ))
                 {
                     return true;
@@ -313,9 +329,9 @@ namespace emitbreaker.PawnControl
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.AllowWorkPrefix)) ||
+                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.BlockWorkPrefix))
+                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
                     ))
                 {
                     return true;
@@ -337,9 +353,9 @@ namespace emitbreaker.PawnControl
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.AllowWorkPrefix)) ||
+                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.BlockWorkPrefix))
+                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
                     ))
                 {
                     return true;
@@ -361,9 +377,9 @@ namespace emitbreaker.PawnControl
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.AllowWorkPrefix)) ||
+                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        Utility_TagManager.GetTags(pawn.def).Any(tag => tag != null && tag.StartsWith(ManagedTags.BlockWorkPrefix))
+                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
                     ))
                 {
                     return true;
