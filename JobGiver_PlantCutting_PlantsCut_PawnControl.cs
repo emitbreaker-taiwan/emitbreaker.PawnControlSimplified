@@ -7,78 +7,83 @@ using Verse.AI;
 namespace emitbreaker.PawnControl
 {
     /// <summary>
-    /// Plant‐cutting JobGiver now only implements the two hooks
+    /// Plant‐cutting JobGiver with minimal overrides:
+    /// uses the standard TryGiveJob wrapper, a cache, and nearest‐plant selection.
     /// </summary>
     public class JobGiver_PlantCutting_PlantsCut_PawnControl : JobGiver_PawnControl
     {
-        //———— Overrides for wrapper —————————————————————————————————————————
-
+        // 1) Tag used by the base wrapper for eligibility checks
         protected override string WorkTag => "PlantCutting";
-        protected override int CacheUpdateInterval => 500; // ~8s between scans
 
+        // 2) Cache rebuild interval (~8s) for large plant maps
+        protected override int CacheUpdateInterval => 500;
+
+        // 3) Populate cache: all plants that need cutting or harvesting
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
             return GetPlantsNeedingCutting(map).Cast<Thing>();
         }
 
+        // 4) From the cached list, pick the nearest valid Plant and return a CutPlant job
         protected override Job ExecuteJobGiverInternal(Pawn pawn, List<Thing> targets)
         {
-            Plant best = null;
-            float bestDistSqr = float.MaxValue;
+            Plant bestPlant = null;
+            float bestDistSq = float.MaxValue;
 
-            foreach (var plant in targets.OfType<Plant>())
+            foreach (var thing in targets.OfType<Plant>())
             {
-                if (!ValidatePlantTarget(plant, pawn))
+                if (!ValidatePlantTarget(thing, pawn))
                     continue;
 
-                float distSqr = (plant.Position - pawn.Position).LengthHorizontalSquared;
-                if (distSqr < bestDistSqr)
+                float distSq = (thing.Position - pawn.Position).LengthHorizontalSquared;
+                if (distSq < bestDistSq)
                 {
-                    bestDistSqr = distSqr;
-                    best = plant;
+                    bestDistSq = distSq;
+                    bestPlant = thing;
                 }
             }
 
-            return best != null
-                ? JobMaker.MakeJob(JobDefOf.CutPlant, best)
+            return bestPlant != null
+                ? JobMaker.MakeJob(JobDefOf.CutPlant, bestPlant)
                 : null;
         }
 
-        //———— Plant‐selection details ————————————————————————————————————————
+        #region Plant‐selection helpers
 
         private IEnumerable<Plant> GetPlantsNeedingCutting(Map map)
         {
-            var list = new List<Plant>();
+            var plants = new List<Plant>();
 
-            // 1) designated
+            // 1) designated Cut/Harvest
             foreach (var des in map.designationManager.AllDesignations)
             {
                 if ((des.def == DesignationDefOf.CutPlant || des.def == DesignationDefOf.HarvestPlant)
                     && des.target.Thing is Plant p)
                 {
-                    list.Add(p);
+                    plants.Add(p);
                 }
             }
 
-            // 2) growing‐zone defaults
+            // 2) zone‐based cutting
             foreach (var zone in map.zoneManager.AllZones.OfType<Zone_Growing>())
             {
                 if (!zone.allowCut) continue;
-                var growDef = zone.GetPlantDefToGrow();
+                ThingDef growDef = zone.GetPlantDefToGrow();
+
                 foreach (var cell in zone.Cells)
                 {
-                    var p = cell.GetPlant(map);
-                    if (p != null
-                        && !list.Contains(p)
-                        && (growDef == null || p.def != growDef))
+                    var plant = cell.GetPlant(map);
+                    if (plant != null
+                        && !plants.Contains(plant)
+                        && (growDef == null || plant.def != growDef))
                     {
-                        list.Add(p);
+                        plants.Add(plant);
                     }
                 }
             }
 
-            // cap for performance
-            return list.Count > 200 ? list.Take(200) : list;
+            // 3) cap to 200 entries
+            return plants.Count > 200 ? plants.Take(200) : plants;
         }
 
         private bool ValidatePlantTarget(Plant plant, Pawn pawn)
@@ -86,8 +91,10 @@ namespace emitbreaker.PawnControl
             if (plant == null || plant.Destroyed || !plant.Spawned)
                 return false;
 
-            bool isDesignated = pawn.Map.designationManager.DesignationOn(plant, DesignationDefOf.CutPlant) != null
-                               || pawn.Map.designationManager.DesignationOn(plant, DesignationDefOf.HarvestPlant) != null;
+            bool isDesignated =
+                pawn.Map.designationManager.DesignationOn(plant, DesignationDefOf.CutPlant) != null
+                || pawn.Map.designationManager.DesignationOn(plant, DesignationDefOf.HarvestPlant) != null;
+
             if (isDesignated)
             {
                 if (pawn.Faction != Faction.OfPlayer)
@@ -105,5 +112,7 @@ namespace emitbreaker.PawnControl
 
             return pawn.CanReserve(plant, 1, -1);
         }
+
+        #endregion
     }
 }

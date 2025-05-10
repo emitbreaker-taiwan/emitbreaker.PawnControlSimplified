@@ -223,7 +223,7 @@ namespace emitbreaker.PawnControl
 
 
             // JobGiver_PawnControl base class caches
-            JobGiver_PawnControl.ResetAllCaches();
+            //JobGiver_PawnControl.ResetAllCaches();
 
             // General job giver caches
             JobGiver_WorkNonHumanlike.ResetCache();

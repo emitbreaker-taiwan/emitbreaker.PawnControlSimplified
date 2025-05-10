@@ -22,7 +22,7 @@ namespace emitbreaker.PawnControl
         public override void MapRemoved()
         {
             base.MapRemoved();
-            JobGiver_PawnControl.CleanupMap(map.uniqueID);
+            //JobGiver_PawnControl.CleanupMap(map.uniqueID);
             Utility_DebugManager.LogNormal($"Cleaned up caches for removed map {map.uniqueID}");
         }
     }
