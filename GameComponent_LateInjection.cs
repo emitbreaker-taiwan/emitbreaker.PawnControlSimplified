@@ -229,7 +229,7 @@ namespace emitbreaker.PawnControl
             JobGiver_WorkNonHumanlike.ResetCache();
 
             // Plant cutting job givers
-            JobGiver_PlantCutting_PlantsCut_PawnControl.ResetCache();
+            //JobGiver_PlantCutting_PlantsCut_PawnControl.ResetCache();
             JobGiver_PlantCutting_ExtractTree_PawnControl.ResetCache();
 
             // Growing job givers

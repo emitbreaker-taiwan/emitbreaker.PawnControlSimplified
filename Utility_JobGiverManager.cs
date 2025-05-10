@@ -604,52 +604,29 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Checks if a pawn is eligible for specialized JobGiver processing
         /// </summary>
-        public static bool IsEligibleForSpecializedJobGiver(Pawn pawn, string workTag)
+        public static bool IsEligibleForSpecializedJobGiver(Pawn pawn, string workTypeName)
         {
             if (pawn == null || !pawn.Spawned || pawn.Dead)
                 return false;
-            
-            // Using ThinkTreeManager for consistent tagging across codebase
-            if (!Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def))
-                return false;
-            
-            // Check for specific work tag - must be explicitly enabled for this pawn
-            if (!string.IsNullOrEmpty(workTag) && !Utility_TagManager.WorkEnabled(pawn.def, workTag))
-                return false;
-            
+
             // Skip pawns without mod extension - let vanilla handle them
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
                 return false;
 
-            // CRITICAL FIX: Check actual work settings for humanlike and modded pawns with workSettings
-            if (!string.IsNullOrEmpty(workTag) && pawn.workSettings != null)
+            // Using ThinkTreeManager for consistent tagging across codebase
+            if (!Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def))
+                return false;
+
+            // Use WorkTypeSettingEnabled to check both tag permissions and work settings
+            // This handles both the work setting check and tag permission check
+            if (!Utility_TagManager.WorkTypeSettingEnabled(pawn, workTypeName))
             {
-                // Try to find the corresponding WorkTypeDef based on tag name
-                WorkTypeDef workTypeDef = null;
-
-                // First try exact match
-                workTypeDef = DefDatabase<WorkTypeDef>.GetNamedSilentFail(workTag);
-
-                // If that fails, try case-insensitive match
-                if (workTypeDef == null)
+                if (Prefs.DevMode)
                 {
-                    foreach (WorkTypeDef def in DefDatabase<WorkTypeDef>.AllDefsListForReading)
-                    {
-                        if (def.defName.EqualsIgnoreCase(workTag))
-                        {
-                            workTypeDef = def;
-                            break;
-                        }
-                    }
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} is not eligible for {workTypeName} work, skipping job");
                 }
-
-                // If work type exists and is disabled in pawn's settings, don't give job
-                if (workTypeDef != null && !pawn.workSettings.WorkIsActive(workTypeDef))
-                {
-                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} has work type {workTypeDef.defName} disabled in work settings, skipping job");
-                    return false;
-                }
+                return false;
             }
 
             return true;

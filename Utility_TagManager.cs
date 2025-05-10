@@ -1,5 +1,7 @@
-﻿using System;
+﻿using RimWorld;
+using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using Verse;
 
 namespace emitbreaker.PawnControl
@@ -137,28 +139,48 @@ namespace emitbreaker.PawnControl
                 return false; // No mod extension found
             }
 
+            Utility_DebugManager.LogNormal($"Issued WorkTypeDef was: {workTypeDef.defName}.");
+
             // Check if the pawn is allowed to do the work type
             if (!WorkTypeEnabled(pawn.def, workTypeDef))
             {
                 return false;
             }
 
-            var key = new ValueTuple<ThingDef, WorkTypeDef>(pawn.def, workTypeDef);
+            // IMPORTANT: Get the most up-to-date work settings value
+            return pawn.workSettings?.WorkIsActive(workTypeDef) ?? false;
+        }
 
-            // Try to get from cache first
-            if (Utility_CacheManager._workTypeSettingEnabledCache.TryGetValue(key, out bool result))
+        public static bool WorkTypeSettingEnabled(Pawn pawn, string workTypeName)
+        {
+            if (pawn == null || string.IsNullOrEmpty(workTypeName))
             {
-                return result;
+                return false; // Invalid input
             }
 
-            // Compute result
-            result = pawn.workSettings.WorkIsActive(workTypeDef);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null)
+            {
+                return false; // No mod extension found
+            }
 
-            // Store in cache
-            Utility_CacheManager._workTypeSettingEnabledCache[key] = result;
+            Utility_DebugManager.LogNormal($"Issued work type name string was: {workTypeName}.");
 
-            // Check if the pawn's work settings allow this work type
-            return result;
+            // FIX: Use the actual parameter instead of the literal string "workTypeDef"
+            WorkTypeDef targetDef = Utility_WorkTypeManager.Named(workTypeName);
+            if (targetDef == null)
+            {
+                return false; // Work type not found
+            }
+
+            // Check if the pawn is allowed to do the work type
+            if (!WorkTypeEnabled(pawn.def, targetDef))
+            {
+                return false;
+            }
+
+            // IMPORTANT: Get the most up-to-date work settings value
+            return pawn.workSettings?.WorkIsActive(targetDef) ?? false;
         }
 
         public static bool ForceDraftable(ThingDef def, string tag = ManagedTags.ForceDraftable)

@@ -71,24 +71,6 @@ namespace emitbreaker.PawnControl
             return DefDatabase<BodyPartDef>.GetNamed(defName);
         }
 
-        // UPDATED: Cache the names on first access to avoid repeated reflection.
-        private static readonly List<string> _pawnEnumTagNamesListCache = Enum.GetNames(typeof(PawnEnumTags)).ToList();
-        private static readonly HashSet<string> _pawnEnumTagNamesHashSetCache = new HashSet<string>(_pawnEnumTagNamesListCache);
-
-        /// <summary>
-        /// Returns all PawnEnumTags as a List of their names.
-        /// </summary>
-        /// <returns>List of enum member names</returns>
-        public static List<string> GetPawnEnumTagNames()
-        {
-            return _pawnEnumTagNamesListCache;
-        }
-
-        public static HashSet<string> GetPawnEnumTagNamesHashSet()
-        {
-            return _pawnEnumTagNamesHashSetCache;
-        }
-
         /// <summary>
         /// Finds the pawn that owns the given work settings instance
         /// </summary>

@@ -100,7 +100,7 @@ namespace emitbreaker.PawnControl
 
             return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
                 pawn,
-                "Handler",
+                "Handling",
                 (p, forced) => {
                     // Update gatherable animals cache
                     UpdateGatherableAnimalsCacheSafely(p.Map, p.Faction);

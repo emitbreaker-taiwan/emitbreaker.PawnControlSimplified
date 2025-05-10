@@ -210,7 +210,7 @@ namespace emitbreaker.PawnControl
             //}
         }
 
-        public static class Patch_WorkTabInjection
+        public static class Patch_Iteration2_WorkTabInjection
         {
             #region Work Tab Pawn List
 
@@ -842,6 +842,9 @@ namespace emitbreaker.PawnControl
                 [HarmonyPostfix]
                 public static void Postfix(Pawn __instance)
                 {
+                    // Initialize the static filter for this pawn
+                    JobGiver_PawnControl.GetStaticAllowedJobGivers(__instance);
+
                     if (__instance == null || __instance.Dead || __instance.Destroyed)
                         return;
 
@@ -889,6 +892,36 @@ namespace emitbreaker.PawnControl
                             Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__instance);
                         }
                     });
+                }
+            }
+
+            #endregion
+
+            #region Pawn Lifecycle management
+
+            /// <summary>
+            /// Cleans up static module filters when a pawn despawns
+            /// </summary>
+            [HarmonyPatch(typeof(Pawn), nameof(Pawn.DeSpawn))]
+            public static class Patch_Pawn_DeSpawn_ModuleFilter
+            {
+                [HarmonyPostfix]
+                public static void Postfix(Pawn __instance)
+                {
+                    // Clean up the static filter for this pawn
+                    if (__instance != null)
+                    {
+                        JobGiver_PawnControl.CleanupStaticFilter(__instance.thingIDNumber);
+
+                        if (Prefs.DevMode)
+                        {
+                            var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                            if (modExtension != null && modExtension.debugMode)
+                            {
+                                Utility_DebugManager.LogNormal($"Static filter cleared for {__instance.LabelShort} (ID: {__instance.thingIDNumber})");
+                            }
+                        }
+                    }
                 }
             }
 

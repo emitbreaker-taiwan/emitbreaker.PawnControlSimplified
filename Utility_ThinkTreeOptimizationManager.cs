@@ -232,7 +232,7 @@ namespace emitbreaker.PawnControl
                 {
                     if (string.IsNullOrEmpty(workTypeName) || pawn == null) return false;
 
-                    WorkTypeDef workType = Utility_WorkTypeManager.WorkTypeDefNamed(workTypeName);
+                    WorkTypeDef workType = Utility_WorkTypeManager.Named(workTypeName);
                     if (workType == null) return true; // If work type doesn't exist, bypass
 
                     return !Utility_TagManager.WorkTypeSettingEnabled(pawn, workType);

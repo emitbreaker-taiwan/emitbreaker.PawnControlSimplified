@@ -28,7 +28,6 @@ namespace emitbreaker.PawnControl
 
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _workEnabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool> _workTypeEnabledCache = new Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool>();
-        public static readonly Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool> _workTypeSettingEnabledCache = new Dictionary<ValueTuple<ThingDef, WorkTypeDef>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _workDisabledCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceDraftableCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();
         public static readonly Dictionary<ValueTuple<ThingDef, string>, bool> _forceEquipWeaponCache = new Dictionary<ValueTuple<ThingDef, string>, bool>();

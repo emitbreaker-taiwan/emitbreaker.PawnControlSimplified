@@ -9,7 +9,7 @@ namespace emitbreaker.PawnControl
 {
     public static class Utility_WorkTypeManager
     {
-        public static WorkTypeDef WorkTypeDefNamed(string defName)
+        public static WorkTypeDef Named(string defName)
         {
             return DefDatabase<WorkTypeDef>.GetNamed(defName);
         }
