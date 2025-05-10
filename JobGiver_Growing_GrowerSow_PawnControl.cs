@@ -44,7 +44,7 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Growing",
                 (p, forced) => {

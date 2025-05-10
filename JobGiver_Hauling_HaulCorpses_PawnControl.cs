@@ -29,7 +29,7 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
@@ -148,7 +148,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _haulableCorpsesCache[mapId],
                 (corpse) => (corpse.Position - pawn.Position).LengthHorizontalSquared,
@@ -156,7 +156,7 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best corpse to haul
-            Corpse targetCorpse = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Corpse targetCorpse = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (corpse, p) => {

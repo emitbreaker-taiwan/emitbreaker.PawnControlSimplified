@@ -33,7 +33,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Using StandardTryGiveJob to handle common validation checks
-            return Utility_JobGiverManager.StandardTryGiveJob<Thing>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Thing>(
                 pawn,
                 "Construction",
                 (p, forced) => {
@@ -100,7 +100,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _smoothBuildingsCache[mapId],
                 (building) => (building.Position - pawn.Position).LengthHorizontalSquared,
@@ -108,7 +108,7 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best wall to smooth - explicitly specify Building as the type parameter
-            Building bestBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Building>(
+            Building bestBuilding = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets<Building>(
                 buckets,
                 pawn,
                 (building, p) => {

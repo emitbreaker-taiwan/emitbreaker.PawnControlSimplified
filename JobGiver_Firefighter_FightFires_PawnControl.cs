@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Firefighter",
                 (p, forced) => {
@@ -153,7 +153,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Step 2: Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 validFires,
                 (fire) => (fire.Position - pawn.Position).LengthHorizontalSquared,
@@ -161,7 +161,7 @@ namespace emitbreaker.PawnControl
             );
 
             // Step 3: Find the best fire using the manager
-            Fire targetFire = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Fire targetFire = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (fire, p) => !fire.IsForbidden(p) && p.CanReserveAndReach(fire, PathEndMode.Touch, p.NormalMaxDanger()),

@@ -24,7 +24,7 @@ namespace emitbreaker.PawnControl
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Standardized approach to job giving using your utility class
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_PlantCutting_ExtractTree_PawnControl>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<JobGiver_PlantCutting_ExtractTree_PawnControl>(
                 pawn,
                 "PlantCutting", // This work type is PlantCutting, not Construction
                 (p, forced) => {

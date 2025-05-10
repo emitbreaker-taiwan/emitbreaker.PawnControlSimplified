@@ -34,7 +34,7 @@ namespace emitbreaker.PawnControl
             if (pawn?.Map == null || !pawn.Map.listerThings.ThingsInGroup(ThingRequestGroup.BuildingFrame).Any())
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Frame>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Frame>(
                 pawn,
                 "Construction",
                 (p, forced) => {
@@ -105,7 +105,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _completedFrameCache[mapId],
                 (frame) => (frame.Position - pawn.Position).LengthHorizontalSquared,
@@ -137,12 +137,12 @@ namespace emitbreaker.PawnControl
             }
 
             // With no blocking jobs found, proceed with normal target selection
-            Frame bestFrame = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Frame bestFrame = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (frame, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(frame, p, requiresDesignator: false))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(frame, p, requiresDesignator: false))
                         return false;
 
                     // Skip frames from different factions

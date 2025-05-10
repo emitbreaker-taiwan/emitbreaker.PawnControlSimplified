@@ -47,7 +47,7 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
@@ -55,7 +55,7 @@ namespace emitbreaker.PawnControl
                     UpdateCremateCacheSafely(p.Map);
 
                     // Find and create a job for cremating corpses
-                    return Utility_JobGiverManager.TryCreateBillGiverJob(p, _crematoriumCache, _reachabilityCache);
+                    return Utility_JobGiverManagerOld.TryCreateBillGiverJob(p, _crematoriumCache, _reachabilityCache);
                 },
                 debugJobDesc: "cremate assignment",
                 skipEmergencyCheck: false);

@@ -38,7 +38,7 @@ namespace emitbreaker.PawnControl
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Standardized approach to job giving using your utility class
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Common_RemoveBuilding_PawnControl>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<JobGiver_Common_RemoveBuilding_PawnControl>(
                 pawn,
                 "Construction",
                 (p, forced) => {
@@ -123,7 +123,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _targetCache[mapId],
                 (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
@@ -131,12 +131,12 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best target to remove
-            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Thing bestTarget = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (thing, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, p, requiresDesignator: true))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(thing, p, requiresDesignator: true))
                         return false;
 
                     // Skip if no longer valid

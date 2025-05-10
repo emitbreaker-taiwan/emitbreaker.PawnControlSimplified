@@ -24,7 +24,7 @@ namespace emitbreaker.PawnControl
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Standardized approach to job giving using your utility class
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Construction_Uninstall_PawnControl>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<JobGiver_Construction_Uninstall_PawnControl>(
                 pawn,
                 "Construction", // This uses the Construction work type
                 (p, forced) => {
@@ -37,7 +37,7 @@ namespace emitbreaker.PawnControl
                         return null;
                     
                     // Use the same bucketing and target selection as base class
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                    var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                         p,
                         _targetCache[mapId],
                         (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
@@ -45,12 +45,12 @@ namespace emitbreaker.PawnControl
                     );
                     
                     // Find best target with additional uninstall-specific validation
-                    Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                    Thing bestTarget = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                         buckets,
                         p,
                         (thing, pn) => {
                             // Basic validation from base class
-                            if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, pn, requiresDesignator: true))
+                            if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(thing, pn, requiresDesignator: true))
                                 return false;
                                 
                             if (thing == null || thing.Destroyed || !thing.Spawned)

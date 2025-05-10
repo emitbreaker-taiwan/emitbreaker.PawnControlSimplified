@@ -53,7 +53,7 @@ namespace emitbreaker.PawnControl
                 !pawn.Map.listerThings.ThingsInGroup(ThingRequestGroup.Blueprint).OfType<Blueprint_Install>().Any())
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Blueprint_Install>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Blueprint_Install>(
                 pawn,
                 "Growing",
                 (p, forced) => {
@@ -126,7 +126,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing 
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _plantBlueprintCache[mapId],
                 (blueprint) => (blueprint.Position - pawn.Position).LengthHorizontalSquared,
@@ -162,12 +162,12 @@ namespace emitbreaker.PawnControl
             }
 
             // With no blocking jobs found, proceed with normal target selection
-            Blueprint_Install bestBlueprint = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Blueprint_Install>(
+            Blueprint_Install bestBlueprint = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets<Blueprint_Install>(
                 buckets,
                 pawn,
                 (blueprint, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(blueprint, p, requiresDesignator: false))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(blueprint, p, requiresDesignator: false))
                         return false;
 
                     // Skip blueprints from different factions

@@ -41,7 +41,7 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Building>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Building>(
                 pawn,
                 "Construction", // This uses the Construction work type
                 (p, forced) => {
@@ -109,7 +109,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _brokenBuildingsCache[mapId],
                 (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
@@ -117,7 +117,7 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best broken building to repair
-            Building bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Building>(
+            Building bestTarget = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets<Building>(
                 buckets,
                 pawn,
                 (thing, p) => {

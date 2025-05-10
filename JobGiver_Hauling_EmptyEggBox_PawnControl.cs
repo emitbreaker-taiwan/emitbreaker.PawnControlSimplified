@@ -36,7 +36,7 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
@@ -104,7 +104,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _eggBoxCache[mapId],
                 (eggBox) => (eggBox.Position - pawn.Position).LengthHorizontalSquared,
@@ -123,7 +123,7 @@ namespace emitbreaker.PawnControl
                 foreach (Thing eggBox in buckets[b])
                 {
                     // IMPORTANT: Check faction interaction validity
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(eggBox, pawn, requiresDesignator: false))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(eggBox, pawn, requiresDesignator: false))
                         continue;
 
                     // Skip if egg box doesn't exist or is forbidden

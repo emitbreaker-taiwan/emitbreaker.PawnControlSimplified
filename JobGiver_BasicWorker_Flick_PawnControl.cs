@@ -45,7 +45,7 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "BasicWorker",
                 (p, forced) => {
@@ -61,7 +61,7 @@ namespace emitbreaker.PawnControl
                         MAX_CACHE_ENTRIES);
 
                     // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return Utility_JobGiverManager.TryCreateDesignatedJob(
+                    return Utility_JobGiverManagerOld.TryCreateDesignatedJob(
                             pawn,
                             _flickableCache,
                             _reachabilityCache,

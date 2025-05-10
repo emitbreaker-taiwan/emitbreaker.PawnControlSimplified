@@ -37,7 +37,7 @@ namespace emitbreaker.PawnControl
                 pawn.Map.autoSlaughterManager.AnimalsToSlaughter.Count == 0)
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
                 pawn,
                 "Handling",
                 (p, forced) => {
@@ -109,7 +109,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _slaughterCache[mapId],
                 (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
@@ -117,7 +117,7 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best animal to slaughter
-            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Pawn targetAnimal = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (animal, p) => {
@@ -126,7 +126,7 @@ namespace emitbreaker.PawnControl
                         return false;
 
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(animal, p, requiresDesignator: true))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(animal, p, requiresDesignator: true))
                         return false;
 
                     // Skip if no longer a valid slaughter target

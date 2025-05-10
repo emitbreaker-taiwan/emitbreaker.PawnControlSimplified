@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
@@ -102,7 +102,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _strippableThingsCache[mapId],
                 (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
@@ -110,12 +110,12 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best target to strip
-            Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Thing targetThing = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (thing, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, p, requiresDesignator: true))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(thing, p, requiresDesignator: true))
                         return false;
 
                     // Skip if no longer valid

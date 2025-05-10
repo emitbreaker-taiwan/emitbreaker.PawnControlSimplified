@@ -42,7 +42,7 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Cleaning",
                 (p, forced) => {

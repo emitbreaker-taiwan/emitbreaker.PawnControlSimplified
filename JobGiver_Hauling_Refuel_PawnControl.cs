@@ -30,7 +30,7 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
@@ -98,7 +98,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _refuelableBuildingsCache[mapId],
                 (building) => (building.Position - pawn.Position).LengthHorizontalSquared,
@@ -106,12 +106,12 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best building to refuel
-            Thing targetBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Thing targetBuilding = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (building, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(building, p, requiresDesignator: false))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(building, p, requiresDesignator: false))
                         return false;
 
                     // Skip if no longer valid

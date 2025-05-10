@@ -37,12 +37,12 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
                 pawn,
                 "Warden",
                 (p, forced) => {
                     // Update prisoner cache with standardized method
-                    Utility_JobGiverManager.UpdatePrisonerCache(
+                    Utility_JobGiverManagerOld.UpdatePrisonerCache(
                         p.Map,
                         ref _lastCacheUpdateTick,
                         CACHE_UPDATE_INTERVAL,
@@ -51,7 +51,7 @@ namespace emitbreaker.PawnControl
                         FilterExecutionTargets);
 
                     // Create job using standardized method
-                    return Utility_JobGiverManager.TryCreatePrisonerInteractionJob(
+                    return Utility_JobGiverManagerOld.TryCreatePrisonerInteractionJob(
                         p,
                         _executionTargetsCache,
                         _reachabilityCache,

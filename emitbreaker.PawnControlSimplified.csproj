@@ -66,6 +66,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Utility_JobGiverManager.cs" />
     <Compile Include="PawnPathExtensions.cs" />
     <Compile Include="MapComponent_JobGiverCacheCleanup.cs" />
     <Compile Include="Utility_AdaptiveProfilingManager.cs" />
@@ -150,7 +151,7 @@
     <Compile Include="JobGiver_BasicWorker_Flick_PawnControl.cs" />
     <Compile Include="JobGiver_BasicWorker_Open_PawnControl.cs" />
     <Compile Include="JobGiver_Warden_DoExecution_PawnControl.cs" />
-    <Compile Include="Utility_JobGiverManager.cs" />
+    <Compile Include="Utility_JobGiverManagerOld.cs" />
     <Compile Include="Utility_JobGiverTickManager.cs" />
     <Compile Include="Utility_StatManager.cs" />
     <Compile Include="ManagedThinkTreeBlocklist.cs" />

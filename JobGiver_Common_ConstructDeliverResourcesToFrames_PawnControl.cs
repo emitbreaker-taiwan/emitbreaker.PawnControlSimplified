@@ -63,7 +63,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _targetCache[mapId],
                 (frame) => (frame.Position - pawn.Position).LengthHorizontalSquared,

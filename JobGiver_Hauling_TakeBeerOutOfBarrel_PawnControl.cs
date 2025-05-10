@@ -28,7 +28,7 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
@@ -92,7 +92,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _fermentedBarrelCache[mapId],
                 (barrel) => (barrel.Position - pawn.Position).LengthHorizontalSquared,
@@ -100,12 +100,12 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best barrel to use
-            Building_FermentingBarrel targetBarrel = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Building_FermentingBarrel targetBarrel = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (barrel, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(barrel, p, requiresDesignator: false))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(barrel, p, requiresDesignator: false))
                         return false;
 
                     // Skip if no longer valid

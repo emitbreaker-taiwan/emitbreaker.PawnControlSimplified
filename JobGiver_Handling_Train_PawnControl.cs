@@ -93,9 +93,9 @@ namespace emitbreaker.PawnControl
             if (pawn?.Map == null || pawn.Faction != Faction.OfPlayer)
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
                 pawn,
-                "Handler",
+                "Handling",
                 (p, forced) => {
                     // Update trainable animals cache
                     UpdateTrainableAnimalsCacheSafely(p.Map, p.Faction);
@@ -129,7 +129,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _trainableAnimalCache[mapId],
                 (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
@@ -137,7 +137,7 @@ namespace emitbreaker.PawnControl
             );
 
             // FIXED: Explicitly specify type argument Pawn for FindFirstValidTargetInBuckets
-            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
+            Pawn targetAnimal = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets<Pawn>(
                 buckets,
                 pawn,
                 (animal, p) => {

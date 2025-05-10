@@ -87,9 +87,9 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
                 pawn,
-                "Handler",
+                "Handling",
                 (p, forced) => {
                     // Update taming cache
                     UpdateTameableCacheSafely(p.Map);
@@ -123,7 +123,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _tameDesignationCache[mapId],
                 (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
@@ -131,12 +131,12 @@ namespace emitbreaker.PawnControl
             );
 
             // FIXED: Explicitly specify type argument Pawn for FindFirstValidTargetInBuckets
-            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
+            Pawn targetAnimal = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets<Pawn>(
                 buckets,
                 pawn,
                 (animal, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(animal, p, requiresDesignator: true))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(animal, p, requiresDesignator: true))
                         return false;
 
                     // Skip if no longer valid

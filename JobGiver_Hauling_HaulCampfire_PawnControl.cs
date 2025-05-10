@@ -43,7 +43,7 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
@@ -51,7 +51,7 @@ namespace emitbreaker.PawnControl
                     UpdateCampfiresCacheSafely(p.Map);
 
                     // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return Utility_JobGiverManager.TryCreateBillGiverJob(p, _campfiresCache, _reachabilityCache);
+                    return Utility_JobGiverManagerOld.TryCreateBillGiverJob(p, _campfiresCache, _reachabilityCache);
                 },
                 debugJobDesc: "haul to campfire assignment");
         }

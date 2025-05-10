@@ -34,7 +34,7 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Hauling",
                 (p, forced) => {
@@ -110,7 +110,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _unloadablePawnsCache[mapId],
                 (carrier) => (carrier.Position - pawn.Position).LengthHorizontalSquared,
@@ -118,12 +118,12 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best carrier to unload
-            Pawn targetCarrier = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Pawn targetCarrier = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (carrier, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(carrier, p, requiresDesignator: false))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(carrier, p, requiresDesignator: false))
                         return false;
 
                     // Skip if no longer valid

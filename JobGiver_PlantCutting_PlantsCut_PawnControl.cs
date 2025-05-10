@@ -10,43 +10,47 @@ namespace emitbreaker.PawnControl
     /// Plant‐cutting JobGiver with minimal overrides:
     /// uses the standard TryGiveJob wrapper, a cache, and nearest‐plant selection.
     /// </summary>
+    /// <summary>
+    /// Plant‐cutting JobGiver with minimal overrides:
+    /// - inherits unified priority logic from base
+    /// - only implements GetTargets & ExecuteJobGiverInternal
+    /// </summary>
     public class JobGiver_PlantCutting_PlantsCut_PawnControl : JobGiver_PawnControl
     {
-        // 1) Tag used by the base wrapper for eligibility checks
-        protected override string WorkTag => "PlantCutting";
+        #region Overrides
 
-        // 2) Cache rebuild interval (~8s) for large plant maps
+        protected override string WorkTag => "PlantCutting";
         protected override int CacheUpdateInterval => 500;
 
-        // 3) Populate cache: all plants that need cutting or harvesting
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
             return GetPlantsNeedingCutting(map).Cast<Thing>();
         }
 
-        // 4) From the cached list, pick the nearest valid Plant and return a CutPlant job
         protected override Job ExecuteJobGiverInternal(Pawn pawn, List<Thing> targets)
         {
-            Plant bestPlant = null;
+            Plant best = null;
             float bestDistSq = float.MaxValue;
 
-            foreach (var thing in targets.OfType<Plant>())
+            foreach (var plant in targets.OfType<Plant>())
             {
-                if (!ValidatePlantTarget(thing, pawn))
+                if (!ValidatePlantTarget(plant, pawn))
                     continue;
 
-                float distSq = (thing.Position - pawn.Position).LengthHorizontalSquared;
+                float distSq = (plant.Position - pawn.Position).LengthHorizontalSquared;
                 if (distSq < bestDistSq)
                 {
                     bestDistSq = distSq;
-                    bestPlant = thing;
+                    best = plant;
                 }
             }
 
-            return bestPlant != null
-                ? JobMaker.MakeJob(JobDefOf.CutPlant, bestPlant)
+            return best != null
+                ? JobMaker.MakeJob(JobDefOf.CutPlant, best)
                 : null;
         }
+
+        #endregion
 
         #region Plant‐selection helpers
 

@@ -40,7 +40,7 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
                 pawn,
                 WorkTagForJob,
                 (p, forced) => {
@@ -140,7 +140,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _hungryPawnCache[mapId],
                 (patient) => (patient.Position - pawn.Position).LengthHorizontalSquared,
@@ -148,7 +148,7 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best patient to feed
-            Pawn targetPatient = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Pawn targetPatient = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (patient, p) => {

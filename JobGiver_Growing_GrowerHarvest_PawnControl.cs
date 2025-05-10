@@ -47,7 +47,7 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
                 pawn,
                 "Growing",
                 (p, forced) => {
@@ -151,7 +151,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _harvestablePlantsCache[mapId],
                 (plant) => (plant.Position - pawn.Position).LengthHorizontalSquared,
@@ -159,7 +159,7 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best plant to start harvesting
-            Plant targetPlant = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Plant targetPlant = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (plant, p) => {

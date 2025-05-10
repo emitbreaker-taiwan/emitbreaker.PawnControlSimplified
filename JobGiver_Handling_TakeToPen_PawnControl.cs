@@ -40,7 +40,7 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
                 pawn,
                 "Handling", // Use the Handling work tag
                 (p, forced) => {
@@ -139,7 +139,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Use distance bucketing to find the closest animal
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _animalCache[mapId],
                 (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
@@ -147,12 +147,12 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best animal to handle
-            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Pawn targetAnimal = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (animal, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(animal, p, requiresDesignator: true))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(animal, p, requiresDesignator: true))
                         return false;
 
                     // Skip if animal is forbidden or in forbidden area

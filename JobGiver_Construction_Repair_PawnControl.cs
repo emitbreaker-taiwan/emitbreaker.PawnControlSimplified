@@ -53,7 +53,7 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Building>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Building>(
                 pawn,
                 "Construction",
                 (p, forced) => {
@@ -141,7 +141,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
                 pawn,
                 _repairableBuildingsCache[mapId],
                 (building) => (building.Position - pawn.Position).LengthHorizontalSquared,
@@ -149,12 +149,12 @@ namespace emitbreaker.PawnControl
             );
 
             // Find the best building to repair
-            Thing bestBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            Thing bestBuilding = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (building, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(building, p, requiresDesignator: false))
+                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(building, p, requiresDesignator: false))
                         return false;
 
                     // Skip if no longer valid

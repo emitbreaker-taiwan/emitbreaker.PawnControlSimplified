@@ -40,7 +40,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Using StandardTryGiveJob to handle common validation checks - use Thing as the generic type
-            return Utility_JobGiverManager.StandardTryGiveJob<Thing>(
+            return Utility_JobGiverManagerOld.StandardTryGiveJob<Thing>(
                 pawn,
                 "Construction",
                 (p, forced) => {
