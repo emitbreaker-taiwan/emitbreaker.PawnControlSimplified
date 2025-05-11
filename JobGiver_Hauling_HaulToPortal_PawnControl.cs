@@ -9,18 +9,49 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to haul items to map portals.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_HaulToPortal_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_HaulToPortal_PawnControl : JobGiver_Hauling_PawnControl
     {
+        #region Configuration
+
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "HaulToPortal";
+
+        /// <summary>
+        /// Update cache every 2 seconds
+        /// </summary>
+        protected override int CacheUpdateInterval => 120;
+
+        /// <summary>
+        /// Distance thresholds for bucketing (10, 20, 30 tiles)
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f };
+
+        #endregion
+
+        #region Cache Management
+
         // Cache for portals that need items loaded
         private static readonly Dictionary<int, List<MapPortal>> _portalsCache = new Dictionary<int, List<MapPortal>>();
-        private static readonly Dictionary<int, Dictionary<MapPortal, bool>> _reachabilityCache = new Dictionary<int, Dictionary<MapPortal, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 120; // Update every 2 seconds
+        private static readonly Dictionary<int, Dictionary<MapPortal, bool>> _portalReachabilityCache = new Dictionary<int, Dictionary<MapPortal, bool>>();
+        private static int _lastPortalCacheUpdateTick = -999;
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 100f, 400f, 900f }; // 10, 20, 30 tiles
+        /// <summary>
+        /// Reset caches when loading game or changing maps
+        /// </summary>
+        public static void ResetHaulToPortalCache()
+        {
+            Utility_CacheManager.ResetJobGiverCache(_portalsCache, _portalReachabilityCache);
+            _lastPortalCacheUpdateTick = -999;
+            ResetHaulingCache(); // Call base class reset too
+        }
 
-        public override float GetPriority(Pawn pawn)
+        #endregion
+
+        #region Core flow
+
+        protected override float GetBasePriority(string workTag)
         {
             // Loading portals is important
             return 5.9f;
@@ -28,18 +59,54 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_HaulToPortal_PawnControl>(
                 pawn,
-                "Hauling",
+                WorkTag,
                 (p, forced) => {
-                    // Update plant cache
+                    if (p?.Map == null)
+                        return null;
+
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Update portals cache
                     UpdatePortalsCache(p.Map);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
+                    // Create job for hauling to portal
                     return TryCreateHaulToPortalJob(p);
                 },
-                debugJobDesc: "haul to portal assignment");
+                debugJobDesc: DebugName);
         }
+
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // We're using our custom portal cache instead of Thing targets
+            yield break;
+        }
+
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // We're using portal-specific logic instead of the standard target processing
+            // This method is required by the base class but not used for portal jobs
+            return null;
+        }
+
+        /// <summary>
+        /// Determines if the job giver should execute now based on cache status
+        /// </summary>
+        protected override bool ShouldExecuteNow(int mapId)
+        {
+            int now = Find.TickManager.TicksGame;
+            return now > _lastPortalCacheUpdateTick + CacheUpdateInterval ||
+                  !_portalsCache.ContainsKey(mapId);
+        }
+
+        #endregion
+
+        #region Portal-specific processing
 
         /// <summary>
         /// Updates the cache of portals that need items loaded
@@ -51,7 +118,7 @@ namespace emitbreaker.PawnControl
             int currentTick = Find.TickManager.TicksGame;
             int mapId = map.uniqueID;
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
+            if (currentTick > _lastPortalCacheUpdateTick + CacheUpdateInterval ||
                 !_portalsCache.ContainsKey(mapId))
             {
                 // Clear outdated cache
@@ -61,10 +128,10 @@ namespace emitbreaker.PawnControl
                     _portalsCache[mapId] = new List<MapPortal>();
 
                 // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
+                if (_portalReachabilityCache.ContainsKey(mapId))
+                    _portalReachabilityCache[mapId].Clear();
                 else
-                    _reachabilityCache[mapId] = new Dictionary<MapPortal, bool>();
+                    _portalReachabilityCache[mapId] = new Dictionary<MapPortal, bool>();
 
                 // Find all portals on the map
                 foreach (Thing thing in map.listerThings.ThingsInGroup(ThingRequestGroup.MapPortal))
@@ -76,7 +143,7 @@ namespace emitbreaker.PawnControl
                     }
                 }
 
-                _lastCacheUpdateTick = currentTick;
+                _lastPortalCacheUpdateTick = currentTick;
             }
         }
 
@@ -95,7 +162,7 @@ namespace emitbreaker.PawnControl
             List<MapPortal>[] buckets = CreateDistanceBucketsForPortals(
                 pawn,
                 _portalsCache[mapId],
-                DISTANCE_THRESHOLDS
+                DistanceThresholds
             );
 
             // Find the best portal to load
@@ -109,12 +176,12 @@ namespace emitbreaker.PawnControl
             {
                 // Use the utility method if available
                 Job job = EnterPortalUtility.JobOnPortal(pawn, targetPortal);
-                
+
                 if (job != null)
                 {
                     Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to haul to portal {targetPortal.LabelCap}");
                 }
-                
+
                 return job;
             }
 
@@ -128,17 +195,17 @@ namespace emitbreaker.PawnControl
         {
             if (pawn == null || portals == null || distanceThresholds == null)
                 return null;
-                
+
             // Initialize buckets
             List<MapPortal>[] buckets = new List<MapPortal>[distanceThresholds.Length + 1];
             for (int i = 0; i < buckets.Length; i++)
                 buckets[i] = new List<MapPortal>();
-                
+
             foreach (MapPortal portal in portals)
             {
                 // Get distance squared between pawn and portal
                 float distSq = (portal.Position - pawn.Position).LengthHorizontalSquared;
-                
+
                 // Assign to appropriate bucket
                 int bucketIndex = distanceThresholds.Length; // Default to last bucket (furthest)
                 for (int i = 0; i < distanceThresholds.Length; i++)
@@ -149,10 +216,10 @@ namespace emitbreaker.PawnControl
                         break;
                     }
                 }
-                
+
                 buckets[bucketIndex].Add(portal);
             }
-            
+
             return buckets;
         }
 
@@ -162,19 +229,19 @@ namespace emitbreaker.PawnControl
         private MapPortal FindFirstValidPortal(List<MapPortal>[] buckets, Pawn pawn)
         {
             if (buckets == null || pawn == null) return null;
-            
+
             // Get map ID for caching
             int mapId = pawn.Map.uniqueID;
-            
+
             // Process buckets from closest to furthest
             for (int b = 0; b < buckets.Length; b++)
             {
                 if (buckets[b] == null || buckets[b].Count == 0)
                     continue;
-                    
+
                 // Randomize within each distance band for better distribution
                 buckets[b].Shuffle();
-                
+
                 // Check each portal in this distance band
                 foreach (MapPortal portal in buckets[b])
                 {
@@ -184,7 +251,7 @@ namespace emitbreaker.PawnControl
 
                     // Check if we've already determined this portal is reachable
                     bool isReachable;
-                    if (_reachabilityCache[mapId].TryGetValue(portal, out isReachable))
+                    if (_portalReachabilityCache[mapId].TryGetValue(portal, out isReachable))
                     {
                         if (!isReachable)
                             continue;
@@ -194,32 +261,29 @@ namespace emitbreaker.PawnControl
                         // Determine if portal is valid and reachable
                         if (!EnterPortalUtility.HasJobOnPortal(pawn, portal))
                         {
-                            _reachabilityCache[mapId][portal] = false;
+                            _portalReachabilityCache[mapId][portal] = false;
                             continue;
                         }
-                        
-                        _reachabilityCache[mapId][portal] = true;
+
+                        _portalReachabilityCache[mapId][portal] = true;
                     }
-                    
+
                     return portal;
                 }
             }
-            
+
             return null;
         }
 
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_portalsCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
-        }
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
-            return "JobGiver_HaulToPortal_PawnControl";
+            return "JobGiver_Hauling_HaulToPortal_PawnControl";
         }
+
+        #endregion
     }
 }

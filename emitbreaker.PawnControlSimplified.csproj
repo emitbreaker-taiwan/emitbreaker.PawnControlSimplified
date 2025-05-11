@@ -66,6 +66,8 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="JobGiver_Warden_ExecuteEntity_PawnControl.cs" />
+    <Compile Include="JobGiver_Handling_InteractAnimal_PawnControl.cs" />
     <Compile Include="JobGiver_PawnControl.cs" />
     <Compile Include="JobGiver_Noscan_PawnControl.cs" />
     <Compile Include="JobGiver_Common_DoBill_PawnControl.cs" />
@@ -76,7 +78,17 @@
     <Compile Include="JobGiver_Common_Growing_PawnControl.cs" />
     <Compile Include="JobGiver_Handling_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_Convert_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_DeliverHemogen_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_EmancipateSlave_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_Enslave_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_ExecuteSlave_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_ImprisonSlave_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_InterrogateIdentity_PawnControl.cs" />
     <Compile Include="JobGiver_Warden_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_ReleaseEntity_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_SuppressActivity_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_SuppressSlave_PawnControl.cs" />
     <Compile Include="Utility_JobGiverManager.cs" />
     <Compile Include="PawnPathExtensions.cs" />
     <Compile Include="MapComponent_JobGiverCacheCleanup.cs" />
@@ -110,7 +122,7 @@
     <Compile Include="JobGiver_Handling_Shear_PawnControl.cs" />
     <Compile Include="JobGiver_Handling_Milk_PawnControl.cs" />
     <Compile Include="JobGiver_Handling_GatherAnimalBodyResources_PawnControl.cs" />
-    <Compile Include="JobGiver_Handling_ReleaseAnimalToWild_PawnControl.cs" />
+    <Compile Include="JobGiver_Handling_ReleaseAnimalsToWild_PawnControl.cs" />
     <Compile Include="JobGiver_Handling_Slaughter_PawnControl.cs" />
     <Compile Include="JobGiver_Handling_FeedAnimalPatient_PawnControl.cs" />
     <Compile Include="JobGiver_Doctor_FeedAnimalPatient_PawnControl.cs" />
@@ -124,7 +136,7 @@
     <Compile Include="JobGiver_Cleaning_CleanFilth_PawnControl.cs" />
     <Compile Include="JobGiver_Cleaning_ClearSnow_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_EmptyEggBox_PawnControl.cs" />
-    <Compile Include="JobGiver_Hauling_Merge_PawnControl.cs" />
+    <Compile Include="JobGiver_Hauling_HaulMerge_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_ConstructDeliverResourcesToBlueprints_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_HaulGeneral_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_DoBillsCremate_PawnControl.cs" />
@@ -160,7 +172,6 @@
     <Compile Include="JobGiver_BasicWorker_Flick_PawnControl.cs" />
     <Compile Include="JobGiver_BasicWorker_Open_PawnControl.cs" />
     <Compile Include="JobGiver_Warden_DoExecution_PawnControl.cs" />
-    <Compile Include="Utility_JobGiverManagerOld.cs" />
     <Compile Include="Utility_JobGiverTickManager.cs" />
     <Compile Include="Utility_StatManager.cs" />
     <Compile Include="ManagedThinkTreeBlocklist.cs" />

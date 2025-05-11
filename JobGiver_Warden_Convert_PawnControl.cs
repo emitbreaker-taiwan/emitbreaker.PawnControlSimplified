@@ -1,4 +1,4 @@
-﻿using RimWorld;
+using RimWorld;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -7,17 +7,17 @@ using Verse.AI;
 namespace emitbreaker.PawnControl
 {
     /// <summary>
-    /// JobGiver that assigns tasks for wardens to chat with prisoners for recruitment or resistance reduction.
+    /// JobGiver that assigns tasks for wardens to convert prisoners to their ideology.
     /// Optimized to use the PawnControl framework for better performance.
     /// </summary>
-    public class JobGiver_Warden_Chat_PawnControl : JobGiver_Warden_PawnControl
+    public class JobGiver_Warden_Convert_PawnControl : JobGiver_Warden_PawnControl
     {
         #region Configuration
 
         /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
-        protected override string DebugName => "Chat";
+        protected override string DebugName => "Convert";
 
         /// <summary>
         /// Cache update interval in ticks (180 ticks = 3 seconds)
@@ -35,13 +35,12 @@ namespace emitbreaker.PawnControl
 
         protected override float GetBasePriority(string workTag)
         {
-            // Chatting with prisoners for recruitment or resistance reduction is important
             return 5.7f;
         }
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_Chat_PawnControl>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_Convert_PawnControl>(
                 pawn,
                 WorkTag,
                 (p, forced) => {
@@ -52,7 +51,7 @@ namespace emitbreaker.PawnControl
                     List<Thing> targets;
                     if (_prisonerCache.TryGetValue(mapId, out var prisonerList) && prisonerList != null)
                     {
-                        targets = new List<Thing>(prisonerList.Cast<Thing>());
+                        targets = prisonerList.Cast<Thing>().ToList();
                     }
                     else
                     {
@@ -61,7 +60,26 @@ namespace emitbreaker.PawnControl
 
                     return ProcessCachedTargets(p, targets, forced);
                 },
-                debugJobDesc: "chat with prisoner");
+                debugJobDesc: "convert prisoner");
+        }
+
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            if (pawn == null || pawn.Dead || pawn.InMentalState)
+                return true;
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null)
+                return true;
+            // Skip if pawn is not a warden
+            if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
+                return true;
+            // Check if Ideology is active
+            if (!ModLister.CheckIdeology("IsValidPrisonerTarget"))
+                return true;
+            // Check if pawn is in a mental state
+            if (pawn.InMentalState)
+                return true;
+            return false;
         }
 
         #endregion
@@ -69,16 +87,20 @@ namespace emitbreaker.PawnControl
         #region Target processing
 
         /// <summary>
-        /// Get all prisoners eligible for chat interaction
+        /// Get all prisoners eligible for conversion interaction
         /// </summary>
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
             if (map == null) yield break;
+            
+            // Check if Ideology is active
+            if (!ModLister.CheckIdeology("JobGiver_Warden_Convert_PawnControl"))
+                yield break;
 
             // Get all prisoner pawns on the map
             foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
             {
-                if (FilterInteractablePrisoners(prisoner))
+                if (FilterConvertablePrisoners(prisoner))
                 {
                     yield return prisoner;
                 }
@@ -86,29 +108,21 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Filter function to identify prisoners ready for chat interaction
+        /// Filter function to identify prisoners ready for conversion interaction
         /// </summary>
-        private bool FilterInteractablePrisoners(Pawn prisoner)
+        private bool FilterConvertablePrisoners(Pawn prisoner)
         {
             // Skip prisoners in mental states
             if (prisoner.InMentalState)
                 return false;
 
-            PrisonerInteractionModeDef interactionMode = prisoner.guest?.ExclusiveInteractionMode;
-
-            // Only include prisoners set for AttemptRecruit or ReduceResistance
-            if (interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ||
-                interactionMode == PrisonerInteractionModeDefOf.ReduceResistance)
+            // Only include prisoners set for Convert
+            if (prisoner.guest?.IsInteractionEnabled(PrisonerInteractionModeDefOf.Convert) == true)
             {
                 // Only include prisoners scheduled for interaction
                 if (prisoner.guest.ScheduledForInteraction)
                 {
-                    // Skip if resistance is already 0 and we're trying to reduce resistance
-                    if (!(interactionMode == PrisonerInteractionModeDefOf.ReduceResistance &&
-                          prisoner.guest.Resistance <= 0f))
-                    {
-                        return true;
-                    }
+                    return true;
                 }
             }
 
@@ -133,7 +147,7 @@ namespace emitbreaker.PawnControl
                 DistanceThresholds
             );
 
-            // Find the first valid prisoner to chat with
+            // Find the first valid prisoner to convert
             Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
                 buckets,
                 warden,
@@ -146,29 +160,37 @@ namespace emitbreaker.PawnControl
             if (targetPrisoner == null)
                 return null;
 
-            // Create chat job
-            return CreateChatJob(warden, targetPrisoner);
+            // Create conversion job
+            return CreateConvertJob(warden, targetPrisoner);
         }
 
         /// <summary>
-        /// Validates if a warden can chat with a specific prisoner
+        /// Validates if a warden can convert a specific prisoner
         /// </summary>
         protected override bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden)
         {
             if (prisoner?.guest == null)
                 return false;
 
-            PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
+            // Check if Ideology is active
+            if (!ModLister.CheckIdeology("IsValidPrisonerTarget"))
+                return false;
 
             // Check for valid interaction mode and scheduling
-            if ((interactionMode != PrisonerInteractionModeDefOf.AttemptRecruit &&
-                 interactionMode != PrisonerInteractionModeDefOf.ReduceResistance) ||
+            if (!prisoner.guest.IsInteractionEnabled(PrisonerInteractionModeDefOf.Convert) ||
                 !prisoner.guest.ScheduledForInteraction)
                 return false;
 
-            // Skip resistance reduction if already at 0
-            if (interactionMode == PrisonerInteractionModeDefOf.ReduceResistance &&
-                prisoner.guest.Resistance <= 0f)
+            // Skip if prisoner and warden already share the same ideology
+            if (prisoner.Ideo == warden.Ideo)
+                return false;
+
+            // Check if warden's ideo matches the target ideology for conversion
+            if (warden.Ideo != prisoner.guest.ideoForConversion)
+                return false;
+
+            // Check if warden can talk
+            if (!warden.health.capacities.CapableOf(PawnCapacityDefOf.Talking))
                 return false;
 
             // Check if prisoner is downed but not in bed
@@ -192,6 +214,10 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override bool ShouldExecuteNow(int mapId)
         {
+            // Check if Ideology is active
+            if (!ModLister.CheckIdeology("ShouldExecuteNow"))
+                return false;
+
             // Check if there's any prisoners of the colony on the map
             Map map = Find.Maps.Find(m => m.uniqueID == mapId);
             if (map == null || map.mapPawns.PrisonersOfColonySpawnedCount == 0)
@@ -206,17 +232,13 @@ namespace emitbreaker.PawnControl
         #region Job creation
 
         /// <summary>
-        /// Creates the chat job for the warden
+        /// Creates the convert job for the warden
         /// </summary>
-        private Job CreateChatJob(Pawn warden, Pawn prisoner)
+        private Job CreateConvertJob(Pawn warden, Pawn prisoner)
         {
-            Job job = JobMaker.MakeJob(JobDefOf.PrisonerAttemptRecruit, prisoner);
+            Job job = JobMaker.MakeJob(JobDefOf.PrisonerConvert, prisoner);
 
-            PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
-            string interactionType = interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ?
-                "recruit" : "reduce resistance of";
-
-            Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to {interactionType} prisoner {prisoner.LabelShort}");
+            Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to convert prisoner {prisoner.LabelShort} to {warden.Ideo.name}");
 
             return job;
         }
@@ -230,7 +252,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public override string ToString()
         {
-            return "JobGiver_Warden_Chat_PawnControl";
+            return "JobGiver_Warden_Convert_PawnControl";
         }
 
         #endregion

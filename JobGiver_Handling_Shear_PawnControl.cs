@@ -11,6 +11,8 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Handling_Shear_PawnControl : JobGiver_Handling_GatherAnimalBodyResources_PawnControl
     {
+        #region Overrides
+
         /// <summary>
         /// The JobDef to use for shearing animals
         /// </summary>
@@ -25,16 +27,23 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Override TryGiveJob to implement shearing-specific logic if needed
         /// </summary>
-        public static new void ResetCache()
+        protected override Job TryGiveJob(Pawn pawn)
         {
-            JobGiver_Handling_GatherAnimalBodyResources_PawnControl.ResetCache();
+            // Leverage the base class implementation which already uses Utility_JobGiverManager
+            return base.TryGiveJob(pawn);
         }
+
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
-            return "JobGiver_Shear_PawnControl";
+            return "JobGiver_Handling_Shear_PawnControl";
         }
+
+        #endregion
     }
 }

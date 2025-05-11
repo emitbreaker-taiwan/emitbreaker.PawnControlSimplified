@@ -29,7 +29,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Blueprint delivery is slightly more important than frame delivery
         /// </summary>
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             return 5.7f;
         }

@@ -66,9 +66,9 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
-            // Cremating is moderately important
+            // Chatting with prisoners for recruitment or resistance reduction is important
             return 5.5f;
         }
 

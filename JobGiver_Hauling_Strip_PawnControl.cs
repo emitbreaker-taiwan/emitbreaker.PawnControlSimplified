@@ -1,6 +1,6 @@
 using RimWorld;
 using System.Collections.Generic;
-using System.Threading;
+using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -10,18 +10,49 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to strip downed pawns or corpses.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_Strip_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_Strip_PawnControl : JobGiver_Hauling_PawnControl
     {
-        // Cache for things that need to be stripped
+        #region Configuration
+
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "Strip";
+
+        /// <summary>
+        /// Update cache every 1.5 seconds
+        /// </summary>
+        protected override int CacheUpdateInterval => 90;
+
+        /// <summary>
+        /// Distance thresholds for bucketing (10, 20, 30 tiles)
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f };
+
+        #endregion
+
+        #region Cache Management
+
+        // Strip-specific cache
         private static readonly Dictionary<int, List<Thing>> _strippableThingsCache = new Dictionary<int, List<Thing>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 90; // Update every 1.5 seconds
+        private static readonly Dictionary<int, Dictionary<Thing, bool>> _stripReachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
+        private static int _lastStripCacheUpdateTick = -999;
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 100f, 400f, 900f }; // 10, 20, 30 tiles
+        /// <summary>
+        /// Reset caches when loading game or changing maps
+        /// </summary>
+        public static void ResetStripCache()
+        {
+            Utility_CacheManager.ResetJobGiverCache(_strippableThingsCache, _stripReachabilityCache);
+            _lastStripCacheUpdateTick = -999;
+            ResetHaulingCache(); // Call base class reset too
+        }
 
-        public override float GetPriority(Pawn pawn)
+        #endregion
+
+        #region Core flow
+
+        protected override float GetBasePriority(string workTag)
         {
             // Stripping is moderately important
             return 5.7f;
@@ -35,18 +66,99 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_Strip_PawnControl>(
                 pawn,
-                "Hauling",
+                WorkTag,
                 (p, forced) => {
-                    // Update plant cache
-                    UpdateStrippableThingsCache(p.Map);
+                    if (p?.Map == null)
+                        return null;
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Update the cache if needed
+                    if (now > _lastStripCacheUpdateTick + CacheUpdateInterval ||
+                        !_strippableThingsCache.ContainsKey(mapId))
+                    {
+                        UpdateStrippableThingsCache(p.Map);
+                    }
+
+                    // Process cached targets
                     return TryCreateStripJob(p);
                 },
-                debugJobDesc: "strip target assignment");
+                debugJobDesc: DebugName);
         }
+
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // We're using our custom strippable cache instead of the standard Thing targets
+            if (map?.designationManager != null)
+            {
+                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Strip))
+                {
+                    if (designation.target.HasThing)
+                    {
+                        Thing thing = designation.target.Thing;
+                        if (thing != null && StrippableUtility.CanBeStrippedByColony(thing))
+                        {
+                            yield return thing;
+                        }
+                    }
+                }
+            }
+        }
+
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            if (targets == null || targets.Count == 0)
+                return null;
+
+            // Use the bucketing system to find the closest valid item
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                targets,
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find the best target to strip
+            Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (thing, p) => IsValidStripTarget(thing, p),
+                _stripReachabilityCache);
+
+            // Create job if target found
+            if (targetThing != null)
+            {
+                Job job = JobMaker.MakeJob(JobDefOf.Strip, targetThing);
+
+                if (Prefs.DevMode)
+                {
+                    string targetDesc = targetThing is Corpse corpse ? $"corpse of {corpse.InnerPawn.LabelCap}" : targetThing.LabelCap;
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to strip {targetDesc}");
+                }
+
+                return job;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Determines if the job giver should execute based on cache status
+        /// </summary>
+        protected override bool ShouldExecuteNow(int mapId)
+        {
+            return Find.TickManager.TicksGame > _lastStripCacheUpdateTick + CacheUpdateInterval ||
+                  !_strippableThingsCache.ContainsKey(mapId);
+        }
+
+        #endregion
+
+        #region Target processing
 
         /// <summary>
         /// Updates the cache of things designated for stripping
@@ -58,36 +170,32 @@ namespace emitbreaker.PawnControl
             int currentTick = Find.TickManager.TicksGame;
             int mapId = map.uniqueID;
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_strippableThingsCache.ContainsKey(mapId))
+            // Clear outdated cache
+            if (_strippableThingsCache.ContainsKey(mapId))
+                _strippableThingsCache[mapId].Clear();
+            else
+                _strippableThingsCache[mapId] = new List<Thing>();
+
+            // Clear reachability cache too
+            if (_stripReachabilityCache.ContainsKey(mapId))
+                _stripReachabilityCache[mapId].Clear();
+            else
+                _stripReachabilityCache[mapId] = new Dictionary<Thing, bool>();
+
+            // Find all things designated for stripping
+            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Strip))
             {
-                // Clear outdated cache
-                if (_strippableThingsCache.ContainsKey(mapId))
-                    _strippableThingsCache[mapId].Clear();
-                else
-                    _strippableThingsCache[mapId] = new List<Thing>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Thing, bool>();
-
-                // Find all things designated for stripping
-                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Strip))
+                if (designation.target.HasThing)
                 {
-                    if (designation.target.HasThing)
+                    Thing thing = designation.target.Thing;
+                    if (thing != null && StrippableUtility.CanBeStrippedByColony(thing))
                     {
-                        Thing thing = designation.target.Thing;
-                        if (thing != null && StrippableUtility.CanBeStrippedByColony(thing))
-                        {
-                            _strippableThingsCache[mapId].Add(thing);
-                        }
+                        _strippableThingsCache[mapId].Add(thing);
                     }
                 }
-
-                _lastCacheUpdateTick = currentTick;
             }
+
+            _lastStripCacheUpdateTick = currentTick;
         }
 
         /// <summary>
@@ -101,80 +209,53 @@ namespace emitbreaker.PawnControl
             if (!_strippableThingsCache.ContainsKey(mapId) || _strippableThingsCache[mapId].Count == 0)
                 return null;
 
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
-                pawn,
-                _strippableThingsCache[mapId],
-                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find the best target to strip
-            Thing targetThing = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (thing, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(thing, p, requiresDesignator: true))
-                        return false;
-
-                    // Skip if no longer valid
-                    if (thing == null || thing.Destroyed || !thing.Spawned)
-                        return false;
-
-                    // Skip if no longer designated for stripping
-                    if (thing.Map.designationManager.DesignationOn(thing, DesignationDefOf.Strip) == null)
-                        return false;
-
-                    // Skip if cannot be stripped by colony
-                    if (!StrippableUtility.CanBeStrippedByColony(thing))
-                        return false;
-
-                    // Skip if in mental state (for pawns)
-                    Pawn targetPawn = thing as Pawn;
-                    if (targetPawn != null && targetPawn.InAggroMentalState)
-                        return false;
-
-                    // Skip if forbidden or unreachable
-                    if (thing.IsForbidden(p) || 
-                        !p.CanReserve(thing) || 
-                        !p.CanReach(thing, PathEndMode.ClosestTouch, Danger.Deadly))
-                        return false;
-                    
-                    return true;
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
-            if (targetThing != null)
-            {
-                Job job = JobMaker.MakeJob(JobDefOf.Strip, targetThing);
-                
-                if (Prefs.DevMode)
-                {
-                    string targetDesc = targetThing is Corpse corpse ? $"corpse of {corpse.InnerPawn.LabelCap}" : targetThing.LabelCap;
-                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to strip {targetDesc}");
-                }
-                
-                return job;
-            }
-
-            return null;
+            return ProcessCachedTargets(pawn, _strippableThingsCache[mapId], false);
         }
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Determines if a thing is valid for stripping
         /// </summary>
-        public static void ResetCache()
+        private bool IsValidStripTarget(Thing thing, Pawn pawn)
         {
-            Utility_CacheManager.ResetJobGiverCache(_strippableThingsCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            // IMPORTANT: Check faction interaction validity first
+            if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, pawn, requiresDesignator: true))
+                return false;
+
+            // Skip if no longer valid
+            if (thing == null || thing.Destroyed || !thing.Spawned)
+                return false;
+
+            // Skip if no longer designated for stripping
+            if (thing.Map.designationManager.DesignationOn(thing, DesignationDefOf.Strip) == null)
+                return false;
+
+            // Skip if cannot be stripped by colony
+            if (!StrippableUtility.CanBeStrippedByColony(thing))
+                return false;
+
+            // Skip if in mental state (for pawns)
+            Pawn targetPawn = thing as Pawn;
+            if (targetPawn != null && targetPawn.InAggroMentalState)
+                return false;
+
+            // Skip if forbidden or unreachable
+            if (thing.IsForbidden(pawn) ||
+                !pawn.CanReserve(thing) ||
+                !pawn.CanReach(thing, PathEndMode.ClosestTouch, Danger.Deadly))
+                return false;
+
+            return true;
         }
+
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
             return "JobGiver_Strip_PawnControl";
         }
+
+        #endregion
     }
 }

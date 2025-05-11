@@ -68,20 +68,40 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected virtual bool ShouldExecuteNow(int mapId)
         {
-            return Find.TickManager.TicksGame % 5 == 0;
+            // Derive how often to run from the static base priority:
+            float pri = GetBasePriority(WorkTag);
+
+            // Avoid div-zero or sub-1 intervals:
+            int interval = System.Math.Max(1, (int)System.Math.Round(60f / pri));
+            return Find.TickManager.TicksGame % interval == 0;
         }
 
         #endregion
 
-        protected virtual bool ShouldSkip(Pawn pawn)
+        #region Priority
+
+        /// <summary>
+        /// Presort custom job givers beforce ThinkTree_PrioritySorter sorts them.
+        /// </summary>
+        public virtual bool ShouldSkip(Pawn pawn)
         {
-            // Skip if there are no pawns with UnloadEverything flag on the map (quick optimization)
-            if (pawn?.Map == null)
+            // 1) Skip if no map/pawn
+            if (pawn?.Map == null) return true;
+
+            // 2) Skip if the Work-tab toggle is off
+            if (!Utility_TagManager.WorkTypeSettingEnabled(pawn, WorkTag))
                 return true;
+
+            // 3) Skip if this jobgiver shouldn't run on this tick
+            if (!ShouldExecuteNow(pawn.Map.uniqueID))
+                return true;
+
+            // 4) Skip if mod-extension or global-state rules block it
+            if (!Utility_JobGiverManager.IsEligibleForSpecializedJobGiver(pawn, WorkTag))
+                return true;
+
             return false;
         }
-
-        #region Priority
 
         /// <summary>
         /// Unified priority lookup based on WorkTag
@@ -94,7 +114,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Standard priority lookup table based on work type
         /// </summary>
-        protected static float GetBasePriority(string workTag)
+        protected virtual float GetBasePriority(string workTag)
         {
             switch (workTag)
             {

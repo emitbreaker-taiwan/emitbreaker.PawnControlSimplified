@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             // Refueling is important to keep buildings running
             return 5.8f;

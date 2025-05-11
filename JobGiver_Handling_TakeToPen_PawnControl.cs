@@ -9,49 +9,118 @@ namespace emitbreaker.PawnControl
 {
     /// <summary>
     /// JobGiver that assigns tasks to take animals to pens.
-    /// Optimized using the PawnControl framework with caching and distance bucketing.
+    /// Uses the Handling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Handling_TakeToPen_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Handling_TakeToPen_PawnControl : JobGiver_Handling_PawnControl
     {
-        // Cache system to improve performance
-        private static readonly Dictionary<int, List<Pawn>> _animalCache = new Dictionary<int, List<Pawn>>();
-        private static readonly Dictionary<int, Dictionary<Pawn, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 300; // Update every 5 seconds
+        #region Configuration
+
+        protected override string WorkTag => "Handling";
+        protected override int CacheUpdateInterval => 300; // Update every 5 seconds
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
 
         // Configuration options (mirrored from WorkGiver_TakeToPen)
         protected bool targetRoamingAnimals = false; // Default value
         protected bool allowUnenclosedPens = false;  // Default value
         protected RopingPriority ropingPriority = RopingPriority.Closest; // Default value
 
-        // Cache for pen balance calculator
-        private readonly Dictionary<Map, AnimalPenBalanceCalculator> _balanceCalculatorsCached = new Dictionary<Map, AnimalPenBalanceCalculator>();
-        private int _balanceCalculatorsCachedTick = -999;
-        private Pawn _balanceCalculatorsCachedForPawn;
-
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
-
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             // Animal handling is an important task
             return 5.7f;
         }
 
+        #endregion
+
+        #region Caching
+
+        // Cache for pen balance calculator
+        private readonly Dictionary<Map, AnimalPenBalanceCalculator> _balanceCalculatorsCached = new Dictionary<Map, AnimalPenBalanceCalculator>();
+        private int _balanceCalculatorsCachedTick = -999;
+        private Pawn _balanceCalculatorsCachedForPawn;
+
+        #endregion
+
+        #region Overrides
+
+        /// <summary>
+        /// Override TryGiveJob to implement pen-specific logic
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
                 pawn,
-                "Handling", // Use the Handling work tag
+                WorkTag,
                 (p, forced) => {
                     // Update animal cache
                     UpdateAnimalCache(p.Map);
-                    
+
                     // Find and create a job for handling animals
                     return TryCreateTakeToPenJob(p, forced);
                 },
                 debugJobDesc: "take animals to pen");
         }
+
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // Implementing required method but we'll use our custom cache instead
+            // because we only want to target pawns (animals)
+            return Enumerable.Empty<Thing>();
+        }
+
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // We're using our custom TryCreateTakeToPenJob method instead
+            return null;
+        }
+
+        protected override bool CanHandleAnimal(Pawn animal, Pawn handler)
+        {
+            // Override for animal-specific logic
+            if (animal == null || !animal.IsNonMutantAnimal)
+                return false;
+
+            // Basic hauling checks
+            if (animal.IsForbidden(handler) || animal.Position.IsForbidden(handler))
+                return false;
+
+            // Check faction interaction validity
+            return Utility_JobGiverManager.IsValidFactionInteraction(animal, handler, requiresDesignator: true);
+        }
+
+        /// <summary>
+        /// Implementation of IsValidAnimalTarget from the parent class
+        /// </summary>
+        protected override bool IsValidAnimalTarget(Pawn animal, Pawn handler)
+        {
+            // Check basic validity first
+            if (animal == null || handler == null || !animal.IsNonMutantAnimal)
+                return false;
+
+            // Basic hauling checks
+            if (animal.IsForbidden(handler) || animal.Position.IsForbidden(handler))
+                return false;
+
+            // Handle roaming animals based on config
+            bool isRoaming = animal.MentalStateDef == MentalStateDefOf.Roaming;
+            if (targetRoamingAnimals && !isRoaming)
+                return false;
+
+            // Skip animals with mental states unless roaming (if configured)
+            if (!targetRoamingAnimals && !isRoaming && animal.MentalStateDef != null)
+                return false;
+
+            // Skip animals marked for release to wild
+            if (handler.Map.designationManager.DesignationOn(animal, DesignationDefOf.ReleaseAnimalToWild) != null)
+                return false;
+
+            // Check faction interaction validity
+            return Utility_JobGiverManager.IsValidFactionInteraction(animal, handler, requiresDesignator: true);
+        }
+
+        #endregion
+
+        #region Animal handling methods
 
         /// <summary>
         /// Updates the cache of animals that need to be taken to pens
@@ -63,7 +132,7 @@ namespace emitbreaker.PawnControl
             int currentTick = Find.TickManager.TicksGame;
             int mapId = map.uniqueID;
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
+            if (currentTick > GetLastCacheUpdateTick(mapId) + CacheUpdateInterval ||
                 !_animalCache.ContainsKey(mapId))
             {
                 // Clear outdated cache
@@ -73,10 +142,10 @@ namespace emitbreaker.PawnControl
                     _animalCache[mapId] = new List<Pawn>();
 
                 // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
+                if (_animalReachabilityCache.ContainsKey(mapId))
+                    _animalReachabilityCache[mapId].Clear();
                 else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
+                    _animalReachabilityCache[mapId] = new Dictionary<Pawn, bool>();
 
                 // Find all animals that can be taken to pens
                 foreach (Pawn animal in map.mapPawns.SpawnedPawnsInFaction(Faction.OfPlayer))
@@ -102,8 +171,27 @@ namespace emitbreaker.PawnControl
                     _animalCache[mapId].Add(animal);
                 }
 
-                _lastCacheUpdateTick = currentTick;
+                // Update the last check time
+                UpdateLastCacheUpdateTick(mapId, currentTick);
             }
+        }
+
+        /// <summary>
+        /// Gets the last cache update tick for a map
+        /// </summary>
+        private int GetLastCacheUpdateTick(int mapId)
+        {
+            if (!_lastHandlingCacheUpdate.TryGetValue(mapId, out int tick))
+                return -999;
+            return tick;
+        }
+
+        /// <summary>
+        /// Updates the last cache update tick for a map
+        /// </summary>
+        private void UpdateLastCacheUpdateTick(int mapId, int tick)
+        {
+            _lastHandlingCacheUpdate[mapId] = tick;
         }
 
         /// <summary>
@@ -139,24 +227,20 @@ namespace emitbreaker.PawnControl
             }
 
             // Use distance bucketing to find the closest animal
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
                 _animalCache[mapId],
                 (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
+                DistanceThresholds
             );
 
             // Find the best animal to handle
-            Pawn targetAnimal = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
+            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (animal, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(animal, p, requiresDesignator: true))
-                        return false;
-
-                    // Skip if animal is forbidden or in forbidden area
-                    if (animal.IsForbidden(p) || animal.Position.IsForbidden(p))
+                    // Use the IsValidAnimalTarget method to check basic validity
+                    if (!IsValidAnimalTarget(animal, p))
                         return false;
 
                     // Check if this animal needs to be taken to a pen
@@ -210,7 +294,7 @@ namespace emitbreaker.PawnControl
 
                     return false;
                 },
-                _reachabilityCache
+                _animalReachabilityCache
             );
 
             // Create the job based on what we found
@@ -238,7 +322,7 @@ namespace emitbreaker.PawnControl
                     pawn, targetAnimal, out failReason, forced);
                 if (hitchingPost != null)
                 {
-                    Job hitchJob = JobMaker.MakeJob(JobDefOf.RopeRoamerToHitchingPost, 
+                    Job hitchJob = JobMaker.MakeJob(JobDefOf.RopeRoamerToHitchingPost,
                         (LocalTargetInfo)targetAnimal, (LocalTargetInfo)hitchingPost);
                     Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take {targetAnimal.LabelShort} to hitching post");
                     return hitchJob;
@@ -250,12 +334,12 @@ namespace emitbreaker.PawnControl
                     targetPen = AnimalPenUtility.GetPenAnimalShouldBeTakenTo(
                         pawn, targetAnimal, out failReason, forced, true, true,
                         mode: ropingPriority, balanceCalculator: balanceCalculator);
-                    
+
                     if (targetPen != null)
                     {
                         Job job = WorkGiver_TakeToPen.MakeJob(
                             pawn, targetAnimal, targetPen, true, ropingPriority, out failReason);
-                        
+
                         if (job != null)
                         {
                             Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take {targetAnimal.LabelShort} to unenclosed pen {targetPen.parent.Label}");
@@ -277,18 +361,15 @@ namespace emitbreaker.PawnControl
             return null;
         }
 
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_animalCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
-        }
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
             return "JobGiver_TakeToPen_PawnControl";
         }
+
+        #endregion
     }
 }

@@ -34,7 +34,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Harvesting is important for obtaining food and resources
         /// </summary>
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             return 5.8f;
         }

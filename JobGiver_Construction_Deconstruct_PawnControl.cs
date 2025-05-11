@@ -21,7 +21,7 @@ namespace emitbreaker.PawnControl
         // Override debug name for better logging
         protected override string DebugName => "Deconstruct";
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             // Higher priority than extract tree but lower than most urgent tasks
             return 5.9f;

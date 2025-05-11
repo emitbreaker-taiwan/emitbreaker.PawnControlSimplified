@@ -38,7 +38,7 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             // Filling barrels is moderately important
             return 5.3f;

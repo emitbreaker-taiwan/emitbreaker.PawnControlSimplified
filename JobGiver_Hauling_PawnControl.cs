@@ -22,6 +22,8 @@ namespace emitbreaker.PawnControl
         protected static readonly Dictionary<int, int> _lastHaulingCacheUpdate = new Dictionary<int, int>();
         #endregion
 
+        #region Utility
+
         // Specialized hauling methods
         protected virtual bool CanHaulThing(Thing t, Pawn p) { return true;/* Common hauling logic */ }
 
@@ -31,5 +33,7 @@ namespace emitbreaker.PawnControl
             Utility_CacheManager.ResetJobGiverCache(_haulableCache, _reachabilityCache);
             _lastHaulingCacheUpdate.Clear();
         }
+
+        #endregion
     }
 }

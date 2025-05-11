@@ -42,7 +42,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Fill In is a medium priority task
         /// </summary>
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             return 6.2f;  // Similar priority to other BasicWorker tasks
         }

@@ -15,7 +15,7 @@ namespace emitbreaker.PawnControl
             this.ropingPriority = RopingPriority.Closest;  // Use additional priority
         }
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             // Higher priority than regular animal handling
             return 6.0f;

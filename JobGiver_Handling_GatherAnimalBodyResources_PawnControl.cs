@@ -12,19 +12,25 @@ namespace emitbreaker.PawnControl
     /// Abstract JobGiver for gathering resources from animals (milk, wool, etc.).
     /// Uses the Handler work tag for eligibility checking.
     /// </summary>
-    public abstract class JobGiver_Handling_GatherAnimalBodyResources_PawnControl : ThinkNode_JobGiver
+    public abstract class JobGiver_Handling_GatherAnimalBodyResources_PawnControl : JobGiver_Handling_PawnControl
     {
-        // Constants
-        protected const int CACHE_REFRESH_INTERVAL = 250;
-        protected const int MAX_CACHE_SIZE = 1000;
+        #region Cach management
 
-        // Cache for animals that have gatherable resources
-        protected static Dictionary<int, List<Pawn>> _gatherableAnimalsCache = new Dictionary<int, List<Pawn>>();
-        protected static Dictionary<int, Dictionary<Pawn, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        protected static int _lastCacheUpdateTick = -999;
+        // Add this field to the class
+        private static Dictionary<int, Dictionary<Pawn, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
 
-        // Distance thresholds for bucketing (25, 50, 100 tiles squared)
-        protected static readonly float[] DISTANCE_THRESHOLDS = new float[] { 625f, 2500f, 10000f };
+        public static void ResetReachabilityCache()
+        {
+            _reachabilityCache.Clear();
+            Utility_DebugManager.LogNormal("Reset JobGiver_Scan_PawnControl cache");
+        }
+
+        #endregion
+
+        #region Overrides
+
+        protected override string WorkTag => "Handling";
+        protected override int CacheUpdateInterval => 250;
 
         /// <summary>
         /// The JobDef to use when creating jobs
@@ -36,112 +42,62 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected abstract CompHasGatherableBodyResource GetComp(Pawn animal);
 
-        public override float GetPriority(Pawn pawn)
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            // Gathering has moderate priority among work tasks
-            return 5.2f;
-        }
+            if (map == null) yield break;
 
-        /// <summary>
-        /// Updates the cache of animals that have gatherable resources
-        /// </summary>
-        protected void UpdateGatherableAnimalsCacheSafely(Map map, Faction faction)
-        {
-            if (map == null || faction == null) return;
+            Faction playerFaction = Faction.OfPlayer;
+            if (playerFaction == null) yield break;
 
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_REFRESH_INTERVAL ||
-                !_gatherableAnimalsCache.ContainsKey(mapId))
+            // Get animals from the faction that have gatherable resources
+            foreach (Pawn animal in map.mapPawns.SpawnedPawnsInFaction(playerFaction))
             {
-                // Clear outdated cache
-                if (_gatherableAnimalsCache.ContainsKey(mapId))
-                    _gatherableAnimalsCache[mapId].Clear();
-                else
-                    _gatherableAnimalsCache[mapId] = new List<Pawn>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Get animals from the faction that have gatherable resources
-                foreach (Pawn animal in map.mapPawns.SpawnedPawnsInFaction(faction))
+                if (animal != null && animal.IsNonMutantAnimal)
                 {
-                    if (animal != null && animal.IsNonMutantAnimal)
+                    CompHasGatherableBodyResource comp = GetComp(animal);
+                    if (comp != null && comp.ActiveAndFull && !animal.Downed &&
+                        animal.CanCasuallyInteractNow() &&
+                        (animal.roping == null || !animal.roping.IsRopedByPawn))
                     {
-                        CompHasGatherableBodyResource comp = GetComp(animal);
-                        if (comp != null && comp.ActiveAndFull && !animal.Downed &&
-                            animal.CanCasuallyInteractNow() &&
-                            (animal.roping == null || !animal.roping.IsRopedByPawn))
-                        {
-                            _gatherableAnimalsCache[mapId].Add(animal);
-                        }
+                        yield return animal;
                     }
                 }
-
-                // Limit cache size for performance
-                if (_gatherableAnimalsCache[mapId].Count > MAX_CACHE_SIZE)
-                {
-                    _gatherableAnimalsCache[mapId] = _gatherableAnimalsCache[mapId].Take(MAX_CACHE_SIZE).ToList();
-                }
-
-                _lastCacheUpdateTick = currentTick;
             }
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
+        // Inside ProcessCachedTargets method in JobGiver_Handling_GatherAnimalBodyResources_PawnControl.cs
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Basic validation - only player faction pawns can gather resources
-            if (pawn?.Map == null || pawn.Faction != Faction.OfPlayer)
+            if (pawn?.Map == null || targets.Count == 0)
                 return null;
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
-                pawn,
-                "Handling",
-                (p, forced) => {
-                    // Update gatherable animals cache
-                    UpdateGatherableAnimalsCacheSafely(p.Map, p.Faction);
-
-                    // Create gathering job
-                    return TryCreateGatherResourceJob(p, forced);
-                },
-                (p, setFailReason) => {
-                    // Additional check for animals work tag
-                    if (p.WorkTagIsDisabled(WorkTags.Animals))
-                    {
-                        if (setFailReason)
-                            JobFailReason.Is("CannotPrioritizeWorkTypeDisabled".Translate(WorkTypeDefOf.Handling.gerundLabel).CapitalizeFirst());
-                        return false;
-                    }
-                    return true;
-                },
-                debugJobDesc: "animal resource gathering");
-        }
-
-        /// <summary>
-        /// Creates a job for gathering resources from an animal
-        /// </summary>
-        protected Job TryCreateGatherResourceJob(Pawn pawn, bool forced = false)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_gatherableAnimalsCache.ContainsKey(mapId) || _gatherableAnimalsCache[mapId].Count == 0)
-                return null;
+            // Distance thresholds for bucketing (25, 50, 100 tiles squared)
+            float[] distanceThresholds = new float[] { 625f, 2500f, 10000f };
 
             // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
+            var animalTargets = targets.Cast<Pawn>().ToList();
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
-                _gatherableAnimalsCache[mapId],
+                animalTargets,
                 (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
+                distanceThresholds
             );
 
+            // Class-specific reachability cache instead of local variable
+            // This ensures the cache persists between calls
+            if (_reachabilityCache == null)
+            {
+                _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
+            }
+
+            int mapId = pawn.Map.uniqueID;
+            if (!_reachabilityCache.ContainsKey(mapId))
+            {
+                _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
+            }
+
             // Find a valid animal to gather resources from
-            Pawn targetAnimal = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets<Pawn>(
+            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
                 buckets,
                 pawn,
                 (animal, p) => {
@@ -187,13 +143,38 @@ namespace emitbreaker.PawnControl
             return job;
         }
 
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetCache()
+        protected override Job TryGiveJob(Pawn pawn)
         {
-            Utility_CacheManager.ResetJobGiverCache(_gatherableAnimalsCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            // Basic validation - only player faction pawns can gather resources
+            if (pawn?.Map == null || pawn.Faction != Faction.OfPlayer)
+                return null;
+
+            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+                pawn,
+                WorkTag,
+                (p, forced) => base.TryGiveJob(p),
+                (p, setFailReason) => {
+                    // Additional check for animals work tag
+                    if (p.WorkTagIsDisabled(WorkTags.Animals))
+                    {
+                        if (setFailReason)
+                            JobFailReason.Is("CannotPrioritizeWorkTypeDisabled".Translate(WorkTypeDefOf.Handling.gerundLabel).CapitalizeFirst());
+                        return false;
+                    }
+                    return true;
+                },
+                debugJobDesc: "animal resource gathering");
         }
+
+        #endregion
+
+        #region Utility
+
+        public override string ToString()
+        {
+            return this.GetType().Name;
+        }
+
+        #endregion
     }
 }

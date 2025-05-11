@@ -1,8 +1,7 @@
-using RimWorld;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
+using RimWorld;
 using Verse;
 using Verse.AI;
 
@@ -12,252 +11,151 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to train animals owned by the player's faction.
     /// Uses the Handler work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Handling_Train_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Handling_Train_PawnControl : JobGiver_Handling_InteractAnimal_PawnControl
     {
-        // Constants
-        private const int CACHE_REFRESH_INTERVAL = 250;
+        #region Configuration
+
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "Train";
+
+        /// <summary>
+        /// Maximum cache size to control memory usage
+        /// </summary>
         private const int MAX_CACHE_SIZE = 1000;
 
-        // Cache for animals that need training
-        private static readonly Dictionary<int, List<Pawn>> _trainableAnimalCache = new Dictionary<int, List<Pawn>>();
-        private static readonly Dictionary<int, Dictionary<Pawn, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        private static int _lastCacheUpdateTick = -999;
+        /// <summary>
+        /// Training doesn't require the animal to be awake
+        /// </summary>
+        protected override bool CanInteractWhileSleeping => false;
 
-        // Distance thresholds for bucketing (25, 50, 100 tiles squared)
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 625f, 2500f, 10000f };
-        protected static string NoUsableFoodTrans;
+        /// <summary>
+        /// Training can be done while animal is roaming
+        /// </summary>
+        protected override bool CanInteractWhileRoaming => false;
 
-        public static void ResetStaticData()
-        {
-            NoUsableFoodTrans = "NoUsableFood".Translate();
-        }
+        /// <summary>
+        /// Training requires appropriate skill levels
+        /// </summary>
+        protected override bool IgnoreSkillRequirements => false;
 
-        public override float GetPriority(Pawn pawn)
+        /// <summary>
+        /// Training usually requires food
+        /// </summary>
+        protected override bool NeedsFoodForInteraction() => true;
+
+        #endregion
+
+        #region Core flow
+
+        protected override float GetBasePriority(string workTag)
         {
             // Training has moderate priority among work tasks
             return 5.0f;
         }
 
+        #endregion
+
+        #region Target processing
+
         /// <summary>
-        /// Updates the cache of animals that need training
+        /// Override to get only animals that need training
         /// </summary>
-        private void UpdateTrainableAnimalsCacheSafely(Map map, Faction faction)
+        protected override bool CanInteractWithAnimalInPrinciple(Pawn animal)
         {
-            if (map == null || faction == null) return;
+            // Basic animal check from base class
+            if (!base.CanInteractWithAnimalInPrinciple(animal))
+                return false;
 
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
+            // Training-specific checks
+            return animal.training != null &&
+                animal.training.NextTrainableToTrain() != null &&
+                animal.RaceProps.animalType != AnimalType.Dryad &&
+                !TrainableUtility.TrainedTooRecently(animal);
+        }
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_REFRESH_INTERVAL ||
-                !_trainableAnimalCache.ContainsKey(mapId))
+        /// <summary>
+        /// Additional criteria for training
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            if (map == null) yield break;
+
+            Faction playerFaction = Faction.OfPlayer;
+            if (playerFaction == null) yield break;
+
+            // Get animals from the faction that need training
+            foreach (Pawn animal in map.mapPawns.SpawnedPawnsInFaction(playerFaction))
             {
-                // Clear outdated cache
-                if (_trainableAnimalCache.ContainsKey(mapId))
-                    _trainableAnimalCache[mapId].Clear();
-                else
-                    _trainableAnimalCache[mapId] = new List<Pawn>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Get animals from the faction that can be trained
-                foreach (Pawn animal in map.mapPawns.SpawnedPawnsInFaction(faction))
+                if (CanInteractWithAnimalInPrinciple(animal))
                 {
-                    if (animal != null && 
-                        animal.IsNonMutantAnimal && 
-                        animal.training != null && 
-                        animal.training.NextTrainableToTrain() != null &&
-                        animal.RaceProps.animalType != AnimalType.Dryad &&
-                        !TrainableUtility.TrainedTooRecently(animal))
-                    {
-                        _trainableAnimalCache[mapId].Add(animal);
-                    }
+                    yield return animal;
                 }
-
-                // Limit cache size for performance
-                if (_trainableAnimalCache[mapId].Count > MAX_CACHE_SIZE)
-                {
-                    _trainableAnimalCache[mapId] = _trainableAnimalCache[mapId].Take(MAX_CACHE_SIZE).ToList();
-                }
-
-                _lastCacheUpdateTick = currentTick;
             }
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
+        /// <summary>
+        /// Training-specific checks for animal interaction
+        /// </summary>
+        protected override bool IsValidForSpecificInteraction(Pawn handler, Pawn animal, bool forced)
         {
-            // Basic validation - only player faction pawns can train animals
-            if (pawn?.Map == null || pawn.Faction != Faction.OfPlayer)
-                return null;
+            // Skip if not of same faction
+            if (animal.Faction != handler.Faction)
+                return false;
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
-                pawn,
-                "Handling",
-                (p, forced) => {
-                    // Update trainable animals cache
-                    UpdateTrainableAnimalsCacheSafely(p.Map, p.Faction);
+            // Skip if no trainable left or trained too recently
+            if (animal.training == null ||
+                animal.training.NextTrainableToTrain() == null ||
+                TrainableUtility.TrainedTooRecently(animal))
+                return false;
 
-                    // Create training job
-                    return TryCreateTrainJob(p);
-                },
-                (p, setFailReason) => {
-                    // Additional check for animals work tag
-                    if (p.WorkTagIsDisabled(WorkTags.Animals))
-                    {
-                        if (setFailReason)
-                            JobFailReason.Is("CannotPrioritizeWorkTypeDisabled".Translate(WorkTypeDefOf.Handling.gerundLabel).CapitalizeFirst());
-                        return false;
-                    }
-                    return true;
-                },
-                debugJobDesc: "animal training",
-                skipEmergencyCheck: false);
+            // Skip if animals marked venerated
+            if (ModsConfig.IdeologyActive &&
+                handler.Ideo != null &&
+                handler.Ideo.IsVeneratedAnimal(animal))
+                return false;
+
+            return true;
         }
 
         /// <summary>
-        /// Creates a job for training an animal
+        /// Create job for training the animal
         /// </summary>
-        private Job TryCreateTrainJob(Pawn pawn)
+        protected override Job MakeInteractionJob(Pawn handler, Pawn animal, bool forced)
         {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_trainableAnimalCache.ContainsKey(mapId) || _trainableAnimalCache[mapId].Count == 0)
+            if (animal?.training?.NextTrainableToTrain() == null)
                 return null;
 
-            // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
-                pawn,
-                _trainableAnimalCache[mapId],
-                (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // FIXED: Explicitly specify type argument Pawn for FindFirstValidTargetInBuckets
-            Pawn targetAnimal = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets<Pawn>(
-                buckets,
-                pawn,
-                (animal, p) => {
-                    // Skip if trying to train self
-                    if (animal == p)
-                        return false;
-                    
-                    // Skip if no longer valid
-                    if (animal.Destroyed || !animal.Spawned || animal.Map != p.Map)
-                        return false;
-                    
-                    // Skip if not of same faction
-                    if (animal.Faction != p.Faction)
-                        return false;
-                        
-                    // Skip if not an animal or doesn't have training
-                    if (!animal.IsNonMutantAnimal || 
-                        animal.RaceProps.animalType == AnimalType.Dryad ||
-                        animal.training == null ||
-                        animal.training.NextTrainableToTrain() == null)
-                        return false;
-                        
-                    // Skip if trained too recently
-                    if (TrainableUtility.TrainedTooRecently(animal))
-                        return false;
-                        
-                    // Skip if forbidden or unreachable
-                    if (animal.IsForbidden(p) ||
-                        !p.CanReserve((LocalTargetInfo)animal) ||
-                        !p.CanReach((LocalTargetInfo)animal, PathEndMode.Touch, Danger.Some))
-                        return false;
-                    
-                    return true;
-                },
-                _reachabilityCache
-            );
-
-            if (targetAnimal == null)
-                return null;
-
-            // Handle food for training
-            Thing foodSource = null;
-            
-            if (targetAnimal.RaceProps.EatsFood && targetAnimal.needs?.food != null &&
-                !HasFoodToInteractAnimal(pawn, targetAnimal))
-            {
-                ThingDef foodDef;
-                foodSource = FoodUtility.BestFoodSourceOnMap(
-                    pawn, targetAnimal, false, out foodDef, FoodPreferability.RawTasty,
-                    false, false, false, false, false,
-                    minNutrition: new float?((float)((double)JobDriver_InteractAnimal.RequiredNutritionPerFeed(targetAnimal) * 2.0))
-                );
-
-                if (foodSource == null)
-                {
-                    JobFailReason.Is(NoUsableFoodTrans);
-                    return null;
-                }
-                
-                // Create a job to get food first if needed
-                Job takeFoodJob = TryCreateTakeFoodJob(pawn, targetAnimal, foodSource, foodDef);
-                if (takeFoodJob != null)
-                    return takeFoodJob;
-            }
-
-            // Create job if target found
-            if (targetAnimal != null)
-            {
-                Job job = JobMaker.MakeJob(JobDefOf.Train, targetAnimal);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to train {targetAnimal.LabelShort}");
-                return job;
-            }
-
-            return null;
+            // Create the training job
+            return JobMaker.MakeJob(JobDefOf.Train, animal);
         }
 
         /// <summary>
-        /// Creates a job to collect food for training an animal
+        /// Custom food check for training animals
         /// </summary>
-        private Job TryCreateTakeFoodJob(Pawn pawn, Pawn targetAnimal, Thing foodSource, ThingDef foodDef)
+        protected override bool HasFoodToInteractAnimal(Pawn pawn, Pawn animal)
         {
-            int numToTake = FoodUtility.WillIngestStackCountOf(targetAnimal, foodDef, 
-                JobDriver_InteractAnimal.RequiredNutritionPerFeed(targetAnimal));
-                
-            if (numToTake <= 0)
-                return null;
-                
-            numToTake = Math.Min(numToTake, foodSource.stackCount);
-            
-            Job job = JobMaker.MakeJob(JobDefOf.TakeInventory, foodSource);
-            job.count = numToTake;
-            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take food for training {targetAnimal.LabelShort}");
-            return job;
+            // Some animals don't need food for training
+            if (!animal.RaceProps.EatsFood || animal.needs?.food == null)
+                return true;
+
+            // Use base implementation for standard food check
+            return base.HasFoodToInteractAnimal(pawn, animal);
         }
+
+        #endregion
+
+        #region Utility
 
         /// <summary>
-        /// Checks if the pawn has appropriate food for interacting with the animal
+        /// For debugging purposes
         /// </summary>
-        private bool HasFoodToInteractAnimal(Pawn pawn, Pawn animal)
-        {
-            return pawn.inventory.innerContainer.Contains(ThingDefOf.Kibble) ||
-                   (animal.RaceProps.foodType & (FoodTypeFlags.Plant | FoodTypeFlags.VegetableOrFruit)) != FoodTypeFlags.None &&
-                   pawn.inventory.innerContainer.Any(t => t.def.IsNutritionGivingIngestible &&
-                   t.def.ingestible.preferability >= FoodPreferability.RawBad &&
-                   (t.def.ingestible.foodType & (FoodTypeFlags.Plant | FoodTypeFlags.VegetableOrFruit)) != FoodTypeFlags.None);
-        }
-
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_trainableAnimalCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
-            ResetStaticData();
-        }
-
         public override string ToString()
         {
             return "JobGiver_Train_PawnControl";
         }
+
+        #endregion
     }
 }

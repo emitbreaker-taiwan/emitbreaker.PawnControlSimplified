@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             // Emptying egg boxes is moderately important
             return 5.2f;

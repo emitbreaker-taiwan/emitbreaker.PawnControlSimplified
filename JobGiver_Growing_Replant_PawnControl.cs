@@ -38,9 +38,8 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Lower priority than construction
         /// </summary>
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
-            // Growing is a lower priority than construction
             return 5.4f;
         }
 

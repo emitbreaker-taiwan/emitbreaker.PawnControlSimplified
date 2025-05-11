@@ -33,9 +33,8 @@ namespace emitbreaker.PawnControl
 
         protected override int CacheUpdateInterval => 600; // Update every 10 seconds (pollution changes slowly)
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
-            // Pollution clearing is higher priority than regular cleaning but lower than most tasks
             return 4.8f;
         }
 

@@ -11,6 +11,8 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Handling_Milk_PawnControl : JobGiver_Handling_GatherAnimalBodyResources_PawnControl
     {
+        #region Overrides
+
         /// <summary>
         /// The JobDef to use for milking animals
         /// </summary>
@@ -25,16 +27,22 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Overrides the TryGiveJob method from the base class
         /// </summary>
-        public static new void ResetCache()
+        protected override Job TryGiveJob(Pawn pawn)
         {
-            JobGiver_Handling_GatherAnimalBodyResources_PawnControl.ResetCache();
+            return base.TryGiveJob(pawn);
         }
+
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
-            return "JobGiver_Milk_PawnControl";
+            return "JobGiver_Handling_Milk_PawnControl";
         }
+
+        #endregion
     }
 }

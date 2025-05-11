@@ -21,7 +21,7 @@ namespace emitbreaker.PawnControl
         // Override debug name for better logging
         protected override string DebugName => "Uninstall";
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             // Slightly lower priority than deconstruct
             return 5.8f;

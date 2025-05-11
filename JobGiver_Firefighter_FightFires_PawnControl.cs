@@ -128,6 +128,11 @@ namespace emitbreaker.PawnControl
             return TryCreateFirefightingJob(pawn);
         }
 
+        protected override float GetBasePriority(string workTag)
+        {
+            return 9f;
+        }
+
         #endregion
 
         #region Target selection

@@ -29,7 +29,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Construction workers should prioritize this even higher than haulers
         /// </summary>
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             return 5.9f;
         }

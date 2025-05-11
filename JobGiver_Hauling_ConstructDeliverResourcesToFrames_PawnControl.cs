@@ -28,7 +28,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Frame delivery is important hauling
         /// </summary>
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             return 5.6f;
         }

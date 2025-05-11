@@ -45,7 +45,7 @@ namespace emitbreaker.PawnControl
 
         #region Overrides
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             return JobPriority;
         }

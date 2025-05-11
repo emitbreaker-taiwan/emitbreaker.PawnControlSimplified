@@ -31,7 +31,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Finishing construction is more important than starting new projects
         /// </summary>
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             return 6.0f;
         }

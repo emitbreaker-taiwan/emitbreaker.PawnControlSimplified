@@ -918,6 +918,28 @@ namespace emitbreaker.PawnControl
                     Utility_WorkSettingsManager.EnsureWorkGiversPopulated(pawn);
                 }
             }
+
+
+            [HarmonyPatch(typeof(ThinkNode_PrioritySorter), nameof(ThinkNode_PrioritySorter.TryIssueJobPackage))]
+            public static class Patch_PrioritySorter_PreFilter
+            {
+                public static readonly FieldInfo SubNodesField =
+                  AccessTools.Field(typeof(ThinkNode_PrioritySorter), "subNodes");
+
+                public static void Prefix(ThinkNode_PrioritySorter __instance, Pawn pawn)
+                {
+                    if (pawn == null) return;
+
+                    var subNodes = (List<ThinkNode>)SubNodesField.GetValue(__instance);
+                    // Remove any JobGiver_PawnControl (or other ThinkNode_JobGiver) that says skip
+                    subNodes.RemoveAll(node =>
+                    {
+                        if (node is JobGiver_PawnControl jg)
+                            return jg.ShouldSkip(pawn);
+                        return true;
+                    });
+                }
+            }
         }
 
         public static class Patch_Iteration3_DrafterInjection

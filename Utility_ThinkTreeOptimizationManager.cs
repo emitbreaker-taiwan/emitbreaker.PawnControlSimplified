@@ -121,7 +121,7 @@ namespace emitbreaker.PawnControl
         {
             Type jobGiverType = typeof(TJobGiver);
             // Register conditions with the JobGiver registry for lookup
-            Utility_JobGiverManagerOld.RegisterBypassConditions(jobGiverType, conditions);
+            Utility_JobGiverManager.RegisterBypassConditions(jobGiverType, conditions);
         }
         
         /// <summary>
@@ -129,7 +129,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static bool ShouldBypassJobGiver(Type jobGiverType, Pawn pawn)
         {
-            var conditions = Utility_JobGiverManagerOld.GetBypassConditions(jobGiverType);
+            var conditions = Utility_JobGiverManager.GetBypassConditions(jobGiverType);
             if (conditions == null || conditions.Length == 0)
                 return false;
 

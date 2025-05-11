@@ -68,6 +68,8 @@ namespace emitbreaker.PawnControl
             // Restore runtime mod extensions from this save file
             RestoreRuntimeModExtensions();
 
+            Utility_JobGiverManager.ResetRegistry();
+
             // Ensure all modded pawns have their stat injections applied
             Utility_StatManager.CheckStatHediffDefExists();
 
@@ -226,6 +228,7 @@ namespace emitbreaker.PawnControl
             JobGiver_Common_DoBill_PawnControl.ResetDoBillsCache();
             JobGiver_Scan_PawnControl.ResetCache();
             JobGiver_Noscan_PawnControl.ResetCache();
+            JobGiver_Handling_GatherAnimalBodyResources_PawnControl.ResetReachabilityCache();
 
             // General job giver caches
             JobGiver_WorkNonHumanlike.ResetCache();
@@ -250,13 +253,22 @@ namespace emitbreaker.PawnControl
 
             // Warden job givers
             JobGiver_Warden_PawnControl.ResetWardenCache();
+            JobGiver_Warden_DoExecution_PawnControl.ResetDoExecutionCache();
 
             // Handling job givers
             JobGiver_Handling_PawnControl.ResetHandlingCache();
+            JobGiver_Handling_ReleaseAnimalsToWild_PawnControl.ResetReleaseCache();
+            JobGiver_Handling_Slaughter_PawnControl.ResetSlaughterCache();
+            JobGiver_Handling_InteractAnimal_PawnControl.ResetInteractCache();
+            JobGiver_Handling_Tame_PawnControl.ResetTameCache();
 
             // Hauling job givers
             JobGiver_Hauling_PawnControl.ResetHaulingCache();
             JobGiver_Hauling_FillFermentingBarrel_PawnControl.ResetStaticData();
+            JobGiver_Hauling_HelpGatheringItemsForCaravan_PawnControl.ResetCache();
+            JobGiver_Hauling_HaulToPortal_PawnControl.ResetHaulToPortalCache();
+            JobGiver_Hauling_Strip_PawnControl.ResetStripCache();
+            JobGiver_Hauling_HaulMerge_PawnControl.ResetMergeCache();
 
             foreach (var map in Find.Maps)
                 Utility_WorkSettingsManager.FullInitializeAllEligiblePawns(map, forceLock: true);

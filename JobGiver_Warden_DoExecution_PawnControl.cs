@@ -1,5 +1,7 @@
+using HarmonyLib;
 using RimWorld;
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -9,19 +11,23 @@ namespace emitbreaker.PawnControl
     /// Enhanced JobGiver that assigns prisoner execution jobs to eligible pawns.
     /// Requires the Warden work tag to be enabled.
     /// </summary>
-    public class JobGiver_Warden_DoExecution_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Warden_DoExecution_PawnControl : JobGiver_Warden_PawnControl
     {
-        // Cache system to improve performance with large numbers of pawns
-        private static readonly Dictionary<int, List<Pawn>> _executionTargetsCache = new Dictionary<int, List<Pawn>>();
-        private static readonly Dictionary<int, Dictionary<Pawn, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        private static int _lastCacheUpdateTick = -999;
+        #region Configuration
+
+        protected override float[] DistanceThresholds => new float[] { 400f, 1600f, 2500f }; // 20, 40, 50 tiles
         private const int CACHE_UPDATE_INTERVAL = 180; // Update every 3 seconds
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 400f, 1600f, 2500f }; // 20, 40, 50 tiles
+        #endregion
+
+        #region Static Resources
 
         // Static string caching for better performance
         private static string IncapableOfViolenceLowerTrans;
+
+        #endregion
+
+        #region Initialization
 
         // Reset static strings when language changes
         public static void ResetStaticData()
@@ -29,47 +35,90 @@ namespace emitbreaker.PawnControl
             IncapableOfViolenceLowerTrans = "IncapableOfViolenceLower".Translate();
         }
 
-        public override float GetPriority(Pawn pawn)
+        #endregion
+
+        #region Job Priority
+
+        protected override float GetBasePriority(string workTag)
         {
             // Higher priority than basic tasks but lower than emergency tasks
             return 7.0f;
         }
 
+        #endregion
+
+        #region Core Flow
+
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
-                pawn,
-                "Warden",
-                (p, forced) => {
-                    // Update prisoner cache with standardized method
-                    Utility_JobGiverManagerOld.UpdatePrisonerCache(
-                        p.Map,
-                        ref _lastCacheUpdateTick,
-                        CACHE_UPDATE_INTERVAL,
-                        _executionTargetsCache,
-                        _reachabilityCache,
-                        FilterExecutionTargets);
+            // Check if pawn can do violent work first
+            if (pawn.WorkTagIsDisabled(WorkTags.Violent))
+            {
+                JobFailReason.Is(IncapableOfViolenceLowerTrans);
+                return null;
+            }
 
-                    // Create job using standardized method
-                    return Utility_JobGiverManagerOld.TryCreatePrisonerInteractionJob(
-                        p,
-                        _executionTargetsCache,
-                        _reachabilityCache,
-                        ValidateCanExecute,
-                        CreateExecutionJob,
-                        DISTANCE_THRESHOLDS);
-                },
-                // Additional check with JobFailReason
-                (p, setFailReason) => {
-                    if (p.WorkTagIsDisabled(WorkTags.Violent))
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_DoExecution_PawnControl>(
+                pawn,
+                WorkTag,
+                (p, forced) => {
+                    if (p?.Map == null) return null;
+
+                    // Update prisoner cache
+                    int lastUpdateTick = 0;
+                    if (_lastWardenCacheUpdate.ContainsKey(p.Map.uniqueID))
                     {
-                        if (setFailReason)
-                            JobFailReason.Is(IncapableOfViolenceLowerTrans);
-                        return false;
+                        lastUpdateTick = _lastWardenCacheUpdate[p.Map.uniqueID];
                     }
-                    return true;
+
+                    UpdatePrisonerCache(
+                        p.Map,
+                        ref lastUpdateTick,
+                        CACHE_UPDATE_INTERVAL,
+                        _prisonerCache,
+                        _prisonerReachabilityCache,
+                        FilterExecutionTargets
+                    );
+                    _lastWardenCacheUpdate[p.Map.uniqueID] = lastUpdateTick;
+
+                    // Process cached targets
+                    List<Thing> targets;
+                    if (_prisonerCache.TryGetValue(p.Map.uniqueID, out var prisonerList) && prisonerList != null)
+                    {
+                        targets = new List<Thing>(prisonerList.Cast<Thing>());
+                    }
+                    else
+                    {
+                        targets = new List<Thing>();
+                    }
+
+                    return ProcessCachedTargets(p, targets, forced);
                 },
-                "prisoner execution");
+                debugJobDesc: "execute prisoner");
+        }
+
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // Assuming prisoners are the targets for this job
+            foreach (var prisoner in map.mapPawns.PrisonersOfColony)
+            {
+                if (FilterExecutionTargets(prisoner))
+                {
+                    yield return prisoner;
+                }
+            }
+        }
+
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            foreach (var target in targets)
+            {
+                if (target is Pawn prisoner && ValidateCanExecute(prisoner, pawn))
+                {
+                    return CreateExecutionJob(pawn, prisoner);
+                }
+            }
+            return null;
         }
 
         /// <summary>
@@ -105,6 +154,9 @@ namespace emitbreaker.PawnControl
 
             return true;
         }
+        #endregion
+
+        #region Job Creation
 
         /// <summary>
         /// Creates the execution job for the warden
@@ -120,6 +172,10 @@ namespace emitbreaker.PawnControl
 
             return job;
         }
+
+        #endregion
+
+        #region Validation
 
         /// <summary>
         /// Check if the pawn should take care of a prisoner (ported from WorkGiver_Warden)
@@ -163,19 +219,24 @@ namespace emitbreaker.PawnControl
             return true;
         }
 
+        #endregion
+
+        #region Cache Management
+
         /// <summary>
         /// Reset caches when loading game or changing maps
         /// </summary>
-        public static void ResetCache()
+        public static void ResetDoExecutionCache()
         {
-            Utility_CacheManager.ResetJobGiverCache(_executionTargetsCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
             ResetStaticData();
         }
+        #endregion
 
+        #region Object Information
         public override string ToString()
         {
             return "JobGiver_Warden_DoExecution_PawnControl";
         }
+        #endregion
     }
 }

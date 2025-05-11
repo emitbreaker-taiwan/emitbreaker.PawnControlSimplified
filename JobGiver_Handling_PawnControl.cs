@@ -11,8 +11,10 @@ namespace emitbreaker.PawnControl
     public abstract class JobGiver_Handling_PawnControl : JobGiver_Scan_PawnControl
     {
         #region Configuration
+
         protected override string WorkTag => "Handling";
         protected virtual float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
+        
         #endregion
 
         #region Caching
@@ -22,8 +24,15 @@ namespace emitbreaker.PawnControl
         protected static readonly Dictionary<int, int> _lastHandlingCacheUpdate = new Dictionary<int, int>();
         #endregion
 
+        #region Utility
+
         // Specialized animal handling methods
         protected virtual bool IsValidAnimalTarget(Pawn animal, Pawn handler) { return true;/* Common handling logic */ }
+
+        protected virtual bool CanHandleAnimal(Pawn animal, Pawn handler)
+        {
+            return true; // Check if the animal is reachable and can be handled by the pawn
+        }
 
         // Reset cache helpers
         public static void ResetHandlingCache()
@@ -32,5 +41,7 @@ namespace emitbreaker.PawnControl
             _animalReachabilityCache.Clear();
             _lastHandlingCacheUpdate.Clear();
         }
+
+        #endregion
     }
 }

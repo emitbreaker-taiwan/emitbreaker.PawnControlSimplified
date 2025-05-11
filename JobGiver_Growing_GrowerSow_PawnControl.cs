@@ -32,7 +32,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Sowing is important for future food production
         /// </summary>
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
             return 5.7f;
         }

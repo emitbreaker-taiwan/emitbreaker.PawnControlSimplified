@@ -14,20 +14,35 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to help gather items for forming caravans.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_HelpGatheringItemsForCaravan_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_HelpGatheringItemsForCaravan_PawnControl : JobGiver_Hauling_PawnControl
     {
+        #region Configuration
+
+        // Use higher priority since caravan forming is important
+        protected override float GetBasePriority(string workTag)
+        {
+            return 6.0f;
+        }
+
+        // Use shorter cache update interval for more responsive caravan formation
+        protected override int CacheUpdateInterval => 120;
+
+        #endregion
+
+        #region Caching
+
         // Cache for active caravan forming lords that are gathering items
         private static readonly Dictionary<int, List<Lord>> _caravanLordsCache = new Dictionary<int, List<Lord>>();
         private static readonly Dictionary<int, Dictionary<Thing, bool>> _thingToHaulCache = new Dictionary<int, Dictionary<Thing, bool>>();
         private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 120; // Update every 2 seconds
 
-        public override float GetPriority(Pawn pawn)
-        {
-            // Caravan forming is important
-            return 6.0f;
-        }
+        #endregion
 
+        #region Overrides
+
+        /// <summary>
+        /// Override TryGiveJob to implement caravan-specific logic
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             // IMPORTANT: Only player pawns and slaves owned by player should gather items for caravans
@@ -41,18 +56,34 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
                 pawn,
-                "Hauling",
+                WorkTag,
                 (p, forced) => {
-                    // Update plant cache
+                    // Update caravan lords cache
                     UpdateCaravanLordsCache(p.Map);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
+                    // Find and create a job for gathering items for caravans
                     return TryCreateGatherItemsJob(pawn);
                 },
                 debugJobDesc: "gather items for caravan assignment");
         }
+
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // This won't be used since we're overriding TryGiveJob directly
+            yield break;
+        }
+
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // This won't be used since we're overriding TryGiveJob directly
+            return null;
+        }
+
+        #endregion
+
+        #region Caravan-specific methods
 
         /// <summary>
         /// Updates the cache of lords that are currently forming caravans and gathering items
@@ -64,7 +95,7 @@ namespace emitbreaker.PawnControl
             int currentTick = Find.TickManager.TicksGame;
             int mapId = map.uniqueID;
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
+            if (currentTick > _lastCacheUpdateTick + CacheUpdateInterval ||
                 !_caravanLordsCache.ContainsKey(mapId))
             {
                 // Clear outdated cache
@@ -153,7 +184,7 @@ namespace emitbreaker.PawnControl
             foreach (TransferableOneWay transferable in caravanLordJob.transferables)
             {
                 if (transferable.CountToTransfer <= 0) continue;
-                
+
                 int leftToTransfer = transferable.CountToTransfer;
                 foreach (Thing alreadyTransferred in lord.ownedPawns
                     .Where(p => p.inventory != null)
@@ -169,7 +200,7 @@ namespace emitbreaker.PawnControl
                 foreach (Thing thing in transferable.things)
                 {
                     if (!thing.Spawned || thing.IsForbidden(pawn)) continue;
-                    
+
                     if (pawn.CanReserve(thing) && pawn.CanReach(thing, PathEndMode.Touch, Danger.Deadly))
                     {
                         return thing;
@@ -188,8 +219,8 @@ namespace emitbreaker.PawnControl
             for (int i = 0; i < lord.ownedPawns.Count; i++)
             {
                 Pawn ownedPawn = lord.ownedPawns[i];
-                if (IsUsableCarrier(ownedPawn, forPawn, false) && 
-                    !ownedPawn.IsForbidden(forPawn) && 
+                if (IsUsableCarrier(ownedPawn, forPawn, false) &&
+                    !ownedPawn.IsForbidden(forPawn) &&
                     forPawn.CanReach(ownedPawn, PathEndMode.Touch, Danger.Deadly))
                 {
                     return true;
@@ -209,30 +240,42 @@ namespace emitbreaker.PawnControl
             if (p == forPawn)
                 return true;
 
-            if (p.DestroyedOrNull() || !p.Spawned || p.inventory.UnloadEverything || 
+            if (p.DestroyedOrNull() || !p.Spawned || p.inventory.UnloadEverything ||
                 !forPawn.CanReach(p, PathEndMode.Touch, Danger.Deadly))
                 return false;
 
             if (allowColonists && p.IsColonist)
                 return true;
 
-            return (p.RaceProps.packAnimal || p.HostFaction == Faction.OfPlayer) && 
+            return (p.RaceProps.packAnimal || p.HostFaction == Faction.OfPlayer) &&
                    !p.IsBurning() && !p.Downed && !MassUtility.IsOverEncumbered(p);
         }
+
+        #endregion
+
+        #region Cache management
 
         /// <summary>
         /// Reset caches when loading game or changing maps
         /// </summary>
-        public static void ResetCache()
+        public static new void ResetCache()
         {
             _caravanLordsCache.Clear();
             _thingToHaulCache.Clear();
             _lastCacheUpdateTick = -999;
+
+            Utility_DebugManager.LogNormal("Reset JobGiver_HelpGatheringItemsForCaravan cache");
         }
+
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
-            return "JobGiver_GatherItemsForCaravan_PawnControl";
+            return "JobGiver_Hauling_HelpGatheringItemsForCaravan_PawnControl";
         }
+
+        #endregion
     }
 }

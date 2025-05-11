@@ -1,4 +1,4 @@
-﻿using RimWorld;
+using RimWorld;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -7,17 +7,17 @@ using Verse.AI;
 namespace emitbreaker.PawnControl
 {
     /// <summary>
-    /// JobGiver that assigns tasks for wardens to chat with prisoners for recruitment or resistance reduction.
+    /// JobGiver that assigns tasks for wardens to enslave prisoners or reduce their will.
     /// Optimized to use the PawnControl framework for better performance.
     /// </summary>
-    public class JobGiver_Warden_Chat_PawnControl : JobGiver_Warden_PawnControl
+    public class JobGiver_Warden_Enslave_PawnControl : JobGiver_Warden_PawnControl
     {
         #region Configuration
 
         /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
-        protected override string DebugName => "Chat";
+        protected override string DebugName => "Enslave";
 
         /// <summary>
         /// Cache update interval in ticks (180 ticks = 3 seconds)
@@ -33,15 +33,24 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
+        /// <summary>
+        /// Enslave has high priority as it changes prisoner status
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
-            // Chatting with prisoners for recruitment or resistance reduction is important
-            return 5.7f;
+            // Enslaving is a higher priority task than regular warden duties
+            return 6.5f;
         }
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_Chat_PawnControl>(
+            // Check for Ideology DLC first
+            if (!ModLister.CheckIdeology("WorkGiver_Warden_Enslave"))
+            {
+                return null;
+            }
+
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_Enslave_PawnControl>(
                 pawn,
                 WorkTag,
                 (p, forced) => {
@@ -61,7 +70,24 @@ namespace emitbreaker.PawnControl
 
                     return ProcessCachedTargets(p, targets, forced);
                 },
-                debugJobDesc: "chat with prisoner");
+                debugJobDesc: "enslave prisoner or reduce will");
+        }
+
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            // Use base checks first
+            if (base.ShouldSkip(pawn))
+                return true;
+
+            // Ideology required
+            if (!ModLister.CheckIdeology("WorkGiver_Warden_Enslave"))
+                return true;
+                
+            // Check pawn capable of talking
+            if (!pawn.health.capacities.CapableOf(PawnCapacityDefOf.Talking))
+                return true;
+
+            return false;
         }
 
         #endregion
@@ -69,7 +95,7 @@ namespace emitbreaker.PawnControl
         #region Target processing
 
         /// <summary>
-        /// Get all prisoners eligible for chat interaction
+        /// Get all prisoners eligible for enslavement interaction
         /// </summary>
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
@@ -78,7 +104,7 @@ namespace emitbreaker.PawnControl
             // Get all prisoner pawns on the map
             foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
             {
-                if (FilterInteractablePrisoners(prisoner))
+                if (FilterEnslavablePrisoners(prisoner))
                 {
                     yield return prisoner;
                 }
@@ -86,33 +112,38 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Filter function to identify prisoners ready for chat interaction
+        /// Filter function to identify prisoners ready for enslavement interaction
         /// </summary>
-        private bool FilterInteractablePrisoners(Pawn prisoner)
+        private bool FilterEnslavablePrisoners(Pawn prisoner)
         {
             // Skip prisoners in mental states
             if (prisoner.InMentalState)
                 return false;
 
-            PrisonerInteractionModeDef interactionMode = prisoner.guest?.ExclusiveInteractionMode;
+            // Check if either Enslave or ReduceWill interaction is enabled
+            bool canEnslave = prisoner.guest.IsInteractionEnabled(PrisonerInteractionModeDefOf.Enslave);
+            bool canReduceWill = prisoner.guest.IsInteractionEnabled(PrisonerInteractionModeDefOf.ReduceWill);
 
-            // Only include prisoners set for AttemptRecruit or ReduceResistance
-            if (interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ||
-                interactionMode == PrisonerInteractionModeDefOf.ReduceResistance)
-            {
-                // Only include prisoners scheduled for interaction
-                if (prisoner.guest.ScheduledForInteraction)
-                {
-                    // Skip if resistance is already 0 and we're trying to reduce resistance
-                    if (!(interactionMode == PrisonerInteractionModeDefOf.ReduceResistance &&
-                          prisoner.guest.Resistance <= 0f))
-                    {
-                        return true;
-                    }
-                }
-            }
+            if (!canEnslave && !canReduceWill)
+                return false;
 
-            return false;
+            // Check if scheduled for interaction
+            if (!prisoner.guest.ScheduledForInteraction)
+                return false;
+                
+            // Skip if attempting to reduce will but will is already 0
+            if (canReduceWill && !canEnslave && prisoner.guest.will <= 0f)
+                return false;
+
+            // Check if downed but not in bed
+            if (prisoner.Downed && !prisoner.InBed())
+                return false;
+
+            // Check if awake
+            if (!prisoner.Awake())
+                return false;
+
+            return true;
         }
 
         /// <summary>
@@ -133,7 +164,7 @@ namespace emitbreaker.PawnControl
                 DistanceThresholds
             );
 
-            // Find the first valid prisoner to chat with
+            // Find the first valid prisoner to enslave or reduce will
             Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
                 buckets,
                 warden,
@@ -146,29 +177,31 @@ namespace emitbreaker.PawnControl
             if (targetPrisoner == null)
                 return null;
 
-            // Create chat job
-            return CreateChatJob(warden, targetPrisoner);
+            // Create enslave job
+            return CreateEnslaveJob(warden, targetPrisoner);
         }
 
         /// <summary>
-        /// Validates if a warden can chat with a specific prisoner
+        /// Validates if a warden can enslave a specific prisoner
         /// </summary>
         protected override bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden)
         {
             if (prisoner?.guest == null)
                 return false;
 
-            PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
+            // Check if either Enslave or ReduceWill interaction is enabled
+            bool canEnslave = prisoner.guest.IsInteractionEnabled(PrisonerInteractionModeDefOf.Enslave);
+            bool canReduceWill = prisoner.guest.IsInteractionEnabled(PrisonerInteractionModeDefOf.ReduceWill);
 
-            // Check for valid interaction mode and scheduling
-            if ((interactionMode != PrisonerInteractionModeDefOf.AttemptRecruit &&
-                 interactionMode != PrisonerInteractionModeDefOf.ReduceResistance) ||
-                !prisoner.guest.ScheduledForInteraction)
+            if (!canEnslave && !canReduceWill)
                 return false;
 
-            // Skip resistance reduction if already at 0
-            if (interactionMode == PrisonerInteractionModeDefOf.ReduceResistance &&
-                prisoner.guest.Resistance <= 0f)
+            // Check if scheduled for interaction
+            if (!prisoner.guest.ScheduledForInteraction)
+                return false;
+                
+            // Check for reduce will when will is at 0
+            if (canReduceWill && !canEnslave && prisoner.guest.will <= 0f)
                 return false;
 
             // Check if prisoner is downed but not in bed
@@ -179,9 +212,17 @@ namespace emitbreaker.PawnControl
             if (!prisoner.Awake())
                 return false;
 
+            // Check if warden can talk
+            if (!warden.health.capacities.CapableOf(PawnCapacityDefOf.Talking))
+                return false;
+
             // Check basic reachability
             if (!prisoner.Spawned || prisoner.IsForbidden(warden) ||
                 !warden.CanReserve(prisoner, 1, -1, null, false))
+                return false;
+
+            // Check history event notification for enslaving
+            if (!new HistoryEvent(HistoryEventDefOf.EnslavedPrisoner, warden.Named(HistoryEventArgsNames.Doer)).Notify_PawnAboutToDo_Job())
                 return false;
 
             return true;
@@ -206,31 +247,39 @@ namespace emitbreaker.PawnControl
         #region Job creation
 
         /// <summary>
-        /// Creates the chat job for the warden
+        /// Creates the enslave job for the warden
         /// </summary>
-        private Job CreateChatJob(Pawn warden, Pawn prisoner)
+        private Job CreateEnslaveJob(Pawn warden, Pawn prisoner)
         {
-            Job job = JobMaker.MakeJob(JobDefOf.PrisonerAttemptRecruit, prisoner);
-
-            PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
-            string interactionType = interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ?
-                "recruit" : "reduce resistance of";
-
-            Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to {interactionType} prisoner {prisoner.LabelShort}");
+            bool canEnslave = prisoner.guest.IsInteractionEnabled(PrisonerInteractionModeDefOf.Enslave);
+            bool canReduceWill = prisoner.guest.IsInteractionEnabled(PrisonerInteractionModeDefOf.ReduceWill);
+            
+            Job job;
+            
+            if (canEnslave)
+            {
+                job = JobMaker.MakeJob(JobDefOf.PrisonerEnslave, prisoner);
+                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to enslave prisoner {prisoner.LabelShort}");
+            }
+            else
+            {
+                job = JobMaker.MakeJob(JobDefOf.PrisonerReduceWill, prisoner);
+                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to reduce will of prisoner {prisoner.LabelShort}");
+            }
 
             return job;
         }
 
         #endregion
 
-        #region Utility
+        #region Debug support
 
         /// <summary>
         /// For debugging purposes
         /// </summary>
         public override string ToString()
         {
-            return "JobGiver_Warden_Chat_PawnControl";
+            return "JobGiver_Warden_Enslave_PawnControl";
         }
 
         #endregion

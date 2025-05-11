@@ -1,4 +1,5 @@
 using RimWorld;
+using System;
 using System.Collections.Generic;
 using Verse;
 using Verse.AI;
@@ -22,8 +23,65 @@ namespace emitbreaker.PawnControl
         protected static readonly Dictionary<int, int> _lastWardenCacheUpdate = new Dictionary<int, int>();
         #endregion
 
+        #region Utility
+
         // Specialized prisoner handling methods
-        protected virtual bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden) { /* Common warden logic */ }
+        protected virtual bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden) { return true;/* Common warden logic */ }
+
+        #endregion
+
+        #region Helpers
+
+        /// <summary>
+        /// Updates a cache of prisoners matching specific criteria
+        /// </summary>
+        public static void UpdatePrisonerCache(
+            Map map,
+            ref int lastUpdateTick,
+            int updateInterval,
+            Dictionary<int, List<Pawn>> prisonerCache,
+            Dictionary<int, Dictionary<Pawn, bool>> reachabilityCache,
+            Func<Pawn, bool> prisonerFilter)
+        {
+            if (map == null) return;
+
+            int currentTick = Find.TickManager.TicksGame;
+            int mapId = map.uniqueID;
+
+            if (currentTick > lastUpdateTick + updateInterval ||
+                !prisonerCache.ContainsKey(mapId))
+            {
+                // Clear outdated cache
+                if (prisonerCache.ContainsKey(mapId))
+                    prisonerCache[mapId].Clear();
+                else
+                    prisonerCache[mapId] = new List<Pawn>();
+
+                // Clear reachability cache too
+                if (reachabilityCache.ContainsKey(mapId))
+                    reachabilityCache[mapId].Clear();
+                else
+                    reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
+
+                // Find all matching prisoners using the provided filter
+                foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
+                {
+                    if (prisoner == null || prisoner.Destroyed || !prisoner.Spawned)
+                        continue;
+
+                    if (prisonerFilter(prisoner))
+                    {
+                        prisonerCache[mapId].Add(prisoner);
+                    }
+                }
+
+                lastUpdateTick = currentTick;
+            }
+        }
+
+        #endregion
+
+        #region Cache Management
 
         // Reset cache helpers
         public static void ResetWardenCache()
@@ -32,5 +90,7 @@ namespace emitbreaker.PawnControl
             _prisonerReachabilityCache.Clear();
             _lastWardenCacheUpdate.Clear();
         }
+
+        #endregion
     }
 }

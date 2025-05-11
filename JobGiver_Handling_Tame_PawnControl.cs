@@ -1,5 +1,4 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -12,24 +11,51 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to tame animals with tame designations.
     /// Uses the Handler work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Handling_Tame_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Handling_Tame_PawnControl : JobGiver_Handling_PawnControl
     {
-        // Constants
-        private const int CACHE_REFRESH_INTERVAL = 180;
+        #region Configuration
+
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "Tame";
+
+        /// <summary>
+        /// Work tag for eligibility checking
+        /// </summary>
+        protected override string WorkTag => "Handling";
+
+        /// <summary>
+        /// Maximum cache size to control memory usage
+        /// </summary>
         private const int MAX_CACHE_SIZE = 1000;
+
+        /// <summary>
+        /// Cache update interval in ticks (180 ticks = 3 seconds)
+        /// </summary>
+        protected override int CacheUpdateInterval => 180;
+
+        /// <summary>
+        /// Distance thresholds for bucketing (25, 50, 100 tiles squared)
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 625f, 2500f, 10000f };
+
+        #endregion
+
+        #region Cache Management
 
         // Cache for target animals with tame designation
         private static readonly Dictionary<int, List<Pawn>> _tameDesignationCache = new Dictionary<int, List<Pawn>>();
         private static readonly Dictionary<int, Dictionary<Pawn, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
         private static int _lastCacheUpdateTick = -999;
 
-        // Distance thresholds for bucketing (25, 50, 100 tiles squared)
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 625f, 2500f, 10000f };
-
-        public override float GetPriority(Pawn pawn)
+        /// <summary>
+        /// Reset caches when loading game or changing maps
+        /// </summary>
+        public static void ResetTameCache()
         {
-            // Taming has moderate priority among work tasks
-            return 5.1f;
+            Utility_CacheManager.ResetJobGiverCache(_tameDesignationCache, _reachabilityCache);
+            _lastCacheUpdateTick = -999;
         }
 
         /// <summary>
@@ -42,7 +68,7 @@ namespace emitbreaker.PawnControl
             int currentTick = Find.TickManager.TicksGame;
             int mapId = map.uniqueID;
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_REFRESH_INTERVAL ||
+            if (currentTick > _lastCacheUpdateTick + CacheUpdateInterval ||
                 !_tameDesignationCache.ContainsKey(mapId))
             {
                 // Clear outdated cache
@@ -76,6 +102,25 @@ namespace emitbreaker.PawnControl
             }
         }
 
+        /// <summary>
+        /// Determines if the job giver should execute based on cache status
+        /// </summary>
+        protected override bool ShouldExecuteNow(int mapId)
+        {
+            return Find.TickManager.TicksGame > _lastCacheUpdateTick + CacheUpdateInterval ||
+                  !_tameDesignationCache.ContainsKey(mapId);
+        }
+
+        #endregion
+
+        #region Core flow
+
+        protected override float GetBasePriority(string workTag)
+        {
+            // Taming has moderate priority among work tasks
+            return 5.1f;
+        }
+
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Skip if no tame designations exist on map
@@ -87,9 +132,9 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_Tame_PawnControl>(
                 pawn,
-                "Handling",
+                WorkTag,
                 (p, forced) => {
                     // Update taming cache
                     UpdateTameableCacheSafely(p.Map);
@@ -111,6 +156,35 @@ namespace emitbreaker.PawnControl
                 skipEmergencyCheck: false);
         }
 
+        #endregion
+
+        #region Target processing
+
+        /// <summary>
+        /// Get all animals eligible for taming
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            if (map == null) yield break;
+
+            // Return animals with tame designations
+            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Tame))
+            {
+                if (designation.target.Thing is Pawn animal && TameUtility.CanTame(animal))
+                {
+                    yield return animal;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Process the cached targets for taming
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            return TryCreateTameJob(pawn);
+        }
+
         /// <summary>
         /// Creates a job for taming an animal with a tame designation
         /// </summary>
@@ -123,20 +197,20 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
                 _tameDesignationCache[mapId],
                 (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
+                DistanceThresholds
             );
 
-            // FIXED: Explicitly specify type argument Pawn for FindFirstValidTargetInBuckets
-            Pawn targetAnimal = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets<Pawn>(
+            // Find first valid target
+            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
                 buckets,
                 pawn,
                 (animal, p) => {
                     // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(animal, p, requiresDesignator: true))
+                    if (!Utility_JobGiverManager.IsValidFactionInteraction(animal, p, requiresDesignator: true))
                         return false;
 
                     // Skip if no longer valid
@@ -198,21 +272,41 @@ namespace emitbreaker.PawnControl
             }
 
             // Create job if target found
-            if (targetAnimal != null)
-            {
-                Job job = JobMaker.MakeJob(JobDefOf.Tame, targetAnimal, null, foodSource);
-                job.count = foodCount;
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to tame {targetAnimal.LabelShort}");
-                return job;
-            }
-
-            return null;
+            Job job = JobMaker.MakeJob(JobDefOf.Tame, targetAnimal, null, foodSource);
+            job.count = foodCount;
+            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to tame {targetAnimal.LabelShort}");
+            return job;
         }
+
+        /// <summary>
+        /// Implements the animal-specific validity check
+        /// </summary>
+        protected override bool IsValidAnimalTarget(Pawn animal, Pawn handler)
+        {
+            // Skip if no tame designation
+            if (handler?.Map == null || animal?.Map == null ||
+                handler.Map.designationManager.DesignationOn(animal, DesignationDefOf.Tame) == null)
+                return false;
+
+            // Skip if invalid tame target
+            if (!TameUtility.CanTame(animal) || TameUtility.TriedToTameTooRecently(animal))
+                return false;
+
+            // Skip if in aggressive mental state
+            if (animal.InAggroMentalState)
+                return false;
+
+            return true;
+        }
+
+        #endregion
+
+        #region Animal interaction helpers
 
         /// <summary>
         /// Checks if the pawn has appropriate food for interacting with the animal
         /// </summary>
-        private bool HasFoodToInteractAnimal(Pawn pawn, Pawn animal)
+        protected virtual bool HasFoodToInteractAnimal(Pawn pawn, Pawn animal)
         {
             return pawn.inventory.innerContainer.Contains(ThingDefOf.Kibble) ||
                    (animal.RaceProps.foodType & (FoodTypeFlags.Plant | FoodTypeFlags.VegetableOrFruit)) != FoodTypeFlags.None &&
@@ -221,18 +315,18 @@ namespace emitbreaker.PawnControl
                    (t.def.ingestible.foodType & (FoodTypeFlags.Plant | FoodTypeFlags.VegetableOrFruit)) != FoodTypeFlags.None);
         }
 
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_tameDesignationCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
-        }
+        #endregion
 
+        #region Utility
+
+        /// <summary>
+        /// For debugging purposes
+        /// </summary>
         public override string ToString()
         {
             return "JobGiver_Tame_PawnControl";
         }
+
+        #endregion
     }
 }

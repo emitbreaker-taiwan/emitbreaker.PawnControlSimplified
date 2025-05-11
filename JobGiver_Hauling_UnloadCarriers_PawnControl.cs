@@ -33,9 +33,8 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
-        public override float GetPriority(Pawn pawn)
+        protected override float GetBasePriority(string workTag)
         {
-            // Unloading carriers is important to get resources
             return 5.8f;
         }
 
@@ -143,7 +142,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Check if we should skip this job giver entirely (optimization)
         /// </summary>
-        protected override bool ShouldSkip(Pawn pawn)
+        public override bool ShouldSkip(Pawn pawn)
         {
             if (pawn?.Map == null)
                 return true;
