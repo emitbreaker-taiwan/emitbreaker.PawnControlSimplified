@@ -1,7 +1,5 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
-using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -9,75 +7,129 @@ namespace emitbreaker.PawnControl
 {
     /// <summary>
     /// Enhanced JobGiver that assigns container opening jobs to eligible pawns.
-    /// Requires the BasicWorker work tag to be enabled.
     /// </summary>
-    public class JobGiver_BasicWorker_Open_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_BasicWorker_Open_PawnControl : JobGiver_BasicWorker_PawnControl
     {
-        // Cache system to improve performance with large numbers of pawns
-        private static readonly Dictionary<int, List<Thing>> _openableCache = new Dictionary<int, List<Thing>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 300; // Update every 5 seconds
+        #region Configuration
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 400f, 1600f, 2500f }; // 20, 40, 50 tiles
+        /// <summary>
+        /// Use Hauling work tag
+        /// </summary>
+        protected override string WorkTag => "Hauling";
 
-        public override float GetPriority(Pawn pawn)
-        {
-            // Medium priority - similar to flicking
-            return 6.1f;
-        }
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "Open";
+
+        /// <summary>
+        /// The designation this job giver targets
+        /// </summary>
+        protected override DesignationDef TargetDesignation => DesignationDefOf.Open;
+
+        /// <summary>
+        /// The job to create
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Open;
+
+        #endregion
+
+        #region Core flow
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Quick early exit if there are no strip designations
-            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.Open))
+            // Quick early exit if there are no relevant designations
+            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation))
             {
                 return null;
             }
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_BasicWorker_Open_PawnControl>(
                 pawn,
-                "BasicWorker",
-                (p, forced) => {
-                    // Update plant cache
+                WorkTag,
+                (p, forced) =>
+                {
+                    int mapId = p.Map.uniqueID;
+
+                    // Get the current last update time, or default if not set
+                    if (!_lastDesignationCacheUpdate.TryGetValue(mapId, out int lastUpdateTick))
+                    {
+                        lastUpdateTick = -999;
+                    }
+
+                    // Update cache of items with designations
                     Utility_CacheManager.UpdateDesignationBasedCache(
-                        pawn.Map,
-                        ref _lastCacheUpdateTick,
-                        CACHE_UPDATE_INTERVAL,
-                        _openableCache,
+                        p.Map,
+                        ref lastUpdateTick,
+                        CacheUpdateInterval,
+                        _designationCache,
                         _reachabilityCache,
-                        DesignationDefOf.Open,
+                        TargetDesignation,
                         (des) => des?.target.Thing,
                         100);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return Utility_JobGiverManagerOld.TryCreateDesignatedJob(
-                            pawn,
-                            _openableCache,
-                            _reachabilityCache,
-                            "BasicWorker",
-                            DesignationDefOf.Open,
-                            JobDefOf.Open,
-                            reachabilityFunc: (thing, q) => !thing.IsForbidden(q) &&
-                                                           q.CanReserveAndReach(thing, PathEndMode.ClosestTouch, Danger.Deadly),
-                            distanceThresholds: DISTANCE_THRESHOLDS);
+                    // Store the updated tick back in the dictionary
+                    _lastDesignationCacheUpdate[mapId] = lastUpdateTick;
+
+                    // Find a valid target and create a job
+                    var targets = _designationCache.TryGetValue(mapId, out var list) ? list : null;
+                    if (targets == null || targets.Count == 0)
+                        return null;
+
+                    // Use the bucketing system to find the closest valid target
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        targets,
+                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
+
+                    // Find the best target using the provided validation function 
+                    Thing target = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, worker) => IsValidTarget(thing, worker),
+                        _reachabilityCache);
+
+                    // Create and return job if we found a valid target
+                    if (target != null)
+                    {
+                        return CreateJobForTarget(target);
+                    }
+
+                    return null;
                 },
-                debugJobDesc: "open assignment");
+                debugJobDesc: DebugName);
         }
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Process the cached targets and create a job for the pawn
         /// </summary>
-        public static void ResetCache()
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            Utility_CacheManager.ResetJobGiverCache(_openableCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            // Skip if no targets
+            if (targets.Count == 0)
+                return null;
+
+            // Use bucketing system to find closest valid target
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                targets,
+                thing => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find the first valid target
+            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets, pawn, IsValidTarget, _reachabilityCache);
+
+            // Create a job for the target if found
+            if (bestTarget != null)
+            {
+                return CreateJobForTarget(bestTarget);
+            }
+
+            return null;
         }
 
-        public override string ToString()
-        {
-            return "JobGiver_Open_PawnControl";
-        }
+        #endregion
     }
 }

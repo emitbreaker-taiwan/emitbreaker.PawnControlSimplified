@@ -1,4 +1,5 @@
 ﻿using RimWorld;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -11,16 +12,28 @@ namespace emitbreaker.PawnControl
     /// Handles non-turret buildings that require fuel.
     /// Optimized for large colonies with many refuelable buildings using distance-based bucketing.
     /// </summary>
-    public class JobGiver_Hauling_Refuel_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_Refuel_PawnControl : JobGiver_Hauling_PawnControl
     {
-        // Cache for buildings that need refueling
-        private static readonly Dictionary<int, List<Thing>> _refuelableBuildingsCache = new Dictionary<int, List<Thing>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 180; // Update every 3 seconds
+        #region Configuration
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "Refuel";
+
+        /// <summary>
+        /// Update cache every 3 seconds - fuel levels don't change rapidly
+        /// </summary>
+        protected override int CacheUpdateInterval => 180;
+
+        /// <summary>
+        /// Distance thresholds for fuel-requiring buildings
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
+
+        #endregion
+
+        #region Core flow
 
         public override float GetPriority(Pawn pawn)
         {
@@ -30,174 +43,173 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_Refuel_PawnControl>(
                 pawn,
-                "Hauling",
-                (p, forced) => {
-                    // Update plant cache
-                    UpdateRefuelableBuildingsCache(p.Map);
-
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateRefuelJob(p);
-                },
-                debugJobDesc: "refuel assignment");
-        }
-
-        /// <summary>
-        /// Updates the cache of buildings that need refueling (excluding turrets)
-        /// </summary>
-        private void UpdateRefuelableBuildingsCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_refuelableBuildingsCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_refuelableBuildingsCache.ContainsKey(mapId))
-                    _refuelableBuildingsCache[mapId].Clear();
-                else
-                    _refuelableBuildingsCache[mapId] = new List<Thing>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Thing, bool>();
-
-                // Find all refuelable buildings (excluding turrets)
-                foreach (Thing thing in map.listerThings.ThingsInGroup(ThingRequestGroup.Refuelable))
+                WorkTag,
+                (p, forced) =>
                 {
-                    // Skip turrets (these are handled by JobGiver_Refuel_Turret_PawnControl)
-                    if (thing is Building_Turret)
-                        continue;
+                    if (p?.Map == null)
+                        return null;
 
-                    CompRefuelable refuelable = thing.TryGetComp<CompRefuelable>();
-                    if (refuelable != null && refuelable.ShouldAutoRefuelNow && !thing.IsBurning())
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Use the shared cache updating logic from base class
+                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
+                        || now - last >= CacheUpdateInterval)
                     {
-                        _refuelableBuildingsCache[mapId].Add(thing);
+                        _lastHaulingCacheUpdate[mapId] = now;
+                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
                     }
-                }
 
-                _lastCacheUpdateTick = currentTick;
-            }
-        }
+                    // Get refuelable buildings from shared cache
+                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
+                        return null;
 
-        /// <summary>
-        /// Create a job for refueling a building using manager-driven bucket processing
-        /// </summary>
-        private Job TryCreateRefuelJob(Pawn pawn)
-        {
-            if (pawn?.Map == null) return null;
+                    // Use the bucketing system to find the closest valid refuelable building
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        haulables,
+                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_refuelableBuildingsCache.ContainsKey(mapId) || _refuelableBuildingsCache[mapId].Count == 0)
-                return null;
+                    // Find the best building to refuel
+                    Thing targetBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, worker) => IsValidRefuelTarget(thing, worker),
+                        _reachabilityCache);
 
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
-                pawn,
-                _refuelableBuildingsCache[mapId],
-                (building) => (building.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find the best building to refuel
-            Thing targetBuilding = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (building, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(building, p, requiresDesignator: false))
-                        return false;
-
-                    // Skip if no longer valid
-                    if (building == null || building.Destroyed || !building.Spawned)
-                        return false;
-
-                    // Skip if burning
-                    if (building.IsBurning())
-                        return false;
-
-                    // Get refuelable component
-                    CompRefuelable refuelable = building.TryGetComp<CompRefuelable>();
-                    if (refuelable == null || !refuelable.ShouldAutoRefuelNow)
-                        return false;
-
-                    // Skip if forbidden or unreachable
-                    if (building.IsForbidden(p) ||
-                        !p.CanReserve(building, 1, -1) ||
-                        !p.CanReach(building, PathEndMode.Touch, p.NormalMaxDanger()))
-                        return false;
-
-                    // Check if fuel is available
-                    bool hasFuel = false;
-
-                    // Check the resource counter for available fuel
-                    foreach (var resourceCount in p.Map.resourceCounter.AllCountedAmounts)
+                    // Create job if target found
+                    if (targetBuilding != null)
                     {
-                        if (refuelable.Props.fuelFilter.Allows(resourceCount.Key) && resourceCount.Value > 0)
+                        CompRefuelable refuelable = targetBuilding.TryGetComp<CompRefuelable>();
+                        if (refuelable != null)
                         {
-                            hasFuel = true;
-                            break;
+                            // Determine job type based on atomicFueling flag
+                            JobDef jobDef = refuelable.Props.atomicFueling ?
+                                JobDefOf.RefuelAtomic : JobDefOf.Refuel;
+
+                            Job job = JobMaker.MakeJob(jobDef, targetBuilding);
+                            Utility_DebugManager.LogNormal($"{p.LabelShort} created job to refuel {targetBuilding.LabelCap}");
+                            return job;
                         }
                     }
 
-                    if (!hasFuel)
-                    {
-                        // Check if there's any available fuel that can be reserved
-                        foreach (Thing fuel in p.Map.listerThings.ThingsInGroup(ThingRequestGroup.HaulableEver))
-                        {
-                            if (refuelable.Props.fuelFilter.Allows(fuel) &&
-                                !fuel.IsForbidden(p) &&
-                                p.CanReserve(fuel) &&
-                                p.CanReach(fuel, PathEndMode.ClosestTouch, p.NormalMaxDanger()))
-                            {
-                                hasFuel = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    return hasFuel;
+                    return null;
                 },
-                _reachabilityCache
-            );
+                debugJobDesc: DebugName);
+        }
 
-            // Create job if target found
-            if (targetBuilding != null)
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // Iterate through the cached targets to find a valid refuelable building
+            foreach (var target in targets)
             {
-                CompRefuelable refuelable = targetBuilding.TryGetComp<CompRefuelable>();
-                if (refuelable != null)
+                if (IsValidRefuelTarget(target, pawn))
                 {
-                    // Determine job type based on atomicFueling flag
-                    JobDef jobDef = refuelable.Props.atomicFueling ?
-                        JobDefOf.RefuelAtomic : JobDefOf.Refuel;
+                    CompRefuelable refuelable = target.TryGetComp<CompRefuelable>();
+                    if (refuelable != null)
+                    {
+                        // Determine job type based on atomicFueling flag
+                        JobDef jobDef = refuelable.Props.atomicFueling ? JobDefOf.RefuelAtomic : JobDefOf.Refuel;
 
-                    Job job = JobMaker.MakeJob(jobDef, targetBuilding);
-                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel {targetBuilding.LabelCap}");
-                    return job;
+                        Job job = JobMaker.MakeJob(jobDef, target);
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel {target.LabelCap}");
+                        return job;
+                    }
                 }
             }
 
+            // Return null if no valid target is found
             return null;
         }
 
+        #endregion
+
+        #region Target selection
+
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Gets all refuelable buildings on the map (excluding turrets)
         /// </summary>
-        public static void ResetCache()
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            Utility_CacheManager.ResetJobGiverCache(_refuelableBuildingsCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            if (map == null)
+                yield break;
+
+            // Find all refuelable buildings (excluding turrets)
+            foreach (Thing thing in map.listerThings.ThingsInGroup(ThingRequestGroup.Refuelable))
+            {
+                // Skip turrets (these are handled by JobGiver_Refuel_Turret_PawnControl)
+                if (thing is Building_Turret)
+                    continue;
+
+                CompRefuelable refuelable = thing.TryGetComp<CompRefuelable>();
+                if (refuelable != null && refuelable.ShouldAutoRefuelNow && !thing.IsBurning())
+                {
+                    yield return thing;
+                }
+            }
         }
 
-        public override string ToString()
+        /// <summary>
+        /// Determines if a building is valid for refueling
+        /// </summary>
+        protected virtual bool IsValidRefuelTarget(Thing thing, Pawn pawn)
         {
-            return "JobGiver_Refuel_PawnControl";
+            // Skip if no longer valid
+            if (thing == null || thing.Destroyed || !thing.Spawned)
+                return false;
+
+            // Skip if burning
+            if (thing.IsBurning())
+                return false;
+
+            // Get refuelable component
+            CompRefuelable refuelable = thing.TryGetComp<CompRefuelable>();
+            if (refuelable == null || !refuelable.ShouldAutoRefuelNow)
+                return false;
+
+            // Skip if forbidden or unreachable
+            if (thing.IsForbidden(pawn) || !pawn.CanReserveAndReach(thing, PathEndMode.Touch, pawn.NormalMaxDanger()))
+                return false;
+
+            // Check if fuel is available
+            return IsFuelAvailable(pawn, refuelable);
         }
+
+        /// <summary>
+        /// Checks if fuel is available for the given refuelable component
+        /// </summary>
+        private bool IsFuelAvailable(Pawn pawn, CompRefuelable refuelable)
+        {
+            // Check the resource counter for available fuel
+            foreach (var resourceCount in pawn.Map.resourceCounter.AllCountedAmounts)
+            {
+                if (refuelable.Props.fuelFilter.Allows(resourceCount.Key) && resourceCount.Value > 0)
+                {
+                    return true;
+                }
+            }
+
+            // Check if there's any available fuel that can be reserved
+            foreach (Thing fuel in pawn.Map.listerThings.ThingsInGroup(ThingRequestGroup.HaulableEver))
+            {
+                if (refuelable.Props.fuelFilter.Allows(fuel) &&
+                    !fuel.IsForbidden(pawn) &&
+                    pawn.CanReserve(fuel) &&
+                    pawn.CanReach(fuel, PathEndMode.ClosestTouch, pawn.NormalMaxDanger()))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        #endregion
     }
 }

@@ -1,6 +1,7 @@
 using RimWorld;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -11,9 +12,14 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Construction_Deconstruct_PawnControl : JobGiver_Common_RemoveBuilding_PawnControl
     {
+        #region Overrides
+
         protected override DesignationDef Designation => DesignationDefOf.Deconstruct;
 
         protected override JobDef RemoveBuildingJob => JobDefOf.Deconstruct;
+
+        // Override debug name for better logging
+        protected override string DebugName => "Deconstruct";
 
         public override float GetPriority(Pawn pawn)
         {
@@ -21,92 +27,93 @@ namespace emitbreaker.PawnControl
             return 5.9f;
         }
 
+        /// <summary>
+        /// Override TryGiveJob to use the common helper method with the specific type
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // This approach properly overrides the base class implementation
-            // and handles the additional building-specific validation
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<JobGiver_Construction_Deconstruct_PawnControl>(
-                pawn,
-                "Construction", // This uses the Construction work type
-                (p, forced) => {
-                    // First call base implementation to update caches
-                    UpdateTargetCache(p.Map);
-
-                    // Get cached targets
-                    int mapId = p.Map.uniqueID;
-                    if (!_targetCache.ContainsKey(mapId) || _targetCache[mapId].Count == 0)
-                        return null;
-
-                    // Use the same bucketing and target selection as base class
-                    var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
-                        p,
-                        _targetCache[mapId],
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DISTANCE_THRESHOLDS
-                    );
-
-                    // Find best target with additional building-specific validation
-                    Thing bestTarget = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, pn) => {
-                            // Basic validation from base class
-                            if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(thing, pn, requiresDesignator: true))
-                                return false;
-
-                            if (thing == null || thing.Destroyed || !thing.Spawned)
-                                return false;
-
-                            if (thing.Map.designationManager.DesignationOn(thing, Designation) == null)
-                                return false;
-
-                            CompExplosive explosive = thing.TryGetComp<CompExplosive>();
-                            if (explosive != null && explosive.wickStarted)
-                                return false;
-
-                            if (thing.IsForbidden(pn) ||
-                                !pn.CanReserve(thing, 1, -1, null, forced) ||
-                                !pn.CanReach(thing, PathEndMode.Touch, Danger.Some))
-                                return false;
-
-                            // Special building checks for deconstruction
-                            Building building = thing.GetInnerIfMinified() as Building;
-                            if (building == null)
-                                return false;
-
-                            if (!building.DeconstructibleBy(pn.Faction))
-                                return false;
-
-                            return true;
-                        },
-                        _reachabilityCache // Pass the entire dictionary, not just mapId entry
-                    );
-
-                    // Create job if target found
-                    if (bestTarget != null)
-                    {
-                        Job job = JobMaker.MakeJob(RemoveBuildingJob, bestTarget);
-                        Utility_DebugManager.LogNormal($"{p.LabelShort} created job to deconstruct {bestTarget.LabelCap}");
-                        return job;
-                    }
-
-                    return null;
-                },
-                debugJobDesc: "deconstruction assignment",
-                skipEmergencyCheck: true);
+            return CreateRemovalJob<JobGiver_Construction_Deconstruct_PawnControl>(pawn);
         }
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Implements the abstract method from JobGiver_Scan_PawnControl to process cached targets
         /// </summary>
-        public static new void ResetCache()
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            JobGiver_Common_RemoveBuilding_PawnControl.ResetCache();
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
+
+            // The deconstruct-specific job execution logic is already defined in a helper method
+            // Reuse it for processing cached targets
+            return ExecuteJobGiverWithDeconstructValidation(pawn, targets, forced);
         }
+
+        // Override ValidateTarget to add deconstruct-specific validation
+        protected override bool ValidateTarget(Thing thing, Pawn pawn)
+        {
+            // First perform base validation
+            if (!base.ValidateTarget(thing, pawn))
+                return false;
+
+            // Then check deconstruct-specific requirements
+            Building building = thing.GetInnerIfMinified() as Building;
+            if (building == null)
+                return false;
+
+            if (!building.DeconstructibleBy(pawn.Faction))
+                return false;
+
+            return true;
+        }
+
+        #endregion
+
+        #region Deconstruct-specific helpers
+
+        /// <summary>
+        /// Deconstruct-specific job execution logic
+        /// </summary>
+        private Job ExecuteJobGiverWithDeconstructValidation(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            if (pawn?.Map == null || targets.Count == 0)
+                return null;
+
+            // Use JobGiverManager for distance bucketing and target selection
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                targets,
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DISTANCE_THRESHOLDS
+            );
+
+            // Find the best target with additional deconstruct-specific validation
+            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (thing, p) => ValidateTarget(thing, p) && p.CanReserve(thing, 1, -1, null, forced),
+                null  // No need for reachability cache as base class already handles caching
+            );
+
+            // Create job if target found
+            if (bestTarget != null)
+            {
+                Job job = JobMaker.MakeJob(RemoveBuildingJob, bestTarget);
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to deconstruct {bestTarget.LabelCap}");
+                return job;
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
-            return "JobGiver_Deconstruct_PawnControl";
+            return "JobGiver_Construction_Deconstruct_PawnControl";
         }
+
+        #endregion
     }
 }

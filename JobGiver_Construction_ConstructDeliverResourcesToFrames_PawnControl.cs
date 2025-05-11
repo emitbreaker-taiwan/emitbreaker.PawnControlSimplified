@@ -2,26 +2,161 @@ using RimWorld;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
 using Verse;
 using Verse.AI;
 
 namespace emitbreaker.PawnControl
-{    
+{
     /// <summary>
     /// JobGiver that assigns construction tasks specifically for delivering resources to construction frames.
     /// Uses the Construction work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl : JobGiver_Common_ConstructDeliverResourcesToFrames_PawnControl
+    public class JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl : JobGiver_Common_ConstructDeliverResources_PawnControl<Frame>
     {
-        protected override string WorkTypeDef => "Construction";
-        
+        #region Overrides
+
+        /// <summary>
+        /// Use Construction work tag
+        /// </summary>
+        protected override string WorkTag => "Construction";
+
+        /// <summary>
+        /// Unique name for debug messages
+        /// </summary>
         protected override string JobDescription => "delivering resources to frames (construction) assignment";
-        
+
+        /// <summary>
+        /// Construction workers should prioritize this even higher than haulers
+        /// </summary>
         public override float GetPriority(Pawn pawn)
         {
-            // Construction workers should prioritize this even higher than haulers
             return 5.8f;
         }
+
+        /// <summary>
+        /// Gets construction frames that need resources
+        /// </summary>
+        protected override List<Frame> GetConstructionTargets(Map map)
+        {
+            if (map == null) return new List<Frame>();
+
+            var result = new List<Frame>();
+
+            // Find all frames needing materials
+            foreach (Frame frame in map.listerThings.ThingsInGroup(ThingRequestGroup.Construction))
+            {
+                if (frame != null && frame.Spawned && !frame.IsForbidden(Faction.OfPlayer))
+                {
+                    result.Add(frame);
+                }
+            }
+
+            // Limit cache size for performance
+            int maxCacheSize = 200;
+            if (result.Count > maxCacheSize)
+            {
+                result = result.Take(maxCacheSize).ToList();
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Override TryGiveJob to use StandardTryGiveJob pattern
+        /// </summary>
+        protected override Job TryGiveJob(Pawn pawn)
+        {
+            return CreateDeliveryJob<JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl>(pawn);
+        }
+
+        /// <summary>
+        /// Processes the cached targets to find valid frames for resource delivery jobs
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
+
+            // Convert generic Things to Frames and filter invalid ones
+            List<Frame> frames = targets
+                .OfType<Frame>()
+                .Where(f => f.Spawned && !f.IsForbidden(pawn.Faction))
+                .ToList();
+
+            if (frames.Count == 0)
+                return null;
+
+            // Try to create a resource delivery job for each frame
+            foreach (Frame frame in frames)
+            {
+                Job job = ResourceDeliverJobFor(pawn, frame);
+                if (job != null)
+                    return job;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Finds nearby construction sites that need the same resources
+        /// </summary>
+        protected override HashSet<Thing> FindNearbyNeeders(
+            Pawn pawn,
+            ThingDef stuff,
+            Frame originalTarget,
+            int resNeeded,
+            int resTotalAvailable,
+            out int neededTotal,
+            out Job jobToMakeNeederAvailable)
+        {
+            neededTotal = resNeeded;
+            jobToMakeNeederAvailable = null;
+            HashSet<Thing> nearbyNeeders = new HashSet<Thing>();
+
+            // Look for other frames nearby
+            foreach (Thing t in GenRadial.RadialDistinctThingsAround(originalTarget.Position, originalTarget.Map, NEARBY_CONSTRUCT_SCAN_RADIUS, true))
+            {
+                if (neededTotal < resTotalAvailable)
+                {
+                    // Check if it's a valid frame needing resources
+                    if (IsNewValidNearbyNeeder(t, nearbyNeeders, originalTarget, pawn))
+                    {
+                        // Get how much material is needed
+                        int materialNeeded = 0;
+                        if (t is Frame frame)
+                        {
+                            materialNeeded = frame.ThingCountNeeded(stuff);
+                        }
+
+                        if (materialNeeded > 0)
+                        {
+                            nearbyNeeders.Add(t);
+                            neededTotal += materialNeeded;
+                        }
+                    }
+                }
+                else
+                {
+                    break; // We have enough needers
+                }
+            }
+
+            return nearbyNeeders;
+        }
+
+        /// <summary>
+        /// Determines if a thing is a valid nearby construction site needing resources
+        /// </summary>
+        protected override bool IsNewValidNearbyNeeder(Thing t, HashSet<Thing> nearbyNeeders, Frame originalTarget, Pawn pawn)
+        {
+            return t is Frame &&
+                   t != originalTarget &&
+                   t.Faction == pawn.Faction &&
+                   !nearbyNeeders.Contains(t) &&
+                   !t.IsForbidden(pawn) &&
+                   pawn.CanReserve(t);
+        }
+
+        #endregion
     }
 }

@@ -12,124 +12,159 @@ namespace emitbreaker.PawnControl
     /// JobGiver that allows non-humanlike pawns to remove roofs in designated areas.
     /// Uses the Construction work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Construction_RemoveRoof_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Construction_RemoveRoof_PawnControl : JobGiver_Scan_PawnControl
     {
-        // Cache for cells marked for roof removal - directly using IntVec3 like BuildRoof
-        private static readonly Dictionary<int, List<IntVec3>> _roofRemovalCellsCache = new Dictionary<int, List<IntVec3>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 250; // Update every ~4 seconds
+        #region Overrides
+
+        protected override string WorkTag => "Construction";
+        protected override int CacheUpdateInterval => 250; // Update every ~4 seconds
+        protected override string DebugName => "roof removal assignment";
 
         // Distance thresholds for bucketing
         private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
 
-        public override float GetPriority(Pawn pawn)
+        protected override bool ShouldExecuteNow(int mapId)
         {
-            // Roof removal is slightly more important than building
-            return 5.6f;
+            // Quick check if there are roof removal areas on the map
+            var map = Find.Maps.FirstOrDefault(m => m.uniqueID == mapId);
+            return map != null && map.areaManager.NoRoof != null && map.areaManager.NoRoof.TrueCount > 0;
+        }
+
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // This job works with IntVec3 cells rather than Things, so we need to handle it differently
+            // We'll return an empty list and handle the actual target collection in TryGiveJob
+            return Enumerable.Empty<Thing>();
         }
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Quick early exit if there are no roof removal areas on the map
-            if (pawn?.Map == null || pawn.Map.areaManager.NoRoof == null || pawn.Map.areaManager.NoRoof.TrueCount == 0)
-                return null;
-
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
-                return null;
-
-            if (!Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Construction.ToString()))
-                return null;
-
-            // Check work type
-            if (pawn.WorkTypeIsDisabled(WorkTypeDefOf.Construction))
-                return null;
-
-            // Check for emergency states that would prevent this job
-            if (pawn.Drafted || pawn.mindState.anyCloseHostilesRecently || pawn.InMentalState)
-                return null;
-
-            // Only player faction pawns can handle roof designation tasks
-            if (pawn.Faction != Faction.OfPlayer)
-                return null;
-
-            // Update cache
-            UpdateRoofRemovalCellsCache(pawn.Map);
-
-            // Find and create job for removing roofs
-            Job job = TryCreateRoofRemovalJob(pawn, false);
-
-            if (job != null)
-            {
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to remove roof");
-            }
-
-            return job;
-        }
-
-        /// <summary>
-        /// Updates the cache of cells marked for roof removal
-        /// </summary>
-        private void UpdateRoofRemovalCellsCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_roofRemovalCellsCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_roofRemovalCellsCache.ContainsKey(mapId))
-                    _roofRemovalCellsCache[mapId].Clear();
-                else
-                    _roofRemovalCellsCache[mapId] = new List<IntVec3>();
-
-                // Find all cells marked for roof removal
-                if (map.areaManager.NoRoof != null)
-                {
-                    // Create list of all active no-roof cells
-                    foreach (IntVec3 cell in map.areaManager.NoRoof.ActiveCells)
+            // Use the StandardTryGiveJob pattern directly
+            return Utility_JobGiverManager.StandardTryGiveJob<Thing>(
+                pawn,
+                WorkTag,  // Use the WorkTag property from the base class
+                (p, forced) => {
+                    // Get targets from the cache
+                    List<Thing> targets = GetTargets(p.Map).ToList();
+                    if (targets.Count == 0)
                     {
-                        // Skip if not roofed - only remove existing roofs
-                        if (!cell.Roofed(map))
-                            continue;
+                        // Direct approach for roof removal since targets are cells, not things
+                        List<IntVec3> cells = GetRoofRemovalCells(p.Map);
+                        if (cells.Count == 0) return null;
 
-                        // Add to cache
-                        _roofRemovalCellsCache[mapId].Add(cell);
+                        // Find the best cell for roof removal
+                        IntVec3 bestCell = IntVec3.Invalid;
+                        float bestDistSq = float.MaxValue;
+
+                        foreach (IntVec3 cell in cells)
+                        {
+                            if (!ValidateRoofRemovalCell(cell, p))
+                                continue;
+
+                            float distSq = (cell - p.Position).LengthHorizontalSquared;
+                            if (distSq < bestDistSq)
+                            {
+                                bestDistSq = distSq;
+                                bestCell = cell;
+                            }
+                        }
+
+                        if (bestCell.IsValid)
+                        {
+                            // Create the job
+                            Job job = JobMaker.MakeJob(JobDefOf.RemoveRoof);
+                            job.targetA = bestCell;
+                            job.targetB = bestCell;
+                            Utility_DebugManager.LogNormal($"{p.LabelShort} created job to remove roof at {bestCell}");
+                            return job;
+                        }
                     }
-                }
 
-                // Limit cache size for performance
-                int maxCacheSize = 500;
-                if (_roofRemovalCellsCache[mapId].Count > maxCacheSize)
-                {
-                    _roofRemovalCellsCache[mapId] = _roofRemovalCellsCache[mapId].Take(maxCacheSize).ToList();
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
+                    return null;
+                },
+                debugJobDesc: DebugName);
         }
 
         /// <summary>
-        /// Creates a job for removing roofs in the nearest valid location
+        /// Implements the abstract method from JobGiver_Scan_PawnControl to process cached targets
         /// </summary>
-        private Job TryCreateRoofRemovalJob(Pawn pawn, bool forced)
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_roofRemovalCellsCache.ContainsKey(mapId) || _roofRemovalCellsCache[mapId].Count == 0)
+            // This job works with cells, not Things, so we need to implement special handling
+            if (pawn?.Map == null)
                 return null;
 
-            // Create distance-based buckets manually since we can't use the generic utilities with IntVec3
+            // Get cells marked for roof removal
+            List<IntVec3> cells = GetRoofRemovalCells(pawn.Map);
+            if (cells.Count == 0)
+                return null;
+
+            // Create distance-based buckets for efficient processing
+            List<IntVec3>[] buckets = CreateDistanceBuckets(cells, pawn);
+
+            // Find the best cell for roof removal
+            IntVec3 bestCell = FindBestRoofRemovalCell(buckets, pawn);
+
+            // Create job if a valid cell was found
+            if (bestCell.IsValid)
+            {
+                // Create the job
+                Job job = JobMaker.MakeJob(JobDefOf.RemoveRoof);
+                job.targetA = bestCell;
+                job.targetB = bestCell;
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to remove roof at {bestCell}");
+                return job;
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        #region Cell-selection helpers
+
+        /// <summary>
+        /// Gets cells marked for roof removal that actually have roofs
+        /// </summary>
+        private List<IntVec3> GetRoofRemovalCells(Map map)
+        {
+            if (map == null || map.areaManager.NoRoof == null)
+                return new List<IntVec3>();
+
+            var cells = new List<IntVec3>();
+
+            // Find all cells marked for roof removal that actually have roofs
+            foreach (IntVec3 cell in map.areaManager.NoRoof.ActiveCells)
+            {
+                // Skip if not roofed - only remove existing roofs
+                if (!cell.Roofed(map))
+                    continue;
+
+                cells.Add(cell);
+            }
+
+            // Limit cell count for performance
+            int maxCellCount = 500;
+            if (cells.Count > maxCellCount)
+            {
+                cells = cells.Take(maxCellCount).ToList();
+            }
+
+            return cells;
+        }
+
+        /// <summary>
+        /// Creates distance-based buckets for cells
+        /// </summary>
+        private List<IntVec3>[] CreateDistanceBuckets(List<IntVec3> cells, Pawn pawn)
+        {
+            // Create buckets
             List<IntVec3>[] buckets = new List<IntVec3>[DISTANCE_THRESHOLDS.Length + 1];
             for (int i = 0; i < buckets.Length; i++)
                 buckets[i] = new List<IntVec3>();
 
             // Sort cells into buckets by distance
-            foreach (IntVec3 cell in _roofRemovalCellsCache[mapId])
+            foreach (IntVec3 cell in cells)
             {
                 float distSq = (cell - pawn.Position).LengthHorizontalSquared;
                 int bucketIndex = buckets.Length - 1;
@@ -146,6 +181,14 @@ namespace emitbreaker.PawnControl
                 buckets[bucketIndex].Add(cell);
             }
 
+            return buckets;
+        }
+
+        /// <summary>
+        /// Finds the best cell for roof removal from distance-based buckets
+        /// </summary>
+        private IntVec3 FindBestRoofRemovalCell(List<IntVec3>[] buckets, Pawn pawn)
+        {
             // Process each bucket in order
             for (int i = 0; i < buckets.Length; i++)
             {
@@ -163,26 +206,30 @@ namespace emitbreaker.PawnControl
 
                 foreach (IntVec3 cell in buckets[i])
                 {
-                    // Filter out invalid cells immediately
-                    if (!pawn.Map.areaManager.NoRoof[cell] || !cell.Roofed(pawn.Map))
-                        continue;
-
-                    // Skip if forbidden or unreachable
-                    if (cell.IsForbidden(pawn) ||
-                        !pawn.CanReserve(cell) ||
-                        !pawn.CanReach(cell, PathEndMode.Touch, pawn.NormalMaxDanger()))
-                        continue;
-
-                    // Create the remove roof job
-                    Job job = JobMaker.MakeJob(JobDefOf.RemoveRoof);
-                    job.targetA = cell;
-                    job.targetB = cell;
-                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to remove roof at {cell}");
-                    return job;
+                    if (ValidateRoofRemovalCell(cell, pawn))
+                        return cell;
                 }
             }
 
-            return null;
+            return IntVec3.Invalid;
+        }
+
+        /// <summary>
+        /// Validates if a cell is appropriate for roof removal
+        /// </summary>
+        private bool ValidateRoofRemovalCell(IntVec3 cell, Pawn pawn)
+        {
+            // Filter out invalid cells
+            if (!pawn.Map.areaManager.NoRoof[cell] || !cell.Roofed(pawn.Map))
+                return false;
+
+            // Skip if forbidden or unreachable
+            if (cell.IsForbidden(pawn) ||
+                !pawn.CanReserve(cell) ||
+                !pawn.CanReach(cell, PathEndMode.Touch, pawn.NormalMaxDanger()))
+                return false;
+
+            return true;
         }
 
         /// <summary>
@@ -213,18 +260,15 @@ namespace emitbreaker.PawnControl
             return -Mathf.Min(adjacentRoofedCellsCount, 3);
         }
 
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetCache()
-        {
-            _roofRemovalCellsCache.Clear();
-            _lastCacheUpdateTick = -999;
-        }
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
             return "JobGiver_RemoveRoof_PawnControl";
         }
+
+        #endregion
     }
 }

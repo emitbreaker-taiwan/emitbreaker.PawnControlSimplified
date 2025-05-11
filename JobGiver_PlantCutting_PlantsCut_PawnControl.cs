@@ -10,12 +10,7 @@ namespace emitbreaker.PawnControl
     /// Plant‐cutting JobGiver with minimal overrides:
     /// uses the standard TryGiveJob wrapper, a cache, and nearest‐plant selection.
     /// </summary>
-    /// <summary>
-    /// Plant‐cutting JobGiver with minimal overrides:
-    /// - inherits unified priority logic from base
-    /// - only implements GetTargets & ExecuteJobGiverInternal
-    /// </summary>
-    public class JobGiver_PlantCutting_PlantsCut_PawnControl : JobGiver_PawnControl
+    public class JobGiver_PlantCutting_PlantsCut_PawnControl : JobGiver_Scan_PawnControl
     {
         #region Overrides
 
@@ -27,8 +22,44 @@ namespace emitbreaker.PawnControl
             return GetPlantsNeedingCutting(map).Cast<Thing>();
         }
 
-        protected override Job ExecuteJobGiverInternal(Pawn pawn, List<Thing> targets)
+        protected override Job TryGiveJob(Pawn pawn)
         {
+            // Use the StandardTryGiveJob pattern directly
+            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+                pawn,
+                "PlantCutting",  // Make sure this matches the name in the WorkTypeDef
+                (p, forced) => {
+                    // Get plants that need cutting
+                    List<Thing> targets = GetTargets(p.Map).ToList();
+                    if (targets.Count == 0) return null;
+
+                    // Find the best plant to cut (nearest one that passes validation)
+                    Plant best = null;
+                    float bestDistSq = float.MaxValue;
+
+                    foreach (var plant in targets.OfType<Plant>())
+                    {
+                        if (!ValidatePlantTarget(plant, p))
+                            continue;
+
+                        float distSq = (plant.Position - p.Position).LengthHorizontalSquared;
+                        if (distSq < bestDistSq)
+                        {
+                            bestDistSq = distSq;
+                            best = plant;
+                        }
+                    }
+
+                    return best != null
+                        ? JobMaker.MakeJob(JobDefOf.CutPlant, best)
+                        : null;
+                },
+                debugJobDesc: "plant cutting assignment");
+        }
+
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // Find the best plant to cut (nearest one that passes validation)
             Plant best = null;
             float bestDistSq = float.MaxValue;
 
@@ -115,6 +146,15 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return pawn.CanReserve(plant, 1, -1);
+        }
+
+        #endregion
+
+        #region Utility
+
+        public override string ToString()
+        {
+            return "JobGiver_PlantCutting_PlantsCut_PawnControl";
         }
 
         #endregion

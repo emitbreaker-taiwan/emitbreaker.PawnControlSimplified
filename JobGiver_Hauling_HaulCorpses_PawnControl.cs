@@ -1,4 +1,5 @@
 ﻿using RimWorld;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -7,263 +8,182 @@ using Verse.AI;
 namespace emitbreaker.PawnControl
 {
     /// <summary>
-    /// JobGiver that assigns tasks to haul corpses to graves, stockpiles, etc.
+    /// JobGiver that assigns corpse hauling tasks to eligible pawns.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_HaulCorpses_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_HaulCorpses_PawnControl : JobGiver_Hauling_PawnControl
     {
-        // Cache for corpses that need hauling
-        private static readonly Dictionary<int, List<Corpse>> _haulableCorpsesCache = new Dictionary<int, List<Corpse>>();
-        private static readonly Dictionary<int, Dictionary<Corpse, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Corpse, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 120; // Update every 2 seconds
+        #region Configuration
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "HaulCorpses";
 
-        public override float GetPriority(Pawn pawn)
-        {
-            // Hauling corpses is moderately important
-            return 5.6f;
-        }
+        /// <summary>
+        /// Update cache every 4 seconds
+        /// </summary>
+        protected override int CacheUpdateInterval => 240;
+
+        /// <summary>
+        /// Smaller distance thresholds for corpses - prioritize closer ones
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 100f, 400f, 1600f }; // 10, 20, 40 tiles
+
+        #endregion
+
+        #region Core flow
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_HaulCorpses_PawnControl>(
                 pawn,
-                "Hauling",
-                (p, forced) => {
-                    // Update plant cache
-                    UpdateHaulableCorpsesCache(p.Map);
-
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateHaulCorpseJob(p);
-                },
-                debugJobDesc: "haul corpse assignment");
-        }
-
-        /// <summary>
-        /// Updates the cache of corpses that need hauling
-        /// </summary>
-        private void UpdateHaulableCorpsesCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_haulableCorpsesCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_haulableCorpsesCache.ContainsKey(mapId))
-                    _haulableCorpsesCache[mapId].Clear();
-                else
-                    _haulableCorpsesCache[mapId] = new List<Corpse>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Corpse, bool>();
-
-                // Find all haulable corpses on the map
-                foreach (Thing thing in map.listerThings.ThingsInGroup(ThingRequestGroup.Corpse))
+                WorkTag,
+                (p, forced) =>
                 {
-                    if (!(thing is Corpse corpse) || !corpse.Spawned || HaulAIUtility.IsInHaulableInventory(corpse))
-                        continue;
+                    if (p?.Map == null)
+                        return null;
 
-                    try
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Use the shared cache updating logic from base class
+                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
+                        || now - last >= CacheUpdateInterval)
                     {
-                        // CRITICAL FIX: Check forbiddenness safely without relying on a specific pawn
-                        // This avoids null reference exceptions in ForbidUtility
-                        bool isForbidden = false;
-                        try
-                        {
-                            isForbidden = corpse.IsForbidden(Faction.OfPlayer);
-                        }
-                        catch
-                        {
-                            // If IsForbidden throws, assume it's not forbidden
-                            isForbidden = false;
-                            Utility_DebugManager.LogWarning($"Error checking if corpse {corpse.InnerPawn?.LabelShort ?? "unknown"} is forbidden. Assuming not forbidden.");
-                        }
-
-                        if (isForbidden)
-                            continue;
-
-                        // CRITICAL FIX: Use a safe check for haulability that doesn't require a specific pawn
-                        bool canBeHauled = false;
-                        try
-                        {
-                            // Check if the corpse meets basic hauling requirements
-                            canBeHauled = corpse.def.EverHaulable &&
-                                          corpse.stackCount > 0 &&
-                                          corpse.GetInnerIfMinified() == corpse;
-                        }
-                        catch (System.Exception ex)
-                        {
-                            Utility_DebugManager.LogWarning($"Error checking if corpse {corpse.InnerPawn?.LabelShort ?? "unknown"} can be hauled: {ex.Message}");
-                            canBeHauled = false;
-                        }
-
-                        if (!canBeHauled)
-                            continue;
-
-                        // For a real corpse, check if it's already being hauled by an animal
-                        Pawn firstReserver = map.physicalInteractionReservationManager.FirstReserverOf(corpse);
-                        if (firstReserver != null &&
-                            firstReserver.RaceProps.Animal &&
-                            firstReserver.Faction != Faction.OfPlayer)
-                        {
-                            continue;
-                        }
-
-                        // If we got this far, add the corpse to the haulable cache
-                        _haulableCorpsesCache[mapId].Add(corpse);
+                        _lastHaulingCacheUpdate[mapId] = now;
+                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
                     }
-                    catch (System.Exception ex)
+
+                    // Get corpses from shared cache
+                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
+                        return null;
+
+                    // Filter only corpses from the shared cache
+                    var corpses = haulables.OfType<Corpse>().ToList();
+                    if (corpses.Count == 0)
+                        return null;
+
+                    // Use the bucketing system to find the closest valid corpse
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        corpses,
+                        (corpse) => (corpse.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
+
+                    // Create a custom validator that uses our Thing-based cache but works with Corpses
+                    Func<Corpse, Pawn, bool> corpseValidator = (corpse, worker) => {
+                        // Use our standard validation but cast the corpse to Thing for reachability cache
+                        return IsValidCorpseTarget(corpse, worker);
+                    };
+
+                    // Use the regular Thing-based FindFirstValidTargetInBuckets
+                    Corpse targetCorpse = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Corpse>(
+                        buckets,
+                        p,
+                        corpseValidator,
+                        null); // Don't use reachability cache to avoid type mismatch
+
+                    // Create and return job if we found a valid target
+                    if (targetCorpse != null)
                     {
-                        // Catch any other exceptions to prevent crashes
-                        Utility_DebugManager.LogError($"Error processing corpse for hauling: {ex}");
+                        return HaulAIUtility.HaulToStorageJob(p, targetCorpse);
                     }
-                }
 
-                if (_haulableCorpsesCache[mapId].Count > 0)
-                    Utility_DebugManager.LogNormal($"Found {_haulableCorpsesCache[mapId].Count} haulable corpses on map {mapId}");
-
-                _lastCacheUpdateTick = currentTick;
-            }
+                    return null;
+                },
+                debugJobDesc: DebugName);
         }
 
-        /// <summary>
-        /// Create a job for hauling a corpse using manager-driven bucket processing
-        /// </summary>
-        private Job TryCreateHaulCorpseJob(Pawn pawn)
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_haulableCorpsesCache.ContainsKey(mapId) || _haulableCorpsesCache[mapId].Count == 0)
+            // Filter only corpses from the cached targets
+            var corpses = targets.OfType<Corpse>().ToList();
+            if (corpses.Count == 0)
                 return null;
 
-            // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
+            // Use the bucketing system to find the closest valid corpse
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
-                _haulableCorpsesCache[mapId],
+                corpses,
                 (corpse) => (corpse.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
+                DistanceThresholds);
 
-            // Find the best corpse to haul
-            Corpse targetCorpse = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
+            // Create a custom validator that uses our Thing-based cache but works with Corpses
+            Func<Corpse, Pawn, bool> corpseValidator = (corpse, worker) => {
+                return IsValidCorpseTarget(corpse, worker);
+            };
+
+            // Use the regular Thing-based FindFirstValidTargetInBuckets
+            Corpse targetCorpse = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Corpse>(
                 buckets,
                 pawn,
-                (corpse, p) => {
-                    // Skip if no longer valid
-                    if (corpse == null || corpse.Destroyed || !corpse.Spawned || HaulAIUtility.IsInHaulableInventory(corpse))
-                        return false;
+                corpseValidator,
+                null); // Don't use reachability cache to avoid type mismatch
 
-                    // Skip if no longer haulable
-                    if (!HaulAIUtility.PawnCanAutomaticallyHaul(p, corpse, false) ||
-                        corpse.IsForbidden(p) ||
-                        !p.CanReserve(corpse))
-                        return false;
-
-                    // Skip if already being hauled by an animal
-                    Pawn firstReserver = p.Map.physicalInteractionReservationManager.FirstReserverOf(corpse);
-                    if (firstReserver != null && firstReserver.RaceProps.Animal && firstReserver.Faction != Faction.OfPlayer)
-                        return false;
-
-                    // Check if there's a storage destination for this corpse
-                    IntVec3 storeCell;
-                    if (!StoreUtility.TryFindBestBetterStoreCellFor(corpse, p, p.Map, StoragePriority.Unstored,
-                                                                   p.Faction, out storeCell))
-                        return false;
-
-                    // Check if pawn can reach both the corpse and the storage location
-                    if (!p.CanReserve(storeCell) ||
-                        !p.CanReach(corpse, PathEndMode.ClosestTouch, p.NormalMaxDanger()) ||
-                        !p.CanReach(storeCell, PathEndMode.OnCell, p.NormalMaxDanger()))
-                        return false;
-
-                    return true;
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
+            // Create and return job if we found a valid target
             if (targetCorpse != null)
             {
-                // Find storage cell for this corpse
-                IntVec3 storeCell;
-                bool foundCell = StoreUtility.TryFindBestBetterStoreCellFor(targetCorpse, pawn, pawn.Map,
-                                                                           StoragePriority.Unstored,
-                                                                           pawn.Faction, out storeCell);
-
-                if (foundCell)
-                {
-                    Job job = null;
-
-                    // Check if the store location is a grave or other container
-                    Building_Grave grave = null;
-                    IHaulDestination container = null;
-
-                    SlotGroup slotGroup = storeCell.GetSlotGroup(pawn.Map);
-                    if (slotGroup != null)
-                    {
-                        container = slotGroup.parent as IHaulDestination;
-                    }
-
-                    Thing edifice = storeCell.GetEdifice(pawn.Map);
-                    if (edifice is Building_Grave buildingGrave)
-                    {
-                        grave = buildingGrave;
-                        container = grave;
-                    }
-
-                    // Create appropriate job based on destination type
-                    if (grave != null)
-                    {
-                        job = JobMaker.MakeJob(JobDefOf.HaulToContainer, targetCorpse, grave);
-                        job.count = 1;
-                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to bury {targetCorpse.InnerPawn.LabelShort}");
-                    }
-                    else if (container != null && container is Thing containerThing)
-                    {
-                        job = JobMaker.MakeJob(JobDefOf.HaulToContainer, targetCorpse, containerThing);
-                        job.count = 1;
-                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to haul {targetCorpse.InnerPawn.LabelShort} to container");
-                    }
-                    else
-                    {
-                        job = HaulAIUtility.HaulToCellStorageJob(pawn, targetCorpse, storeCell, false);
-
-                        if (job != null)
-                        {
-                            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to haul {targetCorpse.InnerPawn.LabelShort} to stockpile");
-                        }
-                    }
-
-                    return job;
-                }
+                return HaulAIUtility.HaulToStorageJob(pawn, targetCorpse);
             }
 
             return null;
         }
 
+        #endregion
+
+        #region Target selection
+
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Gets all corpses that need hauling on the map
         /// </summary>
-        public static void ResetCache()
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            Utility_CacheManager.ResetJobGiverCache(_haulableCorpsesCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            if (map?.listerHaulables != null)
+            {
+                // Return all corpses that need hauling
+                foreach (Thing thing in map.listerHaulables.ThingsPotentiallyNeedingHauling())
+                {
+                    if (thing is Corpse corpse && corpse.Spawned)
+                    {
+                        yield return corpse;
+                    }
+                }
+            }
         }
 
-        public override string ToString()
+        /// <summary>
+        /// Determines if a corpse is valid for hauling
+        /// </summary>
+        private bool IsValidCorpseTarget(Corpse corpse, Pawn pawn)
         {
-            return "JobGiver_HaulCorpses_PawnControl";
+            // Skip invalid corpses
+            if (corpse == null || corpse.Destroyed || !corpse.Spawned)
+                return false;
+
+            // Skip if corpse is forbidden or unreachable
+            if (corpse.IsForbidden(pawn) || !pawn.CanReserveAndReach(corpse, PathEndMode.ClosestTouch, pawn.NormalMaxDanger()))
+                return false;
+
+            // Check if an animal is reserving the corpse (from original WorkGiver_HaulCorpses)
+            Pawn reservingPawn = pawn.Map.physicalInteractionReservationManager.FirstReserverOf(corpse);
+            if (reservingPawn != null && reservingPawn.RaceProps.Animal && reservingPawn.Faction != Faction.OfPlayer)
+                return false;
+
+            // Check if there's a storage location for this corpse
+            // Using the correct method StoreUtility.TryFindBestBetterStoreCellFor
+            if (!StoreUtility.TryFindBestBetterStoreCellFor(corpse, pawn, pawn.Map,
+                StoragePriority.Unstored, pawn.Faction, out _, true))
+            {
+                return false;
+            }
+
+            return true;
         }
+
+        #endregion
     }
 }

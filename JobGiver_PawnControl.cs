@@ -1,13 +1,13 @@
-﻿using RimWorld;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Verse;
 using Verse.AI;
 
 namespace emitbreaker.PawnControl
 {
     /// <summary>
-    /// Simplified base that routes all TryGiveJob calls through StandardTryGiveJob,
-    /// with cache throttling and a unified priority lookup.
+    /// Provides a common base structure for all PawnControl JobGivers.
+    /// This abstract class defines the shared interface and functionality
+    /// while allowing derived classes to implement their own caching systems.
     /// </summary>
     public abstract class JobGiver_PawnControl : ThinkNode_JobGiver
     {
@@ -30,56 +30,56 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Caching
-
-        private readonly Dictionary<int, int> _lastCacheTick = new Dictionary<int, int>();
-        private readonly Dictionary<int, List<Thing>> _cachedTargets = new Dictionary<int, List<Thing>>();
-
-        #endregion
-
         #region Core flow
 
+        /// <summary>
+        /// Standard implementation of TryGiveJob that delegates to the derived class's
+        /// job creation logic.
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<JobGiver_PawnControl>(
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_PawnControl>(
                 pawn,
                 WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    if (!_lastCacheTick.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastCacheTick[mapId] = now;
-                        _cachedTargets[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    var list = _cachedTargets[mapId];
-                    if (list == null || list.Count == 0)
-                        return null;
-
-                    return ExecuteJobGiverInternal(p, list);
-                },
+                (p, forced) => CreateJobFor(p, forced),
                 debugJobDesc: DebugName,
                 skipEmergencyCheck: false,
                 jobGiverType: GetType()
             );
         }
 
+        /// <summary>
+        /// Creates a job for the given pawn. This is where derived classes should implement
+        /// their specific job creation logic.
+        /// </summary>
+        /// <param name="pawn">The pawn to create a job for</param>
+        /// <param name="forced">Whether the job was forced</param>
+        /// <returns>A job if one could be created, null otherwise</returns>
+        protected abstract Job CreateJobFor(Pawn pawn, bool forced);
+
+        /// <summary>
+        /// Determines if the job giver should execute on this tick.
+        /// By default, executes every 5 ticks.
+        /// </summary>
         protected virtual bool ShouldExecuteNow(int mapId)
         {
             return Find.TickManager.TicksGame % 5 == 0;
         }
 
         #endregion
+
+        protected virtual bool ShouldSkip(Pawn pawn)
+        {
+            // Skip if there are no pawns with UnloadEverything flag on the map (quick optimization)
+            if (pawn?.Map == null)
+                return true;
+            return false;
+        }
 
         #region Priority
 
@@ -91,7 +91,10 @@ namespace emitbreaker.PawnControl
             return GetBasePriority(WorkTag);
         }
 
-        private static float GetBasePriority(string workTag)
+        /// <summary>
+        /// Standard priority lookup table based on work type
+        /// </summary>
+        protected static float GetBasePriority(string workTag)
         {
             switch (workTag)
             {
@@ -133,10 +136,12 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Hooks for derived classes
+        #region Debug support
 
-        protected abstract IEnumerable<Thing> GetTargets(Map map);
-        protected abstract Job ExecuteJobGiverInternal(Pawn pawn, List<Thing> targets);
+        public override string ToString()
+        {
+            return DebugName;
+        }
 
         #endregion
     }

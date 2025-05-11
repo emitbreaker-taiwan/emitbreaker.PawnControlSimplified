@@ -12,81 +12,128 @@ namespace emitbreaker.PawnControl
     /// Enhanced JobGiver that assigns switch flicking jobs to eligible pawns.
     /// Requires the BasicWorker work tag to be enabled.
     /// </summary>
-    public class JobGiver_BasicWorker_Flick_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_BasicWorker_Flick_PawnControl : JobGiver_BasicWorker_PawnControl
     {
-        // Cache system to improve performance with large numbers of pawns
-        private static readonly Dictionary<int, List<Thing>> _flickableCache = new Dictionary<int, List<Thing>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 240; // Update every ~4 seconds for performance
+        #region Configuration
 
-        // Local optimization parameters
-        private const int MAX_CACHE_ENTRIES = 100;  // Cap cache size to avoid memory issues
+        /// <summary>
+        /// Use Hauling work tag
+        /// </summary>
+        protected override string WorkTag => "Hauling";
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 400f, 1600f, 3600f }; // 20, 40, 60 tiles
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "Flick";
 
-        public override float GetPriority(Pawn pawn)
-        {
-            // Medium priority - not as urgent as firefighting but more important than plant cutting
-            return 6.2f;
-        }
+        /// <summary>
+        /// The designation this job giver targets
+        /// </summary>
+        protected override DesignationDef TargetDesignation => DesignationDefOf.Flick;
+
+        /// <summary>
+        /// The job to create
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Flick;
+
+        #endregion
+
+        #region Core flow
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // IMPORTANT: Only player pawns and slaves owned by player should flick switches
-            if (pawn.Faction != Faction.OfPlayer &&
-                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
-                return null;
-
-            // Quick skip check - if no flick designations on map
-            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.Flick))
+            // Quick early exit if there are no relevant designations
+            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation))
             {
                 return null;
             }
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_BasicWorker_Flick_PawnControl>(
                 pawn,
-                "BasicWorker",
-                (p, forced) => {
-                    // Update plant cache
+                WorkTag,
+                (p, forced) =>
+                {
+                    int mapId = p.Map.uniqueID;
+
+                    // Get the current last update time, or default if not set
+                    if (!_lastDesignationCacheUpdate.TryGetValue(mapId, out int lastUpdateTick))
+                    {
+                        lastUpdateTick = -999;
+                    }
+
+                    // Update cache of items with designations
                     Utility_CacheManager.UpdateDesignationBasedCache(
                         p.Map,
-                        ref _lastCacheUpdateTick,
-                        CACHE_UPDATE_INTERVAL,
-                        _flickableCache,
+                        ref lastUpdateTick,
+                        CacheUpdateInterval,
+                        _designationCache,
                         _reachabilityCache,
-                        DesignationDefOf.Flick,
+                        TargetDesignation,
                         (des) => des?.target.Thing,
-                        MAX_CACHE_ENTRIES);
+                        100);
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return Utility_JobGiverManagerOld.TryCreateDesignatedJob(
-                            pawn,
-                            _flickableCache,
-                            _reachabilityCache,
-                            "BasicWorker",
-                            DesignationDefOf.Flick,
-                            JobDefOf.Flick,
-                            reachabilityFunc: (thing, q) => !thing.IsForbidden(q) &&
-                                                           q.CanReserveAndReach(thing, PathEndMode.Touch, Danger.Deadly),
-                            distanceThresholds: DISTANCE_THRESHOLDS);
-                            },
-                debugJobDesc: "flick assignment");
+                    // Store the updated tick back in the dictionary
+                    _lastDesignationCacheUpdate[mapId] = lastUpdateTick;
+
+                    // Find a valid target and create a job
+                    var targets = _designationCache.TryGetValue(mapId, out var list) ? list : null;
+                    if (targets == null || targets.Count == 0)
+                        return null;
+
+                    // Use the bucketing system to find the closest valid target
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        targets,
+                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
+
+                    // Find the best target using the provided validation function 
+                    Thing target = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, worker) => IsValidTarget(thing, worker),
+                        _reachabilityCache);
+
+                    // Create and return job if we found a valid target
+                    if (target != null)
+                    {
+                        return CreateJobForTarget(target);
+                    }
+
+                    return null;
+                },
+                debugJobDesc: DebugName);
         }
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Process the cached targets and create a job for the pawn
         /// </summary>
-        public static void ResetCache()
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            Utility_CacheManager.ResetJobGiverCache(_flickableCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            // Skip if no targets
+            if (targets.Count == 0)
+                return null;
+
+            // Use bucketing system to find closest valid target
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                targets,
+                thing => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find the first valid target
+            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets, pawn, IsValidTarget, _reachabilityCache);
+
+            // Create a job for the target if found
+            if (bestTarget != null)
+            {
+                return JobMaker.MakeJob(WorkJobDef, bestTarget);
+            }
+
+            return null;
         }
 
-        public override string ToString()
-        {
-            return "JobGiver_Flick_PawnControl";
-        }
+        #endregion
     }
 }

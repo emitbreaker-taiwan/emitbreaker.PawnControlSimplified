@@ -896,6 +896,28 @@ namespace emitbreaker.PawnControl
             }
 
             #endregion
+
+            // Whenever the player drags the slider in the Work tab...
+            [HarmonyPatch(typeof(Pawn_WorkSettings), nameof(Pawn_WorkSettings.SetPriority))]
+            public static class Patch_Pawn_WorkSettings_SetPriority
+            {
+                // Grab the private 'pawn' field
+                private static readonly FieldInfo PawnField =
+                    AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+
+                static void Postfix(Pawn_WorkSettings __instance)
+                {
+                    var pawn = PawnField.GetValue(__instance) as Pawn;
+                    if (pawn == null) return;
+
+                    if (Utility_CacheManager.GetModExtension(pawn.def) == null) return;
+
+                    if (!Utility_TagManager.HasTagSet(pawn.def)) return;
+
+                    // Rebuild that pawn’s WorkGiversInOrder lists
+                    Utility_WorkSettingsManager.EnsureWorkGiversPopulated(pawn);
+                }
+            }
         }
 
         public static class Patch_Iteration3_DrafterInjection

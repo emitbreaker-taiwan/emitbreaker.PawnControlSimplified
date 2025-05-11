@@ -128,59 +128,38 @@ namespace emitbreaker.PawnControl
 
         public static bool WorkTypeSettingEnabled(Pawn pawn, WorkTypeDef workTypeDef)
         {
-            if (pawn == null || workTypeDef == null)
-            {
-                return false; // Invalid input
-            }
+            if (pawn == null || workTypeDef == null) return false;
 
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
+            if (modExtension == null) return false; // No mod extension found
+
+            Utility_TagManager.ClearCacheForRace(pawn.def);
+
+            // Race‐tags check unchanged…
+            if (!WorkTypeEnabled(pawn.def, workTypeDef)) return false;
+
+            // If the Pawn_WorkSettings hasn’t *ever* been enabled, do it now
+            if (pawn.workSettings == null)
             {
-                return false; // No mod extension found
+                pawn.workSettings = new Pawn_WorkSettings(pawn);
+            }
+            if (!pawn.workSettings.EverWork)
+            {
+                pawn.workSettings.EnableAndInitialize();
             }
 
-            Utility_DebugManager.LogNormal($"Issued WorkTypeDef was: {workTypeDef.defName}.");
-
-            // Check if the pawn is allowed to do the work type
-            if (!WorkTypeEnabled(pawn.def, workTypeDef))
-            {
-                return false;
-            }
-
-            // IMPORTANT: Get the most up-to-date work settings value
-            return pawn.workSettings?.WorkIsActive(workTypeDef) ?? false;
+            // Now this will reflect the checkbox/slider in the UI
+            bool active = pawn.workSettings.WorkIsActive(workTypeDef);
+            if (!active && Prefs.DevMode)
+                Utility_DebugManager.LogWarning($"[{pawn.LabelShort}] {workTypeDef.defName} is disabled in UI");
+            return active;
         }
+
 
         public static bool WorkTypeSettingEnabled(Pawn pawn, string workTypeName)
         {
-            if (pawn == null || string.IsNullOrEmpty(workTypeName))
-            {
-                return false; // Invalid input
-            }
-
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
-            {
-                return false; // No mod extension found
-            }
-
-            Utility_DebugManager.LogNormal($"Issued work type name string was: {workTypeName}.");
-
-            // FIX: Use the actual parameter instead of the literal string "workTypeDef"
-            WorkTypeDef targetDef = Utility_WorkTypeManager.Named(workTypeName);
-            if (targetDef == null)
-            {
-                return false; // Work type not found
-            }
-
-            // Check if the pawn is allowed to do the work type
-            if (!WorkTypeEnabled(pawn.def, targetDef))
-            {
-                return false;
-            }
-
-            // IMPORTANT: Get the most up-to-date work settings value
-            return pawn.workSettings?.WorkIsActive(targetDef) ?? false;
+            var workTypeDef = Utility_WorkTypeManager.Named(workTypeName);
+            return WorkTypeSettingEnabled(pawn, workTypeDef);
         }
 
         public static bool ForceDraftable(ThingDef def, string tag = ManagedTags.ForceDraftable)

@@ -66,6 +66,17 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="JobGiver_PawnControl.cs" />
+    <Compile Include="JobGiver_Noscan_PawnControl.cs" />
+    <Compile Include="JobGiver_Common_DoBill_PawnControl.cs" />
+    <Compile Include="JobGiver_Hauling_HaulCorpseToPublicPlace_PawnControl.cs" />
+    <Compile Include="JobGiver_BasicWorker_PawnControl.cs" />
+    <Compile Include="JobGiver_Construction_FillIn_PawnControl.cs" />
+    <Compile Include="JobGiver_Cleaning_ClearPollution_PawnControl.cs" />
+    <Compile Include="JobGiver_Common_Growing_PawnControl.cs" />
+    <Compile Include="JobGiver_Handling_PawnControl.cs" />
+    <Compile Include="JobGiver_Hauling_PawnControl.cs" />
+    <Compile Include="JobGiver_Warden_PawnControl.cs" />
     <Compile Include="Utility_JobGiverManager.cs" />
     <Compile Include="PawnPathExtensions.cs" />
     <Compile Include="MapComponent_JobGiverCacheCleanup.cs" />
@@ -75,7 +86,7 @@
     <Compile Include="Utility_TargetPrefilteringManager.cs" />
     <Compile Include="Utility_ThinkTreeOptimizationManager.cs" />
     <Compile Include="Utility_WorkTypeManager.cs" />
-    <Compile Include="JobGiver_PawnControl.cs" />
+    <Compile Include="JobGiver_Scan_PawnControl.cs" />
     <Compile Include="MainTabWindow_PawnControl.cs" />
     <Compile Include="Startup_GlobalPresetApplier.cs" />
     <Compile Include="RuntimeModExtensionRecord.cs" />
@@ -84,8 +95,6 @@
     <Compile Include="Dialog_PawnPresetManager.cs" />
     <Compile Include="JobGiver_Common_ConstructAffectFloor_PawnControl.cs" />
     <Compile Include="JobGiver_Construction_BuildRoof_PawnControl.cs" />
-    <Compile Include="JobGiver_Common_ConstructDeliverResourcesToBlueprints_PawnControl.cs" />
-    <Compile Include="JobGiver_Common_ConstructDeliverResourcesToFrames_PawnControl.cs" />
     <Compile Include="JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl.cs" />
     <Compile Include="JobGiver_Common_ConstructDeliverResources_PawnControl.cs" />
     <Compile Include="JobGiver_Construction_ConstructDeliverResourcesToBlueprints_PawnControl.cs" />
@@ -118,11 +127,11 @@
     <Compile Include="JobGiver_Hauling_Merge_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_ConstructDeliverResourcesToBlueprints_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_HaulGeneral_PawnControl.cs" />
-    <Compile Include="JobGiver_Hauling_Cremate_PawnControl.cs" />
+    <Compile Include="JobGiver_Hauling_DoBillsCremate_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_FillFermentingBarrel_PawnControl.cs" />
-    <Compile Include="JobGiver_Hauling_HaulCampfire_PawnControl.cs" />
+    <Compile Include="JobGiver_Hauling_DoBillsHaulCampfire_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_HaulCorpses_PawnControl.cs" />
-    <Compile Include="JobGiver_Hauling_GatherItemsForCaravan_PawnControl.cs" />
+    <Compile Include="JobGiver_Hauling_HelpGatheringItemsForCaravan_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_ConstructDeliverResourcesToFrames_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_HaulToPortal_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_LoadTransporters_PawnControl.cs" />

@@ -1,4 +1,5 @@
 ﻿using RimWorld;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -10,16 +11,28 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns turret refueling tasks to pawns with the Hauling work type.
     /// Optimized for large colonies with many turrets using distance-based bucketing.
     /// </summary>
-    public class JobGiver_Hauling_Refuel_Turret_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_Refuel_Turret_PawnControl : JobGiver_Hauling_Refuel_PawnControl
     {
-        // Cache for turrets that need refueling
-        private static readonly Dictionary<int, List<Building_Turret>> _turretCache = new Dictionary<int, List<Building_Turret>>();
-        private static readonly Dictionary<int, Dictionary<Building_Turret, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Building_Turret, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 150; // Update every 2.5 seconds
+        #region Configuration
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "RefuelTurret";
+
+        /// <summary>
+        /// Update cache more frequently for turrets - they're critical defense structures
+        /// </summary>
+        protected override int CacheUpdateInterval => 150; // Every 2.5 seconds
+
+        /// <summary>
+        /// Same distance thresholds as regular refueling
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
+
+        #endregion
+
+        #region Core flow
 
         public override float GetPriority(Pawn pawn)
         {
@@ -29,177 +42,116 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_Refuel_Turret_PawnControl>(
                 pawn,
-                "Hauling",
-                (p, forced) => {
-                    UpdateTurretCache(p.Map);
-
-                    return TryCreateRefuelTurretJob(p);
-                },
-                debugJobDesc: "refuel turret assignment");
-        }
-
-        /// <summary>
-        /// Updates the cache of turrets that need refueling
-        /// </summary>
-        private void UpdateTurretCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_turretCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_turretCache.ContainsKey(mapId))
-                    _turretCache[mapId].Clear();
-                else
-                    _turretCache[mapId] = new List<Building_Turret>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Building_Turret, bool>();
-
-                // Find all colony turrets that need refueling
-                foreach (Building building in map.listerBuildings.allBuildingsColonist)
+                WorkTag,
+                (p, forced) =>
                 {
-                    Building_Turret turret = building as Building_Turret;
-                    if (turret != null)
+                    if (p?.Map == null)
+                        return null;
+
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Use the shared cache updating logic from base class
+                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
+                        || now - last >= CacheUpdateInterval)
+                    {
+                        _lastHaulingCacheUpdate[mapId] = now;
+                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
+                    }
+
+                    // Get turrets from shared cache
+                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
+                        return null;
+
+                    // Filter to just turrets
+                    var turrets = haulables.OfType<Building_Turret>().ToList();
+                    if (turrets.Count == 0)
+                        return null;
+
+                    // Use the bucketing system to find the closest valid turret
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        turrets.Cast<Thing>().ToList(),
+                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
+
+                    // Find the best turret to refuel
+                    Thing targetTurret = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, worker) => IsValidTurretTarget(thing, worker),
+                        _reachabilityCache);
+
+                    // Create job if target found
+                    if (targetTurret != null && targetTurret is Building_Turret turret)
                     {
                         CompRefuelable refuelable = turret.TryGetComp<CompRefuelable>();
-                        if (refuelable != null && refuelable.ShouldAutoRefuelNow && !turret.IsBurning())
+                        if (refuelable != null)
                         {
-                            _turretCache[mapId].Add(turret);
-                        }
-                    }
-                }
+                            // Use RearmTurret instead of Refuel for turrets
+                            JobDef jobDef = refuelable.Props.atomicFueling ?
+                                JobDefOf.RearmTurretAtomic : JobDefOf.RearmTurret;
 
-                _lastCacheUpdateTick = currentTick;
-            }
-        }
-
-        /// <summary>
-        /// Create a job for refueling a turret using manager-driven bucket processing
-        /// </summary>
-        private Job TryCreateRefuelTurretJob(Pawn pawn)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_turretCache.ContainsKey(mapId) || _turretCache[mapId].Count == 0)
-                return null;
-
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
-                pawn,
-                _turretCache[mapId],
-                (turret) => (turret.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find the best turret to refuel
-            Building_Turret targetTurret = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (turret, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(turret, p, requiresDesignator: false))
-                        return false;
-
-                    // Skip if no longer valid
-                    if (turret == null || turret.Destroyed || !turret.Spawned)
-                        return false;
-
-                    // Skip if burning
-                    if (turret.IsBurning())
-                        return false;
-
-                    // Get refuelable component
-                    CompRefuelable refuelable = turret.TryGetComp<CompRefuelable>();
-                    if (refuelable == null || !refuelable.ShouldAutoRefuelNow)
-                        return false;
-
-                    // Skip if forbidden or unreachable
-                    if (turret.IsForbidden(p) ||
-                        !p.CanReserve(turret, 1, -1) ||
-                        !p.CanReach(turret, PathEndMode.ClosestTouch, p.NormalMaxDanger()))
-                        return false;
-
-                    // Check if fuel is available
-                    bool hasFuel = false;
-
-                    // Check the resource counter for available fuel
-                    foreach (var resourceCount in p.Map.resourceCounter.AllCountedAmounts)
-                    {
-                        if (refuelable.Props.fuelFilter.Allows(resourceCount.Key))
-                        {
-                            hasFuel = resourceCount.Value > 0;
-                            if (hasFuel) break;
+                            Job job = JobMaker.MakeJob(jobDef, turret);
+                            Utility_DebugManager.LogNormal($"{p.LabelShort} created job to refuel turret {turret.LabelCap}");
+                            return job;
                         }
                     }
 
-                    // If we found fuel, we can proceed
-                    if (hasFuel)
-                        return true;
-
-                    // Otherwise, try to find fuel using a simpler approach
-                    float fuelNeeded = refuelable.TargetFuelLevel - refuelable.Fuel;
-                    if (fuelNeeded <= 0f)
-                        return false;
-
-                    // Check if there's any available fuel that can be reserved
-                    foreach (Thing thing in p.Map.listerThings.ThingsInGroup(ThingRequestGroup.HaulableEver))
-                    {
-                        if (refuelable.Props.fuelFilter.Allows(thing) &&
-                            !thing.IsForbidden(p) &&
-                            p.CanReserve(thing) &&
-                            p.CanReach(thing, PathEndMode.ClosestTouch, p.NormalMaxDanger()))
-                        {
-                            return true;
-                        }
-                    }
-
-                    return false;
+                    return null;
                 },
-                _reachabilityCache
-            );
+                debugJobDesc: DebugName);
+        }
 
-            // Create job if target found
-            if (targetTurret != null)
+        #endregion
+
+        #region Target selection
+
+        /// <summary>
+        /// Gets all turrets on the map that need refueling
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            if (map == null)
+                yield break;
+
+            // Find all colony turrets that need refueling
+            foreach (Building building in map.listerBuildings.allBuildingsColonist)
             {
-                CompRefuelable refuelable = targetTurret.TryGetComp<CompRefuelable>();
-                if (refuelable != null)
+                if (building is Building_Turret turret)
                 {
-                    // Determine job type based on atomicFueling flag
-                    JobDef jobDef = refuelable.Props.atomicFueling ?
-                        JobDefOf.RearmTurretAtomic : JobDefOf.RearmTurret;
-
-                    Job job = JobMaker.MakeJob(jobDef, targetTurret);
-                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel turret {targetTurret.LabelCap}");
-                    return job;
+                    CompRefuelable refuelable = turret.TryGetComp<CompRefuelable>();
+                    if (refuelable != null && refuelable.ShouldAutoRefuelNow && !turret.IsBurning())
+                    {
+                        yield return turret;
+                    }
                 }
             }
-
-            return null;
         }
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Determines if a turret is valid for refueling
         /// </summary>
-        public static void ResetCache()
+        private bool IsValidTurretTarget(Thing thing, Pawn pawn)
         {
-            Utility_CacheManager.ResetJobGiverCache(_turretCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            // Ensure it's a turret
+            if (!(thing is Building_Turret turret))
+                return false;
+
+            // Use the base validation logic for general checks
+            if (!IsValidRefuelTarget(thing, pawn))
+                return false;
+
+            // Any turret-specific checks could go here
+
+            return true;
         }
 
-        public override string ToString()
-        {
-            return "JobGiver_Refuel_Turret_PawnControl";
-        }
+        #endregion
     }
 }

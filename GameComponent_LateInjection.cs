@@ -221,88 +221,45 @@ namespace emitbreaker.PawnControl
             Utility_PathfindingManager.ResetAllCaches();
             Utility_GlobalStateManager.ResetAllData();
 
-
-            // JobGiver_PawnControl base class caches
-            //JobGiver_PawnControl.ResetAllCaches();
+            // Super Classes
+            JobGiver_Common_ConstructAffectFloor_PawnControl.ResetConstructAffectFloorCache();
+            JobGiver_Common_DoBill_PawnControl.ResetDoBillsCache();
+            JobGiver_Scan_PawnControl.ResetCache();
+            JobGiver_Noscan_PawnControl.ResetCache();
 
             // General job giver caches
             JobGiver_WorkNonHumanlike.ResetCache();
 
             // Plant cutting job givers
-            //JobGiver_PlantCutting_PlantsCut_PawnControl.ResetCache();
-            JobGiver_PlantCutting_ExtractTree_PawnControl.ResetCache();
 
             // Growing job givers
-            JobGiver_Growing_GrowerHarvest_PawnControl.ResetCache();
-            JobGiver_Growing_GrowerSow_PawnControl.ResetCache();
-            JobGiver_Growing_Replant_PawnControl.ResetCache();
+            JobGiver_Common_Growing_PawnControl.ResetGrowingCache();
 
             // Fire Fighting job givers
-            JobGiver_Firefighter_FightFires_PawnControl.ResetCache();
+            JobGiver_Firefighter_FightFires_PawnControl.ResetFightFiresCache();
 
             // Doctor job givers
-            JobGiver_Common_FeedPatient_PawnControl.ResetCache();
+            JobGiver_Common_FeedPatient_PawnControl.ResetFeedPatientCache();
 
             // Construction job givers
-            JobGiver_Construction_Deconstruct_PawnControl.ResetCache();
-            JobGiver_Construction_Uninstall_PawnControl.ResetCache();
-            JobGiver_Construction_FixBrokenDownBuilding_PawnControl.ResetCache();
-            JobGiver_Construction_ConstructDeliverResourcesToBlueprints_PawnControl.ResetCache();
-            JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl.ResetCache();
-            JobGiver_Construction_BuildRoof_PawnControl.ResetCache();
-            JobGiver_Construction_RemoveRoof_PawnControl.ResetCache();
-            JobGiver_Construction_ConstructFinishFrames_PawnControl.ResetCache();
-            JobGiver_Construction_Repair_PawnControl.ResetCache();
-            JobGiver_Construction_SmoothFloor_PawnControl.ResetCache();
-            JobGiver_Construction_RemoveFloor_PawnControl.ResetCache();
-            JobGiver_Construction_SmoothWall_PawnControl.ResetCache();
 
             // Cleaning job givers
-            JobGiver_Cleaning_CleanFilth_PawnControl.ResetCache();
-            JobGiver_Cleaning_ClearSnow_PawnControl.ResetCache();
 
             // Basic worker job givers
-            JobGiver_BasicWorker_Flick_PawnControl.ResetCache();
-            JobGiver_BasicWorker_Open_PawnControl.ResetCache();
-            JobGiver_BasicWorker_ExtractSkull_PawnControl.ResetCache();
+            JobGiver_BasicWorker_PawnControl.ResetBasicWorkerCache();
 
             // Warden job givers
-            JobGiver_Warden_DoExecution_PawnControl.ResetCache();
-            JobGiver_Warden_ExecuteGuilty_PawnControl.ResetCache();
-            JobGiver_Warden_ReleasePrisoner_PawnControl.ResetCache();
-            JobGiver_Warden_TakeToBed_PawnControl.ResetCache();
-            JobGiver_Warden_Feed_PawnControl.ResetCache();
-            JobGiver_Warden_DeliverFood_PawnControl.ResetCache();
-            JobGiver_Warden_Chat_PawnControl.ResetCache();
+            JobGiver_Warden_PawnControl.ResetWardenCache();
 
             // Handling job givers
-            JobGiver_Handling_Tame_PawnControl.ResetCache();
-            JobGiver_Handling_Train_PawnControl.ResetCache();
-            JobGiver_Handling_TakeRoamingAnimalsToPen_PawnControl.ResetCache();
-            JobGiver_Handling_RebalanceAnimalsInPens_PawnControl.ResetCache();
-            JobGiver_Handling_Slaughter_PawnControl.ResetCache();
-            JobGiver_Handling_ReleaseAnimalToWild_PawnControl.ResetCache();
-            JobGiver_Handling_Milk_PawnControl.ResetCache();
-            JobGiver_Handling_Shear_PawnControl.ResetCache();
+            JobGiver_Handling_PawnControl.ResetHandlingCache();
 
             // Hauling job givers
-            JobGiver_Hauling_EmptyEggBox_PawnControl.ResetCache();
-            JobGiver_Hauling_Merge_PawnControl.ResetCache();
-            JobGiver_Hauling_ConstructDeliverResourcesToBlueprints_PawnControl.ResetCache();
-            JobGiver_Hauling_ConstructDeliverResourcesToFrames_PawnControl.ResetCache();
-            JobGiver_Hauling_HaulGeneral_PawnControl.ResetCache();
-            JobGiver_Hauling_FillFermentingBarrel_PawnControl.ResetCache();
-            JobGiver_Hauling_TakeBeerOutOfBarrel_PawnControl.ResetCache();
-            JobGiver_Hauling_HaulCampfire_PawnControl.ResetCache();
-            JobGiver_Hauling_Cremate_PawnControl.ResetCache();
-            JobGiver_Hauling_HaulCorpses_PawnControl.ResetCache();
-            JobGiver_Hauling_Strip_PawnControl.ResetCache();
-            JobGiver_Hauling_HaulToPortal_PawnControl.ResetCache();
-            JobGiver_Hauling_LoadTransporters_PawnControl.ResetCache();
-            JobGiver_Hauling_GatherItemsForCaravan_PawnControl.ResetCache();
-            JobGiver_Hauling_UnloadCarriers_PawnControl.ResetCache();
-            JobGiver_Hauling_Refuel_PawnControl.ResetCache();
-            JobGiver_Hauling_Refuel_Turret_PawnControl.ResetCache();
+            JobGiver_Hauling_PawnControl.ResetHaulingCache();
+            JobGiver_Hauling_FillFermentingBarrel_PawnControl.ResetStaticData();
+
+            foreach (var map in Find.Maps)
+                Utility_WorkSettingsManager.FullInitializeAllEligiblePawns(map, forceLock: true);
 
             Utility_DebugManager.LogNormal("Cleared job cache on game load");
         }

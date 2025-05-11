@@ -14,7 +14,7 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to help gather items for forming caravans.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_GatherItemsForCaravan_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_HelpGatheringItemsForCaravan_PawnControl : ThinkNode_JobGiver
     {
         // Cache for active caravan forming lords that are gathering items
         private static readonly Dictionary<int, List<Lord>> _caravanLordsCache = new Dictionary<int, List<Lord>>();

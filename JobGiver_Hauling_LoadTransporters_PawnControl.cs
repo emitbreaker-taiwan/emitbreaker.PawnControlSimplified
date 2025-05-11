@@ -1,5 +1,7 @@
 using RimWorld;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -9,213 +11,199 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to load items into transporters like shuttles.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_LoadTransporters_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_LoadTransporters_PawnControl : JobGiver_Hauling_PawnControl
     {
-        // Cache for transporters that need loading
-        private static readonly Dictionary<int, List<CompTransporter>> _transportersCache = new Dictionary<int, List<CompTransporter>>();
-        private static readonly Dictionary<int, Dictionary<CompTransporter, bool>> _reachabilityCache = new Dictionary<int, Dictionary<CompTransporter, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 120; // Update every 2 seconds
+        #region Configuration
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 100f, 400f, 900f }; // 10, 20, 30 tiles
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "LoadTransporters";
 
-        public override float GetPriority(Pawn pawn)
-        {
-            // Loading transporters is important
-            return 5.9f;
-        }
+        /// <summary>
+        /// Update cache every 2 seconds - transporters are time-sensitive
+        /// </summary>
+        protected override int CacheUpdateInterval => 120;
+
+        /// <summary>
+        /// Smaller distance thresholds for transporters - typically centered in a base
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f }; // 10, 20, 30 tiles
+
+        #endregion
+
+        #region Core flow
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_LoadTransporters_PawnControl>(
                 pawn,
-                "Hauling",
-                (p, forced) => {
-                    // Update plant cache
-                    UpdateTransportersCache(p.Map);
-
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateLoadTransporterJob(p);
-                },
-                debugJobDesc: "load transporters assignment");
-        }
-
-        /// <summary>
-        /// Updates the cache of transporters that need loading
-        /// </summary>
-        private void UpdateTransportersCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_transportersCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_transportersCache.ContainsKey(mapId))
-                    _transportersCache[mapId].Clear();
-                else
-                    _transportersCache[mapId] = new List<CompTransporter>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<CompTransporter, bool>();
-
-                // Find all transporters that need loading
-                foreach (Thing thing in map.listerThings.ThingsInGroup(ThingRequestGroup.Transporter))
+                WorkTag,
+                (p, forced) =>
                 {
-                    CompTransporter transporter = thing.TryGetComp<CompTransporter>();
-                    if (transporter != null && transporter.parent.Faction == Faction.OfPlayer)
-                    {
-                        _transportersCache[mapId].Add(transporter);
-                    }
-                }
+                    if (p?.Map == null)
+                        return null;
 
-                _lastCacheUpdateTick = currentTick;
-            }
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Use the shared cache updating logic from base class
+                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
+                        || now - last >= CacheUpdateInterval)
+                    {
+                        _lastHaulingCacheUpdate[mapId] = now;
+                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
+                    }
+
+                    // Get transporters from shared cache
+                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
+                        return null;
+
+                    // Filter only things with CompTransporter component
+                    var transporterThings = haulables.Where(t => t.TryGetComp<CompTransporter>() != null).ToList();
+                    if (transporterThings.Count == 0)
+                        return null;
+
+                    // Extract CompTransporters from their parent things
+                    var transporters = transporterThings
+                        .Select(t => t.TryGetComp<CompTransporter>())
+                        .Where(comp => comp != null)
+                        .ToList();
+
+                    // Use the bucketing system to find the closest valid transporter
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        transporterThings,
+                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
+
+                    // Find the best transporter to load
+                    Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, worker) => IsValidTransporterTarget(thing, worker),
+                        _reachabilityCache);
+
+                    // Create job if target found
+                    if (targetThing != null)
+                    {
+                        CompTransporter transporter = targetThing.TryGetComp<CompTransporter>();
+                        if (transporter != null)
+                        {
+                            Job job = LoadTransportersJobUtility.JobOnTransporter(p, transporter);
+
+                            if (job != null)
+                            {
+                                Utility_DebugManager.LogNormal($"{p.LabelShort} created job to load transporter {targetThing.LabelCap}");
+                            }
+
+                            return job;
+                        }
+                    }
+
+                    return null;
+                },
+                debugJobDesc: DebugName);
         }
 
-        /// <summary>
-        /// Create a job for loading a transporter using manager-driven bucket processing
-        /// </summary>
-        private Job TryCreateLoadTransporterJob(Pawn pawn)
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_transportersCache.ContainsKey(mapId) || _transportersCache[mapId].Count == 0)
+            if (targets == null || targets.Count == 0)
                 return null;
 
-            // Create custom buckets for CompTransporters
-            List<CompTransporter>[] buckets = CreateDistanceBucketsForTransporters(
+            // Filter only things with CompTransporter component
+            var transporterThings = targets.Where(t => t.TryGetComp<CompTransporter>() != null).ToList();
+            if (transporterThings.Count == 0)
+                return null;
+
+            // Extract CompTransporters from their parent things
+            var transporters = transporterThings
+                .Select(t => t.TryGetComp<CompTransporter>())
+                .Where(comp => comp != null)
+                .ToList();
+
+            // Use the bucketing system to find the closest valid transporter
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
-                _transportersCache[mapId],
-                DISTANCE_THRESHOLDS
-            );
+                transporterThings,
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
 
             // Find the best transporter to load
-            CompTransporter targetTransporter = FindFirstValidTransporter(
+            Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
-                pawn
-            );
+                pawn,
+                (thing, worker) => IsValidTransporterTarget(thing, worker),
+                _reachabilityCache);
 
             // Create job if target found
-            if (targetTransporter != null)
+            if (targetThing != null)
             {
-                // Use the utility method if available
-                Job job = LoadTransportersJobUtility.JobOnTransporter(pawn, targetTransporter);
-                
-                if (job != null)
+                CompTransporter transporter = targetThing.TryGetComp<CompTransporter>();
+                if (transporter != null)
                 {
-                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to load transporter {targetTransporter.parent.LabelCap}");
+                    Job job = LoadTransportersJobUtility.JobOnTransporter(pawn, transporter);
+
+                    if (job != null)
+                    {
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to load transporter {targetThing.LabelCap}");
+                    }
+
+                    return job;
                 }
-                
-                return job;
             }
 
             return null;
         }
 
-        /// <summary>
-        /// Create distance-based buckets for CompTransporters
-        /// </summary>
-        private List<CompTransporter>[] CreateDistanceBucketsForTransporters(Pawn pawn, List<CompTransporter> transporters, float[] distanceThresholds)
-        {
-            if (pawn == null || transporters == null || distanceThresholds == null)
-                return null;
-                
-            // Initialize buckets
-            List<CompTransporter>[] buckets = new List<CompTransporter>[distanceThresholds.Length + 1];
-            for (int i = 0; i < buckets.Length; i++)
-                buckets[i] = new List<CompTransporter>();
-                
-            foreach (CompTransporter transporter in transporters)
-            {
-                // Get distance squared between pawn and transporter
-                float distSq = (transporter.parent.Position - pawn.Position).LengthHorizontalSquared;
-                
-                // Assign to appropriate bucket
-                int bucketIndex = distanceThresholds.Length; // Default to last bucket (furthest)
-                for (int i = 0; i < distanceThresholds.Length; i++)
-                {
-                    if (distSq < distanceThresholds[i])
-                    {
-                        bucketIndex = i;
-                        break;
-                    }
-                }
-                
-                buckets[bucketIndex].Add(transporter);
-            }
-            
-            return buckets;
-        }
+        #endregion
+
+        #region Target selection
 
         /// <summary>
-        /// Find the first valid transporter from bucketed lists
+        /// Gets all things with a CompTransporter component on the map
         /// </summary>
-        private CompTransporter FindFirstValidTransporter(List<CompTransporter>[] buckets, Pawn pawn)
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            if (buckets == null || pawn == null) return null;
-            
-            // Get map ID for caching
-            int mapId = pawn.Map.uniqueID;
-            
-            // Process buckets from closest to furthest
-            for (int b = 0; b < buckets.Length; b++)
+            if (map == null)
+                yield break;
+
+            // Find all transporters on the map
+            foreach (Thing thing in map.listerThings.ThingsInGroup(ThingRequestGroup.Transporter))
             {
-                if (buckets[b] == null || buckets[b].Count == 0)
-                    continue;
-                    
-                // Randomize within each distance band for better distribution
-                buckets[b].Shuffle();
-                
-                // Check each transporter in this distance band
-                foreach (CompTransporter transporter in buckets[b])
+                CompTransporter transporter = thing.TryGetComp<CompTransporter>();
+                if (transporter != null && thing.Faction == Faction.OfPlayer && thing.Spawned)
                 {
-                    // Check if we've already determined this transporter is reachable
-                    bool isReachable;
-                    if (_reachabilityCache[mapId].TryGetValue(transporter, out isReachable))
-                    {
-                        if (!isReachable)
-                            continue;
-                    }
-                    else
-                    {
-                        // Determine if transporter is valid and reachable
-                        if (!LoadTransportersJobUtility.HasJobOnTransporter(pawn, transporter))
-                        {
-                            _reachabilityCache[mapId][transporter] = false;
-                            continue;
-                        }
-                        
-                        _reachabilityCache[mapId][transporter] = true;
-                    }
-                    
-                    return transporter;
+                    yield return thing;
                 }
             }
-            
-            return null;
         }
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Determines if a transporter is valid for loading
         /// </summary>
-        public static void ResetCache()
+        private bool IsValidTransporterTarget(Thing thing, Pawn pawn)
         {
-            Utility_CacheManager.ResetJobGiverCache(_transportersCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            // Skip invalid transporters
+            if (thing == null || thing.Destroyed || !thing.Spawned)
+                return false;
+
+            // Check if it has a transporter component
+            CompTransporter transporter = thing.TryGetComp<CompTransporter>();
+            if (transporter == null)
+                return false;
+
+            // Skip if forbidden or unreachable
+            if (thing.IsForbidden(pawn) || !pawn.CanReserveAndReach(thing, PathEndMode.Touch, pawn.NormalMaxDanger()))
+                return false;
+
+            // Use the utility method to check if there's loading work to do
+            return LoadTransportersJobUtility.HasJobOnTransporter(pawn, transporter);
         }
 
-        public override string ToString()
-        {
-            return "JobGiver_LoadTransporters_PawnControl";
-        }
+        #endregion
     }
 }

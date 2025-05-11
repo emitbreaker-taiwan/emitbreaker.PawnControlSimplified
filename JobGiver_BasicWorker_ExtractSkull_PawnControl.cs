@@ -11,26 +11,55 @@ namespace emitbreaker.PawnControl
     /// Enhanced JobGiver that assigns skull extraction jobs to eligible pawns.
     /// Requires the BasicWorker work tag to be enabled.
     /// </summary>
-    public class JobGiver_BasicWorker_ExtractSkull_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_BasicWorker_ExtractSkull_PawnControl : JobGiver_BasicWorker_PawnControl
     {
-        // Cache system to improve performance with large numbers of pawns
-        private static readonly Dictionary<int, List<Corpse>> _skullExtractableCache = new Dictionary<int, List<Corpse>>();
-        private static readonly Dictionary<int, Dictionary<Corpse, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Corpse, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 300; // Update every 5 seconds
+        #region Configuration
 
-        // Local optimization parameters
-        private const int MAX_CACHE_ENTRIES = 100;  // Cap cache size to avoid memory issues
+        /// <summary>
+        /// Use Hauling work tag
+        /// </summary>
+        protected override string WorkTag => "Hauling";
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 400f, 1600f, 2500f }; // 20, 40, 50 tiles
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "ExtractSkull";
 
-        public override float GetPriority(Pawn pawn)
+        /// <summary>
+        /// The designation this job giver targets
+        /// </summary>
+        protected override DesignationDef TargetDesignation => DesignationDefOf.ExtractSkull;
+
+        /// <summary>
+        /// The job to create
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.ExtractSkull;
+
+        #endregion
+
+        #region Validation overrides
+
+        /// <summary>
+        /// Override the target filtering to ensure only valid corpses with heads are processed
+        /// </summary>
+        protected override bool IsValidTarget(Thing thing, Pawn worker)
         {
-            // Medium priority - similar to other basic work
-            return 6.0f;
+            // First do the base class validation
+            if (!base.IsValidTarget(thing, worker))
+                return false;
+
+            // Additional validation for skull extraction
+            if (thing is Corpse corpse && corpse.InnerPawn?.health?.hediffSet != null)
+            {
+                return corpse.InnerPawn.health.hediffSet.HasHead;
+            }
+
+            return false;
         }
 
+        /// <summary>
+        /// Override TryGiveJob to add additional checks specific to skull extraction
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             // IMPORTANT: Only player pawns and slaves owned by player should extract skulls
@@ -44,48 +73,61 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            // Quick skip check - if no skull extraction designations on map
-            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.ExtractSkull))
+            // Let the base class handle the rest of the job creation process
+            return base.TryGiveJob(pawn);
+        }
+
+        /// <summary>
+        /// Override GetTargets to filter corpses that have heads
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // Use base implementation first to get designated corpses
+            foreach (Thing thing in base.GetTargets(map))
             {
+                // Additional filtering for corpses with heads
+                if (thing is Corpse corpse &&
+                    corpse.Spawned &&
+                    corpse.InnerPawn?.health?.hediffSet != null &&
+                    corpse.InnerPawn.health.hediffSet.HasHead)
+                {
+                    yield return thing;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Process the cached targets and create a job for the pawn
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // Skip if no targets or if the pawn can't extract skulls
+            if (targets.Count == 0 || (ModsConfig.IdeologyActive && !CanPawnExtractSkull(pawn)))
                 return null;
+
+            // Use bucketing system to find closest valid target
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                targets,
+                thing => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find the first valid target
+            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets, pawn, IsValidTarget, _reachabilityCache);
+
+            // Create a job for the target if found
+            if (bestTarget != null)
+            {
+                return CreateJobForTarget(bestTarget);
             }
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
-                pawn,
-                "BasicWorker",
-                (p, forced) => {
-                    // Update plant cache
-                    Utility_CacheManager.UpdateDesignationBasedCache(
-                    p.Map,
-                    ref _lastCacheUpdateTick,
-                    CACHE_UPDATE_INTERVAL,
-                    _skullExtractableCache,
-                    _reachabilityCache,
-                    DesignationDefOf.ExtractSkull,
-                    (des) => {
-                        if (des?.target.Thing is Corpse corpse &&
-                            corpse.Spawned &&
-                            corpse.InnerPawn.health.hediffSet.HasHead)
-                            return corpse;
-                        return null;
-                    },
-                    MAX_CACHE_ENTRIES);
-
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return Utility_JobGiverManagerOld.TryCreateDesignatedJob(
-                            pawn,
-                            _skullExtractableCache,
-                            _reachabilityCache,
-                            "BasicWorker",
-                            DesignationDefOf.ExtractSkull,
-                            JobDefOf.ExtractSkull,
-                            extraValidation: (corpse) => corpse is Corpse c && c.InnerPawn.health.hediffSet.HasHead,
-                            reachabilityFunc: (corpse, q) => !corpse.IsForbidden(q) &&
-                                                             q.CanReserveAndReach(corpse, PathEndMode.OnCell, Danger.Deadly),
-                            distanceThresholds: DISTANCE_THRESHOLDS);
-                },
-                debugJobDesc: "skull extraction assignment");
+            return null;
         }
+
+        #endregion
+
+        #region Ideology compatibility
 
         /// <summary>
         /// Checks if the pawn can extract skulls based on ideology requirements
@@ -129,18 +171,6 @@ namespace emitbreaker.PawnControl
             return ModsConfig.AnomalyActive && ResearchProjectDefOf.AdvancedPsychicRituals.IsFinished;
         }
 
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_skullExtractableCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
-        }
-
-        public override string ToString()
-        {
-            return "JobGiver_ExtractSkull_PawnControl";
-        }
+        #endregion
     }
 }

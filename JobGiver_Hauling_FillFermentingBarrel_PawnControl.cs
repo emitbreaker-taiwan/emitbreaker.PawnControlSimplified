@@ -1,6 +1,7 @@
 using RimWorld;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -10,26 +11,32 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to fill fermenting barrels with wort.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_FillFermentingBarrel_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_FillFermentingBarrel_PawnControl : JobGiver_Hauling_PawnControl
     {
-        // Cache for fermenting barrels that need filling
-        private static readonly Dictionary<int, List<Building_FermentingBarrel>> _barrelCache = new Dictionary<int, List<Building_FermentingBarrel>>();
-        private static readonly Dictionary<int, Dictionary<Building_FermentingBarrel, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Building_FermentingBarrel, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 300; // Update every 5 seconds
+        #region Configuration
+
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "FillFermentingBarrel";
+
+        /// <summary>
+        /// Update cache every 5 seconds - barrels don't change state quickly
+        /// </summary>
+        protected override int CacheUpdateInterval => 300;
+
+        /// <summary>
+        /// Distance thresholds for brewery areas
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
 
         // Cache for translation strings
         private static string TemperatureTrans;
         private static string NoWortTrans;
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
+        #endregion
 
-        public static void ResetStaticData()
-        {
-            TemperatureTrans = "BadTemperature".Translate();
-            NoWortTrans = "NoWort".Translate();
-        }
+        #region Core flow
 
         public override float GetPriority(Pawn pawn)
         {
@@ -44,143 +51,165 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_FillFermentingBarrel_PawnControl>(
                 pawn,
-                "Hauling",
-                (p, forced) => {
-                    // Update plant cache
-                    UpdateBarrelCacheSafely(p.Map);
+                WorkTag,
+                (p, forced) =>
+                {
+                    if (p?.Map == null)
+                        return null;
 
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateFillBarrelJob(p);
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Use the shared cache updating logic from base class
+                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
+                        || now - last >= CacheUpdateInterval)
+                    {
+                        _lastHaulingCacheUpdate[mapId] = now;
+                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
+                    }
+
+                    // Get barrels from shared cache
+                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
+                        return null;
+
+                    // Filter only fermenting barrels
+                    var barrels = haulables.OfType<Building_FermentingBarrel>().ToList();
+                    if (barrels.Count == 0)
+                        return null;
+
+                    // Use the bucketing system to find the closest valid barrel
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        barrels.Cast<Thing>().ToList(),
+                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
+
+                    // Find the best barrel to fill
+                    Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, worker) => IsValidBarrelTarget(thing, worker),
+                        _reachabilityCache);
+
+                    // Create job if target found
+                    if (targetThing != null && targetThing is Building_FermentingBarrel barrel)
+                    {
+                        // Find wort to fill the barrel with
+                        Thing wort = FindWort(p, barrel);
+
+                        if (wort != null)
+                        {
+                            Job job = JobMaker.MakeJob(JobDefOf.FillFermentingBarrel, barrel, wort);
+                            Utility_DebugManager.LogNormal($"{p.LabelShort} created job to fill fermenting barrel with wort");
+                            return job;
+                        }
+                    }
+
+                    return null;
                 },
-                debugJobDesc: "filling a fermenting barrel assignment");
+                debugJobDesc: DebugName);
         }
 
-        /// <summary>
-        /// Updates the cache of fermenting barrels that need filling
-        /// </summary>
-        private void UpdateBarrelCacheSafely(Map map)
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_barrelCache.ContainsKey(mapId))
+            // Iterate through the cached targets to find a valid job
+            foreach (var target in targets)
             {
-                // Clear outdated cache
-                if (_barrelCache.ContainsKey(mapId))
-                    _barrelCache[mapId].Clear();
-                else
-                    _barrelCache[mapId] = new List<Building_FermentingBarrel>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Building_FermentingBarrel, bool>();
-
-                // Find all fermenting barrels on the map that need filling
-                foreach (Thing thing in map.listerThings.ThingsOfDef(ThingDefOf.FermentingBarrel))
+                if (IsValidBarrelTarget(target, pawn))
                 {
-                    Building_FermentingBarrel barrel = thing as Building_FermentingBarrel;
-                    if (barrel != null && barrel.Spawned && !barrel.Fermented && barrel.SpaceLeftForWort > 0)
+                    Building_FermentingBarrel barrel = target as Building_FermentingBarrel;
+                    if (barrel != null)
                     {
-                        // Check if temperature is suitable for fermentation
-                        float ambientTemperature = barrel.AmbientTemperature;
-                        CompProperties_TemperatureRuinable compProperties = barrel.def.GetCompProperties<CompProperties_TemperatureRuinable>();
-                        if ((double)ambientTemperature >= (double)compProperties.minSafeTemperature + 2.0 && 
-                            (double)ambientTemperature <= (double)compProperties.maxSafeTemperature - 2.0)
+                        Thing wort = FindWort(pawn, barrel);
+                        if (wort != null)
                         {
-                            _barrelCache[mapId].Add(barrel);
+                            Job job = JobMaker.MakeJob(JobDefOf.FillFermentingBarrel, barrel, wort);
+                            return job;
                         }
                     }
                 }
+            }
 
-                _lastCacheUpdateTick = currentTick;
+            // Return null if no valid job is found
+            return null;
+        }
+
+        #endregion
+
+        #region Target selection
+
+        /// <summary>
+        /// Gets all fermenting barrels on the map that need filling
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            if (map == null)
+                yield break;
+
+            // Find all fermenting barrels on the map that need filling
+            foreach (Thing thing in map.listerThings.ThingsOfDef(ThingDefOf.FermentingBarrel))
+            {
+                Building_FermentingBarrel barrel = thing as Building_FermentingBarrel;
+                if (barrel != null && barrel.Spawned && !barrel.Fermented && barrel.SpaceLeftForWort > 0)
+                {
+                    // Check if temperature is suitable for fermentation
+                    float ambientTemperature = barrel.AmbientTemperature;
+                    CompProperties_TemperatureRuinable compProperties = barrel.def.GetCompProperties<CompProperties_TemperatureRuinable>();
+                    if ((double)ambientTemperature >= (double)compProperties.minSafeTemperature + 2.0 &&
+                        (double)ambientTemperature <= (double)compProperties.maxSafeTemperature - 2.0)
+                    {
+                        yield return barrel;
+                    }
+                }
             }
         }
 
         /// <summary>
-        /// Creates a job for filling a fermenting barrel
+        /// Determines if a barrel is valid for filling
         /// </summary>
-        private Job TryCreateFillBarrelJob(Pawn pawn)
+        private bool IsValidBarrelTarget(Thing thing, Pawn pawn)
         {
-            if (pawn?.Map == null) return null;
+            // Skip if not a fermenting barrel
+            Building_FermentingBarrel barrel = thing as Building_FermentingBarrel;
+            if (barrel == null)
+                return false;
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_barrelCache.ContainsKey(mapId) || _barrelCache[mapId].Count == 0)
-                return null;
+            // Skip if no longer valid
+            if (barrel.Destroyed || !barrel.Spawned)
+                return false;
 
-            // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
-                pawn,
-                _barrelCache[mapId],
-                (barrel) => (barrel.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
+            // Skip if fermented, full, burning, or forbidden
+            if (barrel.Fermented || barrel.SpaceLeftForWort <= 0 ||
+                barrel.IsBurning() || barrel.IsForbidden(pawn))
+                return false;
 
-            // Find the best barrel to fill
-            Building_FermentingBarrel targetBarrel = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (barrel, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(barrel, p, requiresDesignator: true))
-                        return false;
+            // Skip if being deconstructed
+            if (pawn.Map.designationManager.DesignationOn(barrel, DesignationDefOf.Deconstruct) != null)
+                return false;
 
-                    // Skip if no longer valid
-                    if (barrel == null || barrel.Destroyed || !barrel.Spawned)
-                        return false;
-                    
-                    // Skip if fermented, full, burning, or forbidden
-                    if (barrel.Fermented || barrel.SpaceLeftForWort <= 0 ||
-                        barrel.IsBurning() || barrel.IsForbidden(p))
-                        return false;
-                    
-                    // Skip if being deconstructed
-                    if (p.Map.designationManager.DesignationOn(barrel, DesignationDefOf.Deconstruct) != null)
-                        return false;
-                    
-                    // Skip if temperature is not suitable
-                    float ambientTemperature = barrel.AmbientTemperature;
-                    CompProperties_TemperatureRuinable compProperties = barrel.def.GetCompProperties<CompProperties_TemperatureRuinable>();
-                    if ((double)ambientTemperature < (double)compProperties.minSafeTemperature + 2.0 ||
-                        (double)ambientTemperature > (double)compProperties.maxSafeTemperature - 2.0)
-                    {
-                        return false;
-                    }
-                    
-                    // Skip if unreachable or can't be reserved
-                    if (!p.CanReserve(barrel))
-                        return false;
-                    
-                    // Skip if no wort is available
-                    if (FindWort(p, barrel) == null)
-                        return false;
-                    
-                    return true;
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
-            if (targetBarrel != null)
+            // Skip if temperature is not suitable
+            float ambientTemperature = barrel.AmbientTemperature;
+            CompProperties_TemperatureRuinable compProperties = barrel.def.GetCompProperties<CompProperties_TemperatureRuinable>();
+            if ((double)ambientTemperature < (double)compProperties.minSafeTemperature + 2.0 ||
+                (double)ambientTemperature > (double)compProperties.maxSafeTemperature - 2.0)
             {
-                // Find wort to fill the barrel with
-                Thing wort = FindWort(pawn, targetBarrel);
-                
-                if (wort != null)
-                {
-                    Job job = JobMaker.MakeJob(JobDefOf.FillFermentingBarrel, targetBarrel, wort);
-                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to fill fermenting barrel with wort");
-                    return job;
-                }
+                return false;
             }
 
-            return null;
+            // Skip if unreachable or can't be reserved
+            if (!pawn.CanReserve(barrel) || !pawn.CanReserveAndReach(barrel, PathEndMode.Touch, pawn.NormalMaxDanger()))
+                return false;
+
+            // Skip if no wort is available
+            if (FindWort(pawn, barrel) == null)
+                return false;
+
+            return true;
         }
 
         /// <summary>
@@ -199,19 +228,24 @@ namespace emitbreaker.PawnControl
             );
         }
 
+        #endregion
+
+        #region Cache management
+
+        public static void ResetStaticData()
+        {
+            TemperatureTrans = "BadTemperature".Translate();
+            NoWortTrans = "NoWort".Translate();
+        }
+
         /// <summary>
         /// Reset caches when loading game or changing maps
         /// </summary>
-        public static void ResetCache()
+        public static new void ResetCache()
         {
-            Utility_CacheManager.ResetJobGiverCache(_barrelCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
             ResetStaticData();
         }
 
-        public override string ToString()
-        {
-            return "JobGiver_FillFermentingBarrel_PawnControl";
-        }
+        #endregion
     }
 }

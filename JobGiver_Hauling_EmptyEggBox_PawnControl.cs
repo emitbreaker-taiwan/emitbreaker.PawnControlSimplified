@@ -12,16 +12,28 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to empty egg boxes.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_EmptyEggBox_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_EmptyEggBox_PawnControl : JobGiver_Hauling_PawnControl
     {
-        // Cache for egg boxes that need emptying
-        private static readonly Dictionary<int, List<Thing>> _eggBoxCache = new Dictionary<int, List<Thing>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 300; // Update every 5 seconds
+        #region Configuration
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "EmptyEggBox";
+
+        /// <summary>
+        /// Update cache every 5 seconds - egg boxes don't fill that quickly
+        /// </summary>
+        protected override int CacheUpdateInterval => 300;
+
+        /// <summary>
+        /// Distance thresholds for egg boxes
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
+
+        #endregion
+
+        #region Core flow
 
         public override float GetPriority(Pawn pawn)
         {
@@ -36,140 +48,172 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_EmptyEggBox_PawnControl>(
                 pawn,
-                "Hauling",
-                (p, forced) => {
-                    // Update fire cache
-                    UpdateEggBoxCacheSafely(p.Map);
-
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateEmptyEggBoxJob(p);
-                },
-                debugJobDesc: "emptying egg boxes assignment",
-                skipEmergencyCheck: false);
-        }
-
-        /// <summary>
-        /// Updates the cache of egg boxes that need emptying
-        /// </summary>
-        private void UpdateEggBoxCacheSafely(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_eggBoxCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_eggBoxCache.ContainsKey(mapId))
-                    _eggBoxCache[mapId].Clear();
-                else
-                    _eggBoxCache[mapId] = new List<Thing>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Thing, bool>();
-
-                // Find all egg boxes on the map
-                foreach (Thing thing in map.listerThings.ThingsOfDef(ThingDefOf.EggBox))
+                WorkTag,
+                (p, forced) =>
                 {
-                    if (thing != null && thing.Spawned && !thing.Destroyed)
+                    if (p?.Map == null)
+                        return null;
+
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Use the shared cache updating logic from base class
+                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
+                        || now - last >= CacheUpdateInterval)
                     {
-                        CompEggContainer comp = thing.TryGetComp<CompEggContainer>();
+                        _lastHaulingCacheUpdate[mapId] = now;
+                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
+                    }
+
+                    // Get egg boxes from shared cache
+                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
+                        return null;
+
+                    // Use the bucketing system to find the closest valid egg box
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        haulables,
+                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
+
+                    // Find the best egg box to empty
+                    Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, worker) => IsValidEggBoxTarget(thing, worker),
+                        _reachabilityCache);
+
+                    // Create job if target found
+                    if (targetThing != null)
+                    {
+                        CompEggContainer comp = targetThing.TryGetComp<CompEggContainer>();
                         if (comp?.ContainedThing != null)
                         {
-                            _eggBoxCache[mapId].Add(thing);
+                            // Find storage for the eggs
+                            if (!StoreUtility.TryFindBestBetterStorageFor(comp.ContainedThing,
+                                                                         pawn,
+                                                                         pawn.Map,
+                                                                         StoragePriority.Unstored,
+                                                                         pawn.Faction,
+                                                                         out IntVec3 foundCell,
+                                                                         out _))
+                                return null;
+
+                            // Create the job
+                            Job job = JobMaker.MakeJob(JobDefOf.EmptyThingContainer, targetThing, comp.ContainedThing, foundCell);
+                            job.count = comp.ContainedThing.stackCount;
+
+                            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to empty egg box containing {comp.ContainedThing.Label} ({comp.ContainedThing.stackCount})");
+                            return job;
                         }
                     }
-                }
 
-                _lastCacheUpdateTick = currentTick;
-            }
+                    return null;
+                },
+                debugJobDesc: DebugName);
         }
 
-        /// <summary>
-        /// Creates a job for emptying an egg box
-        /// </summary>
-        private Job TryCreateEmptyEggBoxJob(Pawn pawn)
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_eggBoxCache.ContainsKey(mapId) || _eggBoxCache[mapId].Count == 0)
-                return null;
-
-            // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
-                pawn,
-                _eggBoxCache[mapId],
-                (eggBox) => (eggBox.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find a valid egg box to empty
-            for (int b = 0; b < buckets.Length; b++)
+            // Iterate through the cached targets to find a valid job
+            foreach (var target in targets)
             {
-                if (buckets[b].Count == 0)
-                    continue;
-
-                // Randomize within each bucket for even distribution
-                buckets[b].Shuffle();
-
-                foreach (Thing eggBox in buckets[b])
+                if (IsValidEggBoxTarget(target, pawn))
                 {
-                    // IMPORTANT: Check faction interaction validity
-                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(eggBox, pawn, requiresDesignator: false))
-                        continue;
+                    CompEggContainer comp = target.TryGetComp<CompEggContainer>();
+                    if (comp?.ContainedThing != null)
+                    {
+                        // Find storage for the eggs
+                        if (!StoreUtility.TryFindBestBetterStorageFor(comp.ContainedThing,
+                                                                     pawn,
+                                                                     pawn.Map,
+                                                                     StoragePriority.Unstored,
+                                                                     pawn.Faction,
+                                                                     out IntVec3 foundCell,
+                                                                     out _))
+                            continue;
 
-                    // Skip if egg box doesn't exist or is forbidden
-                    if (eggBox == null || eggBox.Destroyed || !eggBox.Spawned || eggBox.IsForbidden(pawn))
-                        continue;
+                        // Create the job
+                        Job job = JobMaker.MakeJob(JobDefOf.EmptyThingContainer, target, comp.ContainedThing, foundCell);
+                        job.count = comp.ContainedThing.stackCount;
 
-                    // Skip if we can't reserve the egg box
-                    if (!pawn.CanReserve(eggBox))
-                        continue;
-
-                    // Get the egg container component
-                    CompEggContainer comp = eggBox.TryGetComp<CompEggContainer>();
-                    if (comp?.ContainedThing == null || (!comp.CanEmpty && !pawn.WorkTagIsDisabled(WorkTags.Violent)))
-                        continue;
-
-                    // Find storage for the eggs
-                    IntVec3 foundCell;
-                    IHaulDestination haulDestination;
-                    if (!StoreUtility.TryFindBestBetterStorageFor(comp.ContainedThing, pawn, pawn.Map, StoragePriority.Unstored, pawn.Faction, out foundCell, out haulDestination))
-                        continue;
-
-                    // Create the job
-                    Job job = JobMaker.MakeJob(JobDefOf.EmptyThingContainer, eggBox, comp.ContainedThing, foundCell);
-                    job.count = comp.ContainedThing.stackCount;
-
-                    // Debug message
-                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to empty egg box containing {comp.ContainedThing.Label} ({comp.ContainedThing.stackCount})");
-                    return job;
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to empty egg box containing {comp.ContainedThing.Label} ({comp.ContainedThing.stackCount})");
+                        return job;
+                    }
                 }
             }
 
+            // Return null if no valid job is found
             return null;
         }
 
+        #endregion
+
+        #region Target selection
+
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Gets all egg boxes on the map that need emptying
         /// </summary>
-        public static void ResetCache()
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            Utility_CacheManager.ResetJobGiverCache(_eggBoxCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            if (map == null)
+                yield break;
+
+            // Find all egg boxes on the map
+            foreach (Thing thing in map.listerThings.ThingsOfDef(ThingDefOf.EggBox))
+            {
+                if (thing != null && thing.Spawned && !thing.Destroyed)
+                {
+                    CompEggContainer comp = thing.TryGetComp<CompEggContainer>();
+                    if (comp?.ContainedThing != null)
+                    {
+                        yield return thing;
+                    }
+                }
+            }
         }
 
-        public override string ToString()
+        /// <summary>
+        /// Determines if an egg box is valid for emptying
+        /// </summary>
+        private bool IsValidEggBoxTarget(Thing thing, Pawn pawn)
         {
-            return "JobGiver_EmptyEggBox_PawnControl";
+            // Skip if not an egg box
+            if (thing == null || thing.def != ThingDefOf.EggBox || thing.Destroyed || !thing.Spawned)
+                return false;
+
+            // Skip if forbidden
+            if (thing.IsForbidden(pawn))
+                return false;
+
+            // Skip if unreachable or can't be reserved
+            if (!pawn.CanReserveAndReach(thing, PathEndMode.Touch, pawn.NormalMaxDanger()))
+                return false;
+
+            // Check egg container component
+            CompEggContainer comp = thing.TryGetComp<CompEggContainer>();
+            if (comp?.ContainedThing == null)
+                return false;
+
+            // Check if we can empty the box
+            if (!comp.CanEmpty && !pawn.WorkTagIsDisabled(WorkTags.Violent))
+                return false;
+
+            // Check if we can find a place to store eggs
+            return StoreUtility.TryFindBestBetterStorageFor(comp.ContainedThing,
+                                                           pawn,
+                                                           pawn.Map,
+                                                           StoragePriority.Unstored,
+                                                           pawn.Faction,
+                                                           out _,
+                                                           out _);
         }
+
+        #endregion
     }
 }

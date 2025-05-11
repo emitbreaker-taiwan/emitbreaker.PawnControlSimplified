@@ -11,160 +11,133 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns general hauling tasks for loose items that need to be moved to storage.
     /// Uses the Hauling work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Hauling_HaulGeneral_PawnControl : ThinkNode_JobGiver
+    public class JobGiver_Hauling_HaulGeneral_PawnControl : JobGiver_Hauling_PawnControl
     {
-        // Cache for haulable things
-        private static readonly Dictionary<int, List<Thing>> _haulableCache = new Dictionary<int, List<Thing>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 300; // Update every 5 seconds
+        #region Configuration
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "HaulGeneral";
 
-        public override float GetPriority(Pawn pawn)
-        {
-            // General hauling is less important than specialized hauling tasks
-            return 4.9f;
-        }
+        /// <summary>
+        /// Update cache every 5 seconds
+        /// </summary>
+        protected override int CacheUpdateInterval => 300;
+
+        /// <summary>
+        /// Standard distance thresholds for bucketing (15, 25, 50 tiles)
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 2500f };
+
+        /// <summary>
+        /// Maximum cache size to control memory usage
+        /// </summary>
+        private const int MAX_CACHE_ENTRIES = 500;
+
+        #endregion
+
+        #region Core flow
 
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<Plant>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_HaulGeneral_PawnControl>(
                 pawn,
-                "Hauling",
-                (p, forced) => {
-                    // Update plant cache
-                    UpdateHaulableCacheSafely(p.Map);
-
-                    // Find and create a job for cutting plants with VALID DESIGNATORS ONLY
-                    return TryCreateHaulJob(p);
-                },
-                debugJobDesc: "haul general assignment");
-        }
-
-        /// <summary>
-        /// Updates the cache of haulable things
-        /// </summary>
-        private void UpdateHaulableCacheSafely(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_haulableCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_haulableCache.ContainsKey(mapId))
-                    _haulableCache[mapId].Clear();
-                else
-                    _haulableCache[mapId] = new List<Thing>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Thing, bool>();
-
-                // Find all haulable things on the map
-                List<Thing> haulablesRaw = map.listerHaulables.ThingsPotentiallyNeedingHauling();
-                int maxCacheSize = Math.Min(500, haulablesRaw.Count); // Limit cache size for performance
-
-                // Filter out things we don't want to haul
-                for (int i = 0; i < haulablesRaw.Count && _haulableCache[mapId].Count < maxCacheSize; i++)
+                WorkTag,
+                (p, forced) =>
                 {
-                    Thing thing = haulablesRaw[i];
-                    if (IsValidHaulItem(thing))
+                    if (p?.Map == null)
+                        return null;
+
+                    int mapId = p.Map.uniqueID;
+                    int now = Find.TickManager.TicksGame;
+
+                    if (!ShouldExecuteNow(mapId))
+                        return null;
+
+                    // Use the shared cache updating logic from base class
+                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
+                        || now - last >= CacheUpdateInterval)
                     {
-                        _haulableCache[mapId].Add(thing);
+                        _lastHaulingCacheUpdate[mapId] = now;
+                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
                     }
-                }
 
-                _lastCacheUpdateTick = currentTick;
-            }
+                    // Get general items from shared cache
+                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
+                        return null;
+
+                    // Filter only non-corpse items from the shared cache
+                    var generalItems = haulables.Where(t => !(t is Corpse)).ToList();
+                    if (generalItems.Count == 0)
+                        return null;
+
+                    // Use the bucketing system to find the closest valid item
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        generalItems,
+                        (item) => (item.Position - p.Position).LengthHorizontalSquared,
+                        DistanceThresholds);
+
+                    // Find the best item to haul
+                    Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, worker) => IsValidHaulItem(thing, worker),
+                        _reachabilityCache);
+
+                    // Create and return job if we found a valid target
+                    if (targetThing != null)
+                    {
+                        // Find storage location
+                        IntVec3 storeCell;
+                        IHaulDestination haulDestination;
+                        if (!StoreUtility.TryFindBestBetterStorageFor(targetThing, p, p.Map,
+                            StoreUtility.CurrentStoragePriorityOf(targetThing), p.Faction, out storeCell, out haulDestination))
+                            return null;
+
+                        // Create haul job
+                        Job job = HaulAIUtility.HaulToCellStorageJob(p, targetThing, storeCell, false);
+
+                        if (job != null)
+                        {
+                            Utility_DebugManager.LogNormal($"{p.LabelShort} created general hauling job for {targetThing.Label} to {storeCell}");
+                        }
+
+                        return job;
+                    }
+
+                    return null;
+                },
+                debugJobDesc: DebugName);
         }
 
-        /// <summary>
-        /// Determines if an item is valid for general hauling
-        /// </summary>
-        private bool IsValidHaulItem(Thing thing)
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Skip if null, destroyed, or not spawned
-            if (thing == null || thing.Destroyed || !thing.Spawned)
-                return false;
-
-            // Skip corpses (handled by separate job giver)
-            if (thing is Corpse)
-                return false;
-
-            // Skip items in good enough storage already (don't waste time moving them again)
-            if (StoreUtility.IsInValidBestStorage(thing))
-                return false;
-
-            return true;
-        }
-
-        /// <summary>
-        /// Creates a job for hauling an item to storage
-        /// </summary>
-        private Job TryCreateHaulJob(Pawn pawn)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_haulableCache.ContainsKey(mapId) || _haulableCache[mapId].Count == 0)
+            if (targets == null || targets.Count == 0)
                 return null;
 
-            // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
+            // Use the bucketing system to find the closest valid item
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
-                _haulableCache[mapId],
+                targets,
                 (item) => (item.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
+                DistanceThresholds);
 
-            // Find the best thing to haul
-            Thing targetThing = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
+            // Find the best item to haul
+            Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
-                (thing, p) => {
-                    // Skip if no longer valid
-                    if (thing == null || thing.Destroyed || !thing.Spawned)
-                        return false;
+                (thing, worker) => IsValidHaulItem(thing, worker),
+                _reachabilityCache);
 
-                    // Skip if forbidden or unreachable
-                    if (thing.IsForbidden(p) || !p.CanReserveAndReach(thing, PathEndMode.ClosestTouch, p.NormalMaxDanger()))
-                        return false;
-
-                    // Skip if already in valid storage
-                    if (StoreUtility.IsInValidBestStorage(thing))
-                        return false;
-
-                    // Skip if we can't find a storage place
-                    IntVec3 storeCell;
-                    IHaulDestination haulDestination;
-                    if (!StoreUtility.TryFindBestBetterStorageFor(thing, p, p.Map, StoreUtility.CurrentStoragePriorityOf(thing), p.Faction, out storeCell, out haulDestination))
-                        return false;
-
-                    // Skip if we can't reserve the store cell
-                    if (!p.CanReserveAndReach(storeCell, PathEndMode.Touch, p.NormalMaxDanger()))
-                        return false;
-
-                    return true;
-                },
-                _reachabilityCache
-            );
-
-            // Create job if target found
             if (targetThing != null)
             {
+                // Find storage location
                 IntVec3 storeCell;
                 IHaulDestination haulDestination;
-
-                // Find storage location
-                if (!StoreUtility.TryFindBestBetterStorageFor(targetThing, pawn, pawn.Map, StoreUtility.CurrentStoragePriorityOf(targetThing), pawn.Faction, out storeCell, out haulDestination))
+                if (!StoreUtility.TryFindBestBetterStorageFor(targetThing, pawn, pawn.Map,
+                    StoreUtility.CurrentStoragePriorityOf(targetThing), pawn.Faction, out storeCell, out haulDestination))
                     return null;
 
                 // Create haul job
@@ -181,18 +154,74 @@ namespace emitbreaker.PawnControl
             return null;
         }
 
+        #endregion
+
+        #region Target selection
+
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Gets all haulable items (excluding corpses) on the map
         /// </summary>
-        public static void ResetCache()
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            Utility_CacheManager.ResetJobGiverCache(_haulableCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            if (map?.listerHaulables != null)
+            {
+                // Get all potential haulables
+                List<Thing> haulablesRaw = map.listerHaulables.ThingsPotentiallyNeedingHauling();
+                int count = 0;
+
+                // Return valid haulable items
+                foreach (Thing thing in haulablesRaw)
+                {
+                    // Apply basic filters during target collection
+                    if (thing != null && thing.Spawned && !(thing is Corpse) &&
+                        !thing.Destroyed && !StoreUtility.IsInValidBestStorage(thing))
+                    {
+                        yield return thing;
+
+                        // Limit cache size
+                        count++;
+                        if (count >= MAX_CACHE_ENTRIES)
+                            break;
+                    }
+                }
+            }
         }
 
-        public override string ToString()
+        /// <summary>
+        /// Determines if an item is valid for general hauling
+        /// </summary>
+        private bool IsValidHaulItem(Thing thing, Pawn pawn)
         {
-            return "JobGiver_HaulGeneral_PawnControl";
+            // Skip if null, destroyed, or not spawned
+            if (thing == null || thing.Destroyed || !thing.Spawned)
+                return false;
+
+            // Skip corpses (handled by separate job giver)
+            if (thing is Corpse)
+                return false;
+
+            // Skip if forbidden or unreachable
+            if (thing.IsForbidden(pawn) || !pawn.CanReserveAndReach(thing, PathEndMode.ClosestTouch, pawn.NormalMaxDanger()))
+                return false;
+
+            // Skip if already in valid storage
+            if (StoreUtility.IsInValidBestStorage(thing))
+                return false;
+
+            // Skip if we can't find a storage place
+            IntVec3 storeCell;
+            IHaulDestination haulDestination;
+            if (!StoreUtility.TryFindBestBetterStorageFor(thing, pawn, pawn.Map,
+                StoreUtility.CurrentStoragePriorityOf(thing), pawn.Faction, out storeCell, out haulDestination))
+                return false;
+
+            // Skip if we can't reserve the store cell
+            if (!pawn.CanReserveAndReach(storeCell, PathEndMode.Touch, pawn.NormalMaxDanger()))
+                return false;
+
+            return true;
         }
+
+        #endregion
     }
 }

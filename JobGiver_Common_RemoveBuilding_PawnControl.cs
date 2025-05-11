@@ -1,5 +1,4 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -11,14 +10,9 @@ namespace emitbreaker.PawnControl
     /// Abstract base class for all building removal JobGivers in PawnControl.
     /// This allows non-humanlike pawns to remove buildings with appropriate designation.
     /// </summary>
-    public abstract class JobGiver_Common_RemoveBuilding_PawnControl : ThinkNode_JobGiver
+    public abstract class JobGiver_Common_RemoveBuilding_PawnControl : JobGiver_Scan_PawnControl
     {
-        // Store cached buildings to remove per map
-        protected static readonly Dictionary<int, List<Thing>> _targetCache = new Dictionary<int, List<Thing>>();
-        protected static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        protected static int _lastCacheUpdateTick = -999;
-        protected const int CACHE_UPDATE_INTERVAL = 180; // 3 seconds
-        protected const int MAX_CACHE_SIZE = 100;
+        #region Configuration
 
         // Define distance thresholds for bucketing
         protected static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
@@ -29,138 +23,161 @@ namespace emitbreaker.PawnControl
         // Must be implemented by subclasses to specify which job to use for removal
         protected abstract JobDef RemoveBuildingJob { get; }
 
-        public override float GetPriority(Pawn pawn)
-        {
-            // Construction is a medium priority task
-            return 5.9f;
-        }
+        #endregion
 
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            // Standardized approach to job giving using your utility class
-            return Utility_JobGiverManagerOld.StandardTryGiveJob<JobGiver_Common_RemoveBuilding_PawnControl>(
-                pawn,
-                "Construction",
-                (p, forced) => {
-                    // Update cache first, matching the pattern from JobGiver_GrowerSow_PawnControl
-                    UpdateTargetCache(p.Map);
+        #region Overrides
 
-                    return TryCreateRemovalJob(p, forced);
-                },
-                debugJobDesc: $"{Designation.defName} assignment",
-                skipEmergencyCheck: true);
-        }
+        // Override WorkTag to specify "Construction" work type
+        protected override string WorkTag => "Construction";
 
-        /// <summary>
-        /// Updates the cache of things that need to be removed
-        /// </summary>
-        protected void UpdateTargetCache(Map map)
-        {
-            if (map == null) return;
+        // Override cache interval - slightly longer than default since designations don't change as frequently
+        protected override int CacheUpdateInterval => 180; // 3 seconds
 
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
+        // Override debug name for better logging
+        protected override string DebugName => $"RemoveBuilding({Designation?.defName ?? "null"})";
 
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_targetCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_targetCache.ContainsKey(mapId))
-                    _targetCache[mapId].Clear();
-                else
-                    _targetCache[mapId] = new List<Thing>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Thing, bool>();
-
-                // Find all designated things for removal
-                var designations = map.designationManager.SpawnedDesignationsOfDef(Designation);
-                foreach (Designation designation in designations)
-                {
-                    Thing thing = designation.target.Thing;
-                    if (thing != null && thing.Spawned)
-                    {
-                        _targetCache[mapId].Add(thing);
-
-                        // Limit cache size for performance
-                        if (_targetCache[mapId].Count >= MAX_CACHE_SIZE)
-                            break;
-                    }
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
-        }
-
-        /// <summary>
-        /// Gets the cached list of things to remove from the given map
-        /// </summary>
-        private List<Thing> GetTargets(Map map)
+        // Override GetTargets to provide buildings that need removal
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
             if (map == null)
-                return new List<Thing>();
+                return Enumerable.Empty<Thing>();
 
-            int mapId = map.uniqueID;
+            // Find all designated things for removal
+            var targets = new List<Thing>();
+            var designations = map.designationManager.SpawnedDesignationsOfDef(Designation);
+            foreach (Designation designation in designations)
+            {
+                Thing thing = designation.target.Thing;
+                if (thing != null && thing.Spawned)
+                {
+                    targets.Add(thing);
 
-            if (_targetCache.TryGetValue(mapId, out var cachedTargets))
-                return cachedTargets;
+                    // Limit collection size for performance
+                    if (targets.Count >= 100)
+                        break;
+                }
+            }
 
-            return new List<Thing>();
+            return targets;
+        }
+
+        // Override TryGiveJob to directly implement job creation logic
+        protected override Job TryGiveJob(Pawn pawn)
+        {
+            return CreateRemovalJob<JobGiver_Common_RemoveBuilding_PawnControl>(pawn);
+        }
+
+        #endregion
+
+        #region Validation helpers
+
+        // Add a helper method for target validation
+        protected virtual bool ValidateTarget(Thing thing, Pawn pawn)
+        {
+            // IMPORTANT: Check faction interaction validity first
+            if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, pawn, requiresDesignator: true))
+                return false;
+
+            // Skip if no longer valid
+            if (thing == null || thing.Destroyed || !thing.Spawned)
+                return false;
+
+            // Skip if no longer designated
+            if (thing.Map.designationManager.DesignationOn(thing, Designation) == null)
+                return false;
+
+            // Check for timed explosives - avoid removing things about to explode
+            CompExplosive explosive = thing.TryGetComp<CompExplosive>();
+            if (explosive != null && explosive.wickStarted)
+                return false;
+
+            // Skip if forbidden or unreachable
+            if (thing.IsForbidden(pawn) ||
+                !pawn.CanReserve(thing, 1, -1) ||
+                !pawn.CanReach(thing, PathEndMode.Touch, Danger.Some))
+                return false;
+
+            return true;
+        }
+
+        #endregion
+
+        #region Common Helpers
+
+        /// <summary>
+        /// Generic helper method to create a building removal job that can be used by all subclasses
+        /// </summary>
+        /// <typeparam name="T">The specific target type to use with JobGiverManager</typeparam>
+        /// <param name="pawn">The pawn that will perform the removal job</param>
+        /// <param name="workTag">The work tag to use for eligibility checks</param>
+        /// <returns>A job to remove a designated building, or null if no valid job could be created</returns>
+        protected Job CreateRemovalJob<T>(Pawn pawn) where T : JobGiver_Common_RemoveBuilding_PawnControl
+        {
+            // Use the StandardTryGiveJob pattern with inline job creation logic
+            return Utility_JobGiverManager.StandardTryGiveJob<T>(
+                pawn,
+                WorkTag,
+                (p, forced) => {
+                    if (p?.Map == null)
+                        return null;
+
+                    // Get all targets from the GetTargets method
+                    List<Thing> targets = GetTargets(p.Map).ToList();
+                    if (targets.Count == 0)
+                        return null;
+
+                    // Use JobGiverManager for distance bucketing
+                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                        p,
+                        targets,
+                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
+                        DISTANCE_THRESHOLDS
+                    );
+
+                    // Find the best target to remove using the ValidateTarget method
+                    Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                        buckets,
+                        p,
+                        (thing, validator) => ValidateTarget(thing, validator) && p.CanReserve(thing, 1, -1, null, forced),
+                        null  // No need for reachability cache as we check in ValidateTarget
+                    );
+
+                    // Create job if target found
+                    if (bestTarget != null)
+                    {
+                        Job job = JobMaker.MakeJob(RemoveBuildingJob, bestTarget);
+                        Utility_DebugManager.LogNormal($"{p.LabelShort} created job to {RemoveBuildingJob.defName} {bestTarget.LabelCap}");
+                        return job;
+                    }
+
+                    return null;
+                },
+                debugJobDesc: DebugName);
         }
 
         /// <summary>
-        /// Create a job for removing a building using manager-driven bucket processing
+        /// Helper method that executes the core job creation logic separately from StandardTryGiveJob.
+        /// Used by subclasses that need to customize the job after it's created.
         /// </summary>
-        private Job TryCreateRemovalJob(Pawn pawn, bool forced)
+        protected Job ExecuteJobGiverInternal(Pawn pawn, List<Thing> targets)
         {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_targetCache.ContainsKey(mapId) || _targetCache[mapId].Count == 0)
+            if (pawn?.Map == null || targets.Count == 0)
                 return null;
 
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManagerOld.CreateDistanceBuckets(
+            // Use JobGiverManager for distance bucketing
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
-                _targetCache[mapId],
+                targets,
                 (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
                 DISTANCE_THRESHOLDS
             );
 
-            // Find the best target to remove
-            Thing bestTarget = Utility_JobGiverManagerOld.FindFirstValidTargetInBuckets(
+            // Find the best target to remove using the ValidateTarget method
+            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
-                (thing, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManagerOld.IsValidFactionInteraction(thing, p, requiresDesignator: true))
-                        return false;
-
-                    // Skip if no longer valid
-                    if (thing == null || thing.Destroyed || !thing.Spawned)
-                        return false;
-
-                    // Skip if no longer designated
-                    if (thing.Map.designationManager.DesignationOn(thing, Designation) == null)
-                        return false;
-
-                    // Check for timed explosives - avoid removing things about to explode
-                    CompExplosive explosive = thing.TryGetComp<CompExplosive>();
-                    if (explosive != null && explosive.wickStarted)
-                        return false;
-
-                    // Skip if forbidden or unreachable
-                    if (thing.IsForbidden(p) ||
-                        !p.CanReserve(thing, 1, -1, null, forced) ||
-                        !p.CanReach(thing, PathEndMode.Touch, Danger.Some))
-                        return false;
-
-                    return true;
-                },
-                _reachabilityCache
+                ValidateTarget,
+                null
             );
 
             // Create job if target found
@@ -174,18 +191,15 @@ namespace emitbreaker.PawnControl
             return null;
         }
 
-        /// <summary>
-        /// Resets all caches maintained by this JobGiver class
-        /// </summary>
-        public static void ResetCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_targetCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
-        }
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
             return $"JobGiver_RemoveBuilding_PawnControl({Designation?.defName ?? "null"})";
         }
+
+        #endregion
     }
 }

@@ -41,6 +41,7 @@ namespace emitbreaker.PawnControl
 
             // ✅ Ensure WorkSettings exist
             EnsureWorkSettingsInitialized(pawn);
+            EnsureWorkGiversPopulated(pawn);
 
             Utility_DebugManager.LogNormal($"Completed FullInitializePawn for {pawn.LabelShortCap} (forceLock={forceLock})");
 
