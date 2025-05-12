@@ -11,7 +11,7 @@ namespace emitbreaker.PawnControl
     /// <summary>
     /// Abstract base class for JobGivers that handle growing activities.
     /// </summary>
-    public abstract class JobGiver_Common_Growing_PawnControl : JobGiver_Scan_PawnControl
+    public abstract class JobGiver_Growing_PawnControl : JobGiver_Scan_PawnControl
     {
         #region Configuration
 
@@ -26,6 +26,12 @@ namespace emitbreaker.PawnControl
         #endregion
 
         #region Overrides
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// Whether to use Growing or PlantCutting work tag
@@ -63,7 +69,7 @@ namespace emitbreaker.PawnControl
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Default implementation calls CreateGrowingJob with the base class type
-            return CreateGrowingJob<JobGiver_Common_Growing_PawnControl>(pawn);
+            return CreateGrowingJob<JobGiver_Growing_PawnControl>(pawn);
         }
 
         #endregion
@@ -77,28 +83,46 @@ namespace emitbreaker.PawnControl
         /// <param name="pawn">The pawn that will perform the growing job</param>
         /// <param name="jobProcessor">Optional custom function to process cells and create specific job types</param>
         /// <returns>A job related to growing, or null if no valid job could be created</returns>
-        protected Job CreateGrowingJob<T>(Pawn pawn, Func<Pawn, List<IntVec3>, Job> jobProcessor = null) where T : JobGiver_Common_Growing_PawnControl
+        protected Job CreateGrowingJob<T>(Pawn pawn, Func<Pawn, List<IntVec3>, Job> jobProcessor = null)
+            where T : JobGiver_Growing_PawnControl
         {
-            // Use the StandardTryGiveJob pattern with the generic type
             return Utility_JobGiverManager.StandardTryGiveJob<T>(
                 pawn,
                 WorkTag,
-                (p, forced) => {
+                (p, forced) =>
+                {
                     if (p?.Map == null)
                         return null;
 
-                    // Get growing cells using the common method
+                    // 1) Gather all potential growing cells
                     List<IntVec3> cells = GetGrowingWorkCells(p);
                     if (cells == null || cells.Count == 0)
                         return null;
 
-                    // If a custom processor was provided, use it
-                    if (jobProcessor != null)
+                    // 2) Filter out any cells whose plant isn't valid for this pawn/faction
+                    var validCells = new List<IntVec3>();
+                    foreach (var cell in cells)
                     {
-                        return jobProcessor(p, cells);
+                        // get the plant (if any) at this location
+                        var plant = cell.GetPlant(p.Map);
+                        if (plant == null)
+                            continue;
+
+                        // skip if pawn isn't allowed to interact (no designator needed here)
+                        if (!Utility_JobGiverManager.IsValidFactionInteraction(plant, p, requiresDesignator: false))
+                            continue;
+
+                        validCells.Add(cell);
                     }
 
-                    // Default implementation (subclasses should override this or provide a processor)
+                    if (validCells.Count == 0)
+                        return null;
+
+                    // 3) If a custom processor was provided, use it with the filtered list
+                    if (jobProcessor != null)
+                        return jobProcessor(p, validCells);
+
+                    // 4) Otherwise no default behavior
                     return null;
                 },
                 debugJobDesc: JobDescription);

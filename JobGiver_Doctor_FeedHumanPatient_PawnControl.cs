@@ -12,6 +12,11 @@ namespace emitbreaker.PawnControl
     {
         #region Override Configuration
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
         protected override bool FeedHumanlikesOnly => true;
         protected override bool FeedAnimalsOnly => false;
         protected override bool FeedPrisonersOnly => false;
@@ -32,18 +37,41 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Processes cached targets for feeding jobs.
+        /// Processes cached targets for feeding humanlike patients.
         /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
+            // Verify pawn is allowed to feed patients based on faction
+            if (!IsValidFactionForFeedingPatients(pawn))
+                return null;
+
+            // Filter targets based on faction relationship
             foreach (var target in targets)
             {
-                if (target is Pawn patient && !ShouldSkipPawn(patient))
+                if (target is Pawn patient &&
+                    patient.RaceProps.Humanlike &&
+                    !patient.IsPrisoner &&
+                    !ShouldSkipPawn(patient) &&
+                    IsPatientValidForPawn(patient, pawn))
                 {
-                    return CreateFeedJob<JobGiver_Doctor_FeedHumanPatient_PawnControl>(patient);
+                    // Create feed job for the humanlike patient
+                    return CreateFeedJob<JobGiver_Doctor_FeedHumanPatient_PawnControl>(pawn);
                 }
             }
+
             return null;
+        }
+
+        /// <summary>
+        /// Enforces additional validation specific to humanlike patients
+        /// </summary>
+        protected override bool IsPatientValidForPawn(Pawn patient, Pawn feeder)
+        {
+            if (!base.IsPatientValidForPawn(patient, feeder))
+                return false;
+
+            // Additional check to ensure we're not handling prisoners
+            return !patient.IsPrisoner;
         }
 
         #endregion

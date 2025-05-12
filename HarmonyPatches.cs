@@ -897,49 +897,131 @@ namespace emitbreaker.PawnControl
 
             #endregion
 
-            // Whenever the player drags the slider in the Work tab...
-            [HarmonyPatch(typeof(Pawn_WorkSettings), nameof(Pawn_WorkSettings.SetPriority))]
-            public static class Patch_Pawn_WorkSettings_SetPriority
+            [HarmonyPatch(typeof(Game), "InitNewGame")]
+            public static class Patch_Game_InitNewGame_CleanupModExtensions
             {
-                // Grab the private 'pawn' field
-                private static readonly FieldInfo PawnField =
-                    AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
-
-                static void Postfix(Pawn_WorkSettings __instance)
+                public static void Prefix()
                 {
-                    var pawn = PawnField.GetValue(__instance) as Pawn;
-                    if (pawn == null) return;
-
-                    if (Utility_CacheManager.GetModExtension(pawn.def) == null) return;
-
-                    if (!Utility_TagManager.HasTagSet(pawn.def)) return;
-
-                    // Rebuild that pawn’s WorkGiversInOrder lists
-                    Utility_WorkSettingsManager.EnsureWorkGiversPopulated(pawn);
+                    // Clean up any lingering mod extensions from previous games
+                    Utility_CacheManager.CleanupAllRuntimeModExtensionsForNewGame();
                 }
             }
 
-
-            [HarmonyPatch(typeof(ThinkNode_PrioritySorter), nameof(ThinkNode_PrioritySorter.TryIssueJobPackage))]
-            public static class Patch_PrioritySorter_PreFilter
+            /// <summary>
+            /// Allows non-humanlike pawns to have work priorities by modifying the GetPriority method
+            /// to consider modded pawns with our extensions when checking for priority conversion.
+            /// </summary>
+            [HarmonyPatch(typeof(Pawn_WorkSettings), "GetPriority")]
+            public static class Patch_Pawn_WorkSettings_GetPriority
             {
-                public static readonly FieldInfo SubNodesField =
-                  AccessTools.Field(typeof(ThinkNode_PrioritySorter), "subNodes");
-
-                public static void Prefix(ThinkNode_PrioritySorter __instance, Pawn pawn)
+                public static bool Prefix(Pawn_WorkSettings __instance, WorkTypeDef w, ref int __result)
                 {
-                    if (pawn == null) return;
-
-                    var subNodes = (List<ThinkNode>)SubNodesField.GetValue(__instance);
-                    // Remove any JobGiver_PawnControl (or other ThinkNode_JobGiver) that says skip
-                    subNodes.RemoveAll(node =>
+                    // Make sure the field info is cached
+                    if (_pawnField == null)
                     {
-                        if (node is JobGiver_PawnControl jg)
-                            return jg.ShouldSkip(pawn);
-                        return true;
-                    });
+                        _pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+                        _prioritiesField = AccessTools.Field(typeof(Pawn_WorkSettings), "priorities");
+                    }
+
+                    // Get the pawn from the private field
+                    var pawn = _pawnField.GetValue(__instance) as Pawn;
+                    if (pawn == null) return true; // Let vanilla handle it
+
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension == null) return true; // Let vanilla handle it
+
+                    // Get priorities directly from the field
+                    var priorities = _prioritiesField.GetValue(__instance) as DefMap<WorkTypeDef, int>;
+                    if (priorities == null)
+                    {
+                        Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
+
+                        priorities = _prioritiesField.GetValue(__instance) as DefMap<WorkTypeDef, int>;
+
+                        if (priorities == null) return true; // Let vanilla handle it
+                    }
+
+                    // Get the raw priority value
+                    int rawPriority = priorities[w];
+
+                    // For our modded pawns, bypass the Humanlike check
+                    if (!pawn.RaceProps.Humanlike && rawPriority > 0)
+                    {
+                        // If work priorities are disabled in game settings, force to 3
+                        if (!Find.PlaySettings.useWorkPriorities)
+                        {
+                            __result = 3;
+                        }
+                        else
+                        {
+                            // Otherwise use the actual priority value
+                            __result = rawPriority;
+                        }
+
+                        // Skip the original method
+                        return false;
+                    }
+
+                    return true; // Let vanilla handle normal pawns
                 }
+
+                // Cache these for better performance
+                private static System.Reflection.FieldInfo _pawnField;
+                private static System.Reflection.FieldInfo _prioritiesField;
             }
+
+            /// <summary>
+            /// Patch to ensure work priority values are properly returned even when
+            /// the pawn doesn't have the Humanlike flag set.
+            /// </summary>
+            [HarmonyPatch(typeof(Pawn_WorkSettings), "WorkIsActive")]
+            public static class Patch_Pawn_WorkSettings_WorkIsActive
+            {
+                public static bool Prefix(Pawn_WorkSettings __instance, WorkTypeDef w, ref bool __result)
+                {
+                    if (_pawnField == null)
+                    {
+                        _pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+                    }
+
+                    var pawn = _pawnField.GetValue(__instance) as Pawn;
+                    if (pawn == null) return true; // Let vanilla handle it
+
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension == null) return true; // Let vanilla handle it
+
+                    // For our modded pawns only, we'll get the priority and check if > 0
+                    // This bypasses any Humanlike check in GetPriority
+                    if (!pawn.RaceProps.Humanlike && Utility_TagManager.WorkTypeEnabled(pawn.def, w))
+                    {
+                        int priority = __instance.GetPriority(w);
+                        __result = priority > 0;
+                        return false; // Skip original method
+                    }
+
+                    return true; // Let vanilla handle normal pawns
+                }
+
+                private static System.Reflection.FieldInfo _pawnField;
+            }
+
+            //[HarmonyPatch(typeof(ThinkNode_PrioritySorter), nameof(ThinkNode_PrioritySorter.TryIssueJobPackage))]
+            //public static class Patch_PrioritySorter_PreFilter
+            //{
+            //    public static readonly FieldInfo SubNodesField = AccessTools.Field(typeof(ThinkNode_PrioritySorter), "subNodes");
+
+            //    public static void Prefix(ThinkNode_PrioritySorter __instance, Pawn pawn)
+            //    {
+            //        if (pawn == null) return;
+
+            //        var subNodes = (List<ThinkNode>)SubNodesField.GetValue(__instance);
+            //        // Only remove those JobGiver_PawnControl nodes that say they should skip.
+            //        subNodes.RemoveAll(node =>
+            //            node is JobGiver_PawnControl jg
+            //            && jg.ShouldSkip(pawn)
+            //        );
+            //    }
+            //}
         }
 
         public static class Patch_Iteration3_DrafterInjection

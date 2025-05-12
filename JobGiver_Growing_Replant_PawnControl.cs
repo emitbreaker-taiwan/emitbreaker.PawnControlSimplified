@@ -44,6 +44,17 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        /// <summary>
+        /// Replanting is strictly a player faction activity
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
+
+        /// <summary>
         /// Get plant blueprint targets that need replanting
         /// </summary>
         protected override List<Blueprint_Install> GetConstructionTargets(Map map)
@@ -65,27 +76,66 @@ namespace emitbreaker.PawnControl
             }
 
             // Limit size for performance
-            int maxCacheSize = 200;
-            if (plantBlueprints.Count > maxCacheSize)
-            {
-                plantBlueprints = plantBlueprints.Take(maxCacheSize).ToList();
-            }
-
-            return plantBlueprints;
+            return LimitListSize(plantBlueprints, 200);
         }
 
         /// <summary>
-        /// Override TryGiveJob to use StandardTryGiveJob pattern
+        /// Replanting is strictly for player faction pawns only
         /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
+        protected override bool IsValidFactionForConstruction(Pawn pawn)
         {
-            return CreateDeliveryJob<JobGiver_Growing_Replant_PawnControl>(pawn);
+            // For replanting, only player faction pawns are allowed (not even slaves)
+            // This is because replanting is a player-designated activity
+            return pawn?.Faction == Faction.OfPlayer;
         }
 
+        /// <summary>
+        /// Double-check faction validation for replant targets
+        /// </summary>
+        protected override bool IsValidTargetFaction(Blueprint_Install target, Pawn pawn)
+        {
+            // For replanting, the target blueprint must be from player faction
+            return target != null && target.Faction == Faction.OfPlayer;
+        }
+
+        /// <summary>
+        /// Override ProcessCachedTargets for replant-specific logic
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Since replanting doesn't use resource sharing logic, we can return null or implement a basic behavior.
-            // For now, we'll return null to indicate no job is created from cached targets.
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
+
+            // First check faction validation - strict player faction check
+            if (pawn.Faction != Faction.OfPlayer)
+                return null;
+
+            // Convert generic Things to Blueprint_Install for plant blueprints
+            List<Blueprint_Install> plantBlueprints = targets
+                .OfType<Blueprint_Install>()
+                .Where(bp => bp.Spawned &&
+                           !bp.IsForbidden(pawn) &&
+                           bp.Faction == Faction.OfPlayer &&
+                           bp.def.entityDefToBuild is ThingDef entityDef &&
+                           entityDef.plant != null)
+                .ToList();
+
+            if (plantBlueprints.Count == 0)
+                return null;
+
+            // Try to find a valid replanting job
+            foreach (Blueprint_Install blueprint in plantBlueprints)
+            {
+                // Check if we can work with this blueprint
+                if (!GenConstruct.CanConstruct(blueprint, pawn, false))
+                    continue;
+
+                // Try to create a job for this target
+                Job job = ResourceDeliverJobFor(pawn, blueprint);
+                if (job != null)
+                    return job;
+            }
+
             return null;
         }
 
@@ -121,6 +171,15 @@ namespace emitbreaker.PawnControl
             return false;
         }
 
+        /// <summary>
+        /// Override map requirements to verify player faction is active
+        /// </summary>
+        protected override bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // For replanting, ensure the map exists and the pawn is player faction
+            return pawn?.Map != null && pawn.Faction == Faction.OfPlayer;
+        }
+
         #endregion
 
         #region Utility
@@ -130,9 +189,6 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static new void ResetStaticData()
         {
-            // Call base to initialize common strings
-            JobGiver_Common_ConstructDeliverResources_PawnControl<Blueprint_Install>.ResetStaticData();
-
             // Initialize replant-specific strings
             BlockedByRoofTranslated = "BlockedByRoof".Translate();
             BeingCarriedByTranslated = "BeingCarriedBy".Translate();

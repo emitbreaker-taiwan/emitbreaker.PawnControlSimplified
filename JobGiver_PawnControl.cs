@@ -28,6 +28,43 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected virtual int CacheUpdateInterval => 120;
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected abstract bool RequiresDesignator { get; }
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected abstract bool RequiresMapZoneorArea { get; }
+
+        /// <summary>
+        /// Whether this job giver requires player faction specifically (for jobs like deconstruct)
+        /// </summary>
+        protected abstract bool RequiresPlayerFaction { get; }
+
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected abstract PawnEnumTags RequiredTag { get; }
+
+        /// <summary>
+        /// Checks if a non-humanlike pawn has the required capabilities for this job giver
+        /// </summary>
+        protected abstract bool HasRequiredCapabilities(Pawn pawn);
+
+        /// <summary>
+        /// The designation type this job giver handles
+        /// </summary>
+        protected abstract DesignationDef TargetDesignation { get; }
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected abstract JobDef WorkJobDef { get; }
+
         #endregion
 
         #region Core flow
@@ -98,6 +135,10 @@ namespace emitbreaker.PawnControl
 
             // 4) Skip if mod-extension or global-state rules block it
             if (!Utility_JobGiverManager.IsEligibleForSpecializedJobGiver(pawn, WorkTag))
+                return true;
+
+            // 5) Skip if pawn has no reuired capabilities
+            if (!HasRequiredCapabilities(pawn))
                 return true;
 
             return false;

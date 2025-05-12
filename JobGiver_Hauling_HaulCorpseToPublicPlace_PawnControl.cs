@@ -17,6 +17,17 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.HaulCorpseToPublicPlace;
+
+        /// <summary>
         /// Human-readable name for debug logging
         /// </summary>
         protected override string DebugName => "HaulCorpseToPublicPlace";
@@ -100,12 +111,12 @@ namespace emitbreaker.PawnControl
                     if (bestTarget is Building_Grave grave && grave.Corpse != null)
                     {
                         // Create job to dig up corpse and display it
-                        return JobMaker.MakeJob(JobDefOf.HaulCorpseToPublicPlace, grave.Corpse, grave, displayCell);
+                        return JobMaker.MakeJob(WorkJobDef, grave.Corpse, grave, displayCell);
                     }
                     else if (bestTarget is Corpse corpse)
                     {
                         // Create job to display corpse
-                        return JobMaker.MakeJob(JobDefOf.HaulCorpseToPublicPlace, corpse, null, displayCell);
+                        return JobMaker.MakeJob(WorkJobDef, corpse, null, displayCell);
                     }
 
                     return null;
@@ -134,12 +145,12 @@ namespace emitbreaker.PawnControl
             if (bestTarget is Building_Grave grave && grave.Corpse != null)
             {
                 // Create job to dig up corpse and display it
-                return JobMaker.MakeJob(JobDefOf.HaulCorpseToPublicPlace, grave.Corpse, grave, displayCell);
+                return JobMaker.MakeJob(WorkJobDef, grave.Corpse, grave, displayCell);
             }
             else if (bestTarget is Corpse corpse)
             {
                 // Create job to display corpse
-                return JobMaker.MakeJob(JobDefOf.HaulCorpseToPublicPlace, corpse, null, displayCell);
+                return JobMaker.MakeJob(WorkJobDef, corpse, null, displayCell);
             }
 
             return null;

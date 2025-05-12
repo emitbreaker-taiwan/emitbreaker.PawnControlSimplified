@@ -15,6 +15,11 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.ReleasePrisoner;
+
+        /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
         protected override string DebugName => "ReleasePrisoner";
@@ -191,7 +196,7 @@ namespace emitbreaker.PawnControl
             IntVec3 releaseCell;
             if (RCellFinder.TryFindPrisonerReleaseCell(prisoner, warden, out releaseCell))
             {
-                Job job = JobMaker.MakeJob(JobDefOf.ReleasePrisoner, prisoner, releaseCell);
+                Job job = JobMaker.MakeJob(WorkJobDef, prisoner, releaseCell);
                 job.count = 1;
 
                 Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to release prisoner {prisoner.LabelShort}");

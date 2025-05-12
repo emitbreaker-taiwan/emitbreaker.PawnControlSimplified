@@ -17,9 +17,20 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        /// <summary>
         /// Default update interval is 3 seconds - bills don't change that often
         /// </summary>
         protected override int CacheUpdateInterval => 180;
+
+        /// <summary>
+        /// Whether this job giver requires player faction (default true for workbench jobs)
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Default distance thresholds for workbenches (15, 30, 60 tiles)
@@ -74,29 +85,94 @@ namespace emitbreaker.PawnControl
         protected static readonly Dictionary<int, List<Thing>> _billGiversCache = new Dictionary<int, List<Thing>>();
         protected static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
         protected static readonly Dictionary<int, int> _lastBillGiverCacheUpdate = new Dictionary<int, int>();
-        
+
         // Cache for ingredient selection
         private static readonly Dictionary<Bill, Dictionary<Pawn, int>> _billFailTicksCache = new Dictionary<Bill, Dictionary<Pawn, int>>();
         private static readonly List<IngredientCount> _missingIngredients = new List<IngredientCount>();
         private static readonly List<ThingCount> _chosenIngThings = new List<ThingCount>();
-        
+
         // Helper static collections for ingredient processing
         private static readonly DefCountList _availableCounts = new DefCountList();
 
         #endregion
 
-        #region Core flow
+        #region Faction Validation
 
+        /// <summary>
+        /// Common implementation for ShouldSkip that enforces faction requirements
+        /// </summary>
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            if (base.ShouldSkip(pawn))
+                return true;
+
+            // Check faction validation - bill processing requires player/slave pawns
+            if (!IsValidFactionForBillWork(pawn))
+                return true;
+
+            // Check compatibility with non-humanlike pawns
+            if (ShouldSkipByCapability(pawn))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Determines if a pawn's faction is allowed to perform bill work
+        /// Can be overridden by derived classes to customize faction rules
+        /// </summary>
+        protected virtual bool IsValidFactionForBillWork(Pawn pawn)
+        {
+            // Only player pawns and player's slaves can process bills by default
+            return pawn != null && (pawn.Faction == Faction.OfPlayer ||
+                   (pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer));
+        }
+
+        /// <summary>
+        /// Checks if a pawn should skip this job giver due to capability restrictions
+        /// </summary>
+        protected virtual bool ShouldSkipByCapability(Pawn pawn)
+        {
+            // If it's a humanlike pawn, no need for additional capability checks
+            if (pawn.RaceProps.Humanlike)
+                return false;
+
+            // For non-humanlike pawns, check if they have the required capabilities
+            // or if they're allowed to ignore capability restrictions
+            NonHumanlikePawnControlExtension modExtension =
+                pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
+
+            if (modExtension != null && modExtension.ignoreCapability)
+                return false; // Skip capability check if extension says to ignore
+
+            // Otherwise apply whatever capability checks are needed for this bill type
+            // (derived classes should override this for specific capabilities)
+            return !HasRequiredCapabilities(pawn);
+        }
+
+        #endregion
+
+        #region Core Flow
+
+        /// <summary>
+        /// Standard implementation of TryGiveJob that ensures proper faction validation
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // Use the standardized job creation pattern
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Common_DoBill_PawnControl>(
                 pawn,
                 WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
+                (p, forced) => {
+                    // Extra faction validation in case this is called directly
+                    if (!IsValidFactionForBillWork(p))
                         return null;
 
+                    // Check if map requirements are met
+                    if (!AreMapRequirementsMet(p))
+                        return null;
+
+                    // Get bill givers
                     int mapId = p.Map.uniqueID;
                     int now = Find.TickManager.TicksGame;
 
@@ -123,27 +199,45 @@ namespace emitbreaker.PawnControl
                     if (validBillGivers.Count == 0)
                         return null;
 
-                    // Use distance bucketing to find the closest valid bill giver
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        validBillGivers,
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Find bill giver with work
-                    Thing targetBillGiver = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, worker) => HasWorkForPawn(thing, worker, forced),
-                        _reachabilityCache);
-
-                    if (targetBillGiver == null)
-                        return null;
-
-                    // Create and return a job for the bill giver
-                    return StartOrResumeBillJob(p, targetBillGiver as IBillGiver, forced);
+                    // Find the best bill giver
+                    return FindBestBillGiverJob(p, validBillGivers, forced);
                 },
                 debugJobDesc: DebugName);
+        }
+
+        /// <summary>
+        /// Checks if the map meets requirements for bill processing
+        /// </summary>
+        protected virtual bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // For bill processing, we just need a valid map
+            return pawn?.Map != null;
+        }
+
+        /// <summary>
+        /// Finds the best bill giver and creates a job
+        /// </summary>
+        protected virtual Job FindBestBillGiverJob(Pawn pawn, List<Thing> validBillGivers, bool forced)
+        {
+            // Use distance bucketing to find the closest valid bill giver
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                validBillGivers,
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find bill giver with work
+            Thing targetBillGiver = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (thing, worker) => HasWorkForPawn(thing, worker, forced),
+                _reachabilityCache);
+
+            if (targetBillGiver == null)
+                return null;
+
+            // Create and return a job for the bill giver
+            return StartOrResumeBillJob(pawn, targetBillGiver as IBillGiver, forced);
         }
 
         #endregion
@@ -156,7 +250,7 @@ namespace emitbreaker.PawnControl
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
             // This implementation mirrors the functionality in WorkGiver_DoBill.PotentialWorkThingRequest
-            if (map == null) 
+            if (map == null)
                 yield break;
 
             // First check fixed bill giver defs
@@ -202,7 +296,7 @@ namespace emitbreaker.PawnControl
             Pawn pawn = thing as Pawn;
             Corpse corpse = thing as Corpse;
             Pawn innerPawn = null;
-            
+
             if (corpse != null)
             {
                 innerPawn = corpse.InnerPawn;
@@ -258,12 +352,12 @@ namespace emitbreaker.PawnControl
         protected virtual bool IsValidBillGiver(Thing thing, Pawn pawn, bool forced = false)
         {
             // Basic validity checks
-            if (!(thing is IBillGiver billGiver) || 
-                !ThingIsUsableBillGiver(thing) || 
-                !billGiver.BillStack.AnyShouldDoNow || 
+            if (!(thing is IBillGiver billGiver) ||
+                !ThingIsUsableBillGiver(thing) ||
+                !billGiver.BillStack.AnyShouldDoNow ||
                 !billGiver.UsableForBillsAfterFueling() ||
-                !pawn.CanReserve(thing, 1, -1, null, forced) || 
-                thing.IsBurning() || 
+                !pawn.CanReserve(thing, 1, -1, null, forced) ||
+                thing.IsBurning() ||
                 thing.IsForbidden(pawn))
             {
                 return false;
@@ -310,29 +404,42 @@ namespace emitbreaker.PawnControl
         protected virtual Job StartOrResumeBillJob(Pawn pawn, IBillGiver giver, bool forced = false)
         {
             bool isFloatMenuCheck = FloatMenuMakerMap.makingFor == pawn;
-            
+
             for (int i = 0; i < giver.BillStack.Count; i++)
             {
                 Bill bill = giver.BillStack[i];
-                
+
                 // Skip bills that don't match our work type or aren't ready
-                if ((bill.recipe.requiredGiverWorkType != null && bill.recipe.requiredGiverWorkType != Utility_WorkTypeManager.Named(WorkTag)) || 
-                    (Find.TickManager.TicksGame <= GetNextBillStartTick(bill, pawn) && !isFloatMenuCheck) || 
-                    !bill.ShouldDoNow() || 
+                if ((bill.recipe.requiredGiverWorkType != null && bill.recipe.requiredGiverWorkType != Utility_WorkTypeManager.Named(WorkTag)) ||
+                    (Find.TickManager.TicksGame <= GetNextBillStartTick(bill, pawn) && !isFloatMenuCheck) ||
+                    !bill.ShouldDoNow() ||
                     !bill.PawnAllowedToStartAnew(pawn))
                 {
                     continue;
                 }
 
-                // Check skill requirements
-                SkillRequirement failedReq = bill.recipe.FirstSkillRequirementPawnDoesntSatisfy(pawn);
-                if (failedReq != null)
+                // Check skill requirements - respect ignoreCapability from mod extension
+                bool skipSkillCheck = false;
+                if (!pawn.RaceProps.Humanlike)
                 {
-                    if (isFloatMenuCheck)
+                    NonHumanlikePawnControlExtension modExt = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
+                    if (modExt != null && modExt.ignoreCapability)
                     {
-                        JobFailReason.Is("UnderRequiredSkill".Translate(failedReq.minLevel), bill.Label);
+                        skipSkillCheck = true;
                     }
-                    continue;
+                }
+
+                if (!skipSkillCheck)
+                {
+                    SkillRequirement failedReq = bill.recipe.FirstSkillRequirementPawnDoesntSatisfy(pawn);
+                    if (failedReq != null)
+                    {
+                        if (isFloatMenuCheck)
+                        {
+                            JobFailReason.Is("UnderRequiredSkill".Translate(failedReq.minLevel), bill.Label);
+                        }
+                        continue;
+                    }
                 }
 
                 // Handle special bill types
@@ -363,8 +470,8 @@ namespace emitbreaker.PawnControl
                 {
                     if (billProductionWithUft.BoundUft != null)
                     {
-                        if (billProductionWithUft.BoundWorker == pawn && 
-                            pawn.CanReserveAndReach(billProductionWithUft.BoundUft, PathEndMode.Touch, Danger.Deadly) && 
+                        if (billProductionWithUft.BoundWorker == pawn &&
+                            pawn.CanReserveAndReach(billProductionWithUft.BoundUft, PathEndMode.Touch, Danger.Deadly) &&
                             !billProductionWithUft.BoundUft.IsForbidden(pawn))
                         {
                             return FinishUftJob(pawn, billProductionWithUft.BoundUft, billProductionWithUft);
@@ -384,7 +491,7 @@ namespace emitbreaker.PawnControl
                 {
                     return WorkOnFormedBill((Thing)giver, billAutonomous);
                 }
-                
+
                 // Try to find ingredients for the bill
                 _missingIngredients.Clear();
                 if (!TryFindBestBillIngredients(bill, pawn, (Thing)giver, _chosenIngThings, isFloatMenuCheck ? _missingIngredients : null))
@@ -409,12 +516,12 @@ namespace emitbreaker.PawnControl
                                 string missingItemsList = _missingIngredients
                                     .Select(missing => missing.Summary)
                                     .ToCommaList();
-                                
+
                                 JobFailReason.Is("MissingMaterials".Translate(missingItemsList), bill.Label);
                             }
                         }
                     }
-                    
+
                     _chosenIngThings.Clear();
                     continue;
                 }
@@ -426,7 +533,7 @@ namespace emitbreaker.PawnControl
                     bool missingUniqueIngredient = false;
                     foreach (Thing uniqueRequiredIngredient in billMedical2.uniqueRequiredIngredients)
                     {
-                        if (uniqueRequiredIngredient.IsForbidden(pawn) || 
+                        if (uniqueRequiredIngredient.IsForbidden(pawn) ||
                             !pawn.CanReserveAndReach(uniqueRequiredIngredient, PathEndMode.OnCell, Danger.Deadly))
                         {
                             missingUniqueIngredient = true;
@@ -436,10 +543,10 @@ namespace emitbreaker.PawnControl
                             }
                             break;
                         }
-                        
+
                         _chosenIngThings.Add(new ThingCount(uniqueRequiredIngredient, 1));
                     }
-                    
+
                     if (missingUniqueIngredient)
                     {
                         _chosenIngThings.Clear();
@@ -451,12 +558,12 @@ namespace emitbreaker.PawnControl
                 Job haulOffJob;
                 Job result = TryStartNewDoBillJob(pawn, bill, giver, _chosenIngThings, out haulOffJob);
                 _chosenIngThings.Clear();
-                
+
                 if (haulOffJob != null)
                 {
                     return haulOffJob;
                 }
-                
+
                 if (result != null)
                 {
                     return result;
@@ -516,7 +623,7 @@ namespace emitbreaker.PawnControl
             Job job = JobMaker.MakeJob(JobDefOf.DoBill, (Thing)giver);
             job.targetQueueB = new List<LocalTargetInfo>(chosenIngredients.Count);
             job.countQueue = new List<int>(chosenIngredients.Count);
-            
+
             for (int i = 0; i < chosenIngredients.Count; i++)
             {
                 job.targetQueueB.Add(chosenIngredients[i].Thing);
@@ -539,21 +646,21 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected virtual UnfinishedThing ClosestUnfinishedThingForBill(Pawn pawn, Bill_ProductionWithUft bill)
         {
-            Predicate<Thing> validator = (Thing t) => 
-                !t.IsForbidden(pawn) && 
-                t is UnfinishedThing unfinished && 
-                unfinished.Recipe == bill.recipe && 
-                unfinished.Creator == pawn && 
-                unfinished.ingredients.TrueForAll(x => bill.IsFixedOrAllowedIngredient(x.def)) && 
+            Predicate<Thing> validator = (Thing t) =>
+                !t.IsForbidden(pawn) &&
+                t is UnfinishedThing unfinished &&
+                unfinished.Recipe == bill.recipe &&
+                unfinished.Creator == pawn &&
+                unfinished.ingredients.TrueForAll(x => bill.IsFixedOrAllowedIngredient(x.def)) &&
                 pawn.CanReserve(t);
-                
+
             return (UnfinishedThing)GenClosest.ClosestThingReachable(
-                pawn.Position, 
-                pawn.Map, 
-                ThingRequest.ForDef(bill.recipe.unfinishedThingDef), 
-                PathEndMode.InteractionCell, 
-                TraverseParms.For(pawn, pawn.NormalMaxDanger()), 
-                9999f, 
+                pawn.Position,
+                pawn.Map,
+                ThingRequest.ForDef(bill.recipe.unfinishedThingDef),
+                PathEndMode.InteractionCell,
+                TraverseParms.For(pawn, pawn.NormalMaxDanger()),
+                9999f,
                 validator);
         }
 
@@ -568,48 +675,48 @@ namespace emitbreaker.PawnControl
         {
             chosen.Clear();
             missingIngredients?.Clear();
-            
+
             if (bill.recipe.ingredients.Count == 0)
             {
                 return true;
             }
-            
+
             IntVec3 rootCell = GetBillGiverRootCell(billGiver, pawn);
             Region rootRegion = rootCell.GetRegion(pawn.Map);
             if (rootRegion == null)
             {
                 return false;
             }
-            
+
             // Predicate for usable ingredients
-            Predicate<Thing> baseValidator = thing => 
-                thing.Spawned && 
-                IsUsableIngredient(thing, bill) && 
-                (float)(thing.Position - billGiver.Position).LengthHorizontalSquared < bill.ingredientSearchRadius * bill.ingredientSearchRadius && 
-                !thing.IsForbidden(pawn) && 
+            Predicate<Thing> baseValidator = thing =>
+                thing.Spawned &&
+                IsUsableIngredient(thing, bill) &&
+                (float)(thing.Position - billGiver.Position).LengthHorizontalSquared < bill.ingredientSearchRadius * bill.ingredientSearchRadius &&
+                !thing.IsForbidden(pawn) &&
                 pawn.CanReserve(thing);
-                
+
             // Special handling for medical bills with pawns
             bool billGiverIsPawn = billGiver is Pawn;
             List<Thing> relevantThings = new List<Thing>();
-            
+
             // For medical operations on pawns, prioritize medicine
             if (billGiverIsPawn)
             {
                 // Special medicine handling
                 MedicalCareCategory medicalCare = GetMedicalCareCategory(billGiver);
                 List<Thing> availableMedicine = pawn.Map.listerThings.ThingsInGroup(ThingRequestGroup.Medicine)
-                    .Where(med => 
-                        medicalCare.AllowsMedicine(med.def) && 
-                        baseValidator(med) && 
+                    .Where(med =>
+                        medicalCare.AllowsMedicine(med.def) &&
+                        baseValidator(med) &&
                         pawn.CanReach(med, PathEndMode.OnCell, Danger.Deadly))
                     .OrderByDescending(med => med.GetStatValue(StatDefOf.MedicalPotency))
                     .ThenBy(med => med.Position.DistanceToSquared(billGiver.Position))
                     .ToList();
-                    
+
                 relevantThings.AddRange(availableMedicine);
-                
-                if (bill.recipe.ingredients.Any(ing => ing.filter.Allows(ThingDefOf.MedicineIndustrial)) && 
+
+                if (bill.recipe.ingredients.Any(ing => ing.filter.Allows(ThingDefOf.MedicineIndustrial)) &&
                     TryFindBestBillIngredientsInSet(availableMedicine, bill, chosen, rootCell, true, missingIngredients))
                 {
                     return true;
@@ -625,26 +732,26 @@ namespace emitbreaker.PawnControl
                     return true;
                 }
             }
-            
+
             // Need to search for ingredients
             TraverseParms traverseParams = TraverseParms.For(pawn);
             HashSet<Thing> processedThings = new HashSet<Thing>(relevantThings);
             List<Thing> newRelevantThings = new List<Thing>();
             RegionEntryPredicate regionEntryPredicate;
-            
+
             // Set up region search conditions
             if (Math.Abs(999f - bill.ingredientSearchRadius) >= 1f)
             {
                 float radiusSq = bill.ingredientSearchRadius * bill.ingredientSearchRadius;
-                regionEntryPredicate = (Region from, Region r) => 
+                regionEntryPredicate = (Region from, Region r) =>
                 {
                     if (!r.Allows(traverseParams, isDestination: false))
                         return false;
-                        
+
                     CellRect extentsClose = r.extentsClose;
                     int dx = Math.Abs(billGiver.Position.x - Math.Max(extentsClose.minX, Math.Min(billGiver.Position.x, extentsClose.maxX)));
                     int dz = Math.Abs(billGiver.Position.z - Math.Max(extentsClose.minZ, Math.Min(billGiver.Position.z, extentsClose.maxZ)));
-                    
+
                     return (float)(dx * dx + dz * dz) <= radiusSq;
                 };
             }
@@ -652,18 +759,18 @@ namespace emitbreaker.PawnControl
             {
                 regionEntryPredicate = (Region from, Region r) => r.Allows(traverseParams, isDestination: false);
             }
-            
+
             // Search for ingredients by traversing regions
             int adjacentRegionsAvailable = rootRegion.Neighbors.Count(region => regionEntryPredicate(rootRegion, region));
             int regionsProcessed = 0;
             bool foundAllIngredients = false;
-            
+
             // Always check the starting set
             if (TryFindBestBillIngredientsInSet(relevantThings, bill, chosen, rootCell, false, missingIngredients))
             {
                 foundAllIngredients = true;
             }
-            
+
             // Process regions to find ingredients
             RegionProcessor regionProcessor = delegate (Region r)
             {
@@ -671,9 +778,9 @@ namespace emitbreaker.PawnControl
                 List<Thing> regionThings = r.ListerThings.ThingsMatching(ThingRequest.ForGroup(ThingRequestGroup.HaulableEver));
                 foreach (Thing thing in regionThings)
                 {
-                    if (!processedThings.Contains(thing) && 
-                        ReachabilityWithinRegion.ThingFromRegionListerReachable(thing, r, PathEndMode.ClosestTouch, pawn) && 
-                        baseValidator(thing) && 
+                    if (!processedThings.Contains(thing) &&
+                        ReachabilityWithinRegion.ThingFromRegionListerReachable(thing, r, PathEndMode.ClosestTouch, pawn) &&
+                        baseValidator(thing) &&
                         !(thing.def.IsMedicine && billGiverIsPawn))
                     {
                         newRelevantThings.Add(thing);
@@ -682,23 +789,23 @@ namespace emitbreaker.PawnControl
                 }
 
                 regionsProcessed++;
-                
+
                 // Check if we've found enough ingredients after processing some regions
                 if (newRelevantThings.Count > 0 && regionsProcessed > adjacentRegionsAvailable)
                 {
                     relevantThings.AddRange(newRelevantThings);
                     newRelevantThings.Clear();
-                    
+
                     if (TryFindBestBillIngredientsInSet(relevantThings, bill, chosen, rootCell, false, missingIngredients))
                     {
                         foundAllIngredients = true;
                         return true; // Stop traversal
                     }
                 }
-                
+
                 return false;
             };
-            
+
             // Traverse regions looking for ingredients
             RegionTraverser.BreadthFirstTraverse(rootRegion, regionEntryPredicate, regionProcessor, 99999);
             return foundAllIngredients;
@@ -709,8 +816,8 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected virtual bool TryFindBestBillIngredientsInSet(
             List<Thing> availableThings,
-            Bill bill, 
-            List<ThingCount> chosen, 
+            Bill bill,
+            List<ThingCount> chosen,
             IntVec3 rootCell,
             bool alreadySorted,
             List<IngredientCount> missingIngredients)
@@ -720,7 +827,7 @@ namespace emitbreaker.PawnControl
                 return TryFindBestBillIngredientsInSet_AllowMix(
                     availableThings, bill, chosen, rootCell, missingIngredients);
             }
-            
+
             return TryFindBestBillIngredientsInSet_NoMix(
                 availableThings, bill, chosen, rootCell, alreadySorted, missingIngredients);
         }
@@ -739,62 +846,62 @@ namespace emitbreaker.PawnControl
             // Sort by distance if needed
             if (!alreadySorted)
             {
-                availableThings.Sort((t1, t2) => 
+                availableThings.Sort((t1, t2) =>
                     (t1.Position - rootCell).LengthHorizontalSquared.CompareTo((t2.Position - rootCell).LengthHorizontalSquared));
             }
-            
+
             // Clear prior results
             chosen.Clear();
             _availableCounts.Clear();
             missingIngredients?.Clear();
-            
+
             // Generate count list from available things
             _availableCounts.GenerateFrom(availableThings);
-            
+
             // Try to satisfy each ingredient
             foreach (IngredientCount ingredientNeeded in bill.recipe.ingredients)
             {
                 bool foundIngredient = false;
-                
+
                 // Look for matching ingredients
                 for (int i = 0; i < _availableCounts.Count; i++)
                 {
                     ThingDef def = _availableCounts.GetDef(i);
                     float countAvailable = _availableCounts.GetCount(i);
-                    float countNeeded = bill.recipe.ignoreIngredientCountTakeEntireStacks ? 
+                    float countNeeded = bill.recipe.ignoreIngredientCountTakeEntireStacks ?
                         1 : ingredientNeeded.CountRequiredOfFor(def, bill.recipe, bill);
-                        
+
                     // Skip if not enough or not allowed
-                    if ((countNeeded > countAvailable && !bill.recipe.ignoreIngredientCountTakeEntireStacks) || 
-                        !ingredientNeeded.filter.Allows(def) || 
+                    if ((countNeeded > countAvailable && !bill.recipe.ignoreIngredientCountTakeEntireStacks) ||
+                        !ingredientNeeded.filter.Allows(def) ||
                         (!ingredientNeeded.IsFixedIngredient && !bill.ingredientFilter.Allows(def)))
                     {
                         continue;
                     }
-                    
+
                     // Find matching things
                     for (int j = 0; j < availableThings.Count; j++)
                     {
                         Thing thing = availableThings[j];
                         if (thing.def != def)
                             continue;
-                            
+
                         int numAlreadyChosen = ThingCountUtility.CountOf(chosen, thing);
                         int numAvailable = thing.stackCount - numAlreadyChosen;
-                        
+
                         if (numAvailable <= 0)
                             continue;
-                            
+
                         if (bill.recipe.ignoreIngredientCountTakeEntireStacks)
                         {
                             ThingCountUtility.AddToList(chosen, thing, numAvailable);
                             return true;
                         }
-                        
+
                         int numToTake = Mathf.Min(Mathf.FloorToInt(countNeeded), numAvailable);
                         ThingCountUtility.AddToList(chosen, thing, numToTake);
                         countNeeded -= numToTake;
-                        
+
                         if (countNeeded < 0.001f)
                         {
                             foundIngredient = true;
@@ -802,25 +909,25 @@ namespace emitbreaker.PawnControl
                             break;
                         }
                     }
-                    
+
                     if (foundIngredient)
                         break;
                 }
-                
+
                 // If we couldn't find this ingredient, record it as missing
                 if (!foundIngredient)
                 {
                     if (missingIngredients == null)
                         return false;
-                        
+
                     missingIngredients.Add(ingredientNeeded);
                 }
             }
-            
+
             // Report if any ingredients are missing
             if (missingIngredients != null)
                 return missingIngredients.Count == 0;
-                
+
             return true;
         }
 
@@ -836,48 +943,48 @@ namespace emitbreaker.PawnControl
         {
             chosen.Clear();
             missingIngredients?.Clear();
-            
+
             // Sort by value per unit and distance
             availableThings.SortBy(
                 t => bill.recipe.IngredientValueGetter.ValuePerUnitOf(t.def),
                 t => (t.Position - rootCell).LengthHorizontalSquared);
-                
+
             // Process each ingredient
             foreach (IngredientCount ingredientNeeded in bill.recipe.ingredients)
             {
                 float countNeeded = ingredientNeeded.GetBaseCount();
-                
+
                 // Try to satisfy with available things
                 foreach (Thing thing in availableThings)
                 {
-                    if (!ingredientNeeded.filter.Allows(thing) || 
+                    if (!ingredientNeeded.filter.Allows(thing) ||
                         (!ingredientNeeded.IsFixedIngredient && !bill.ingredientFilter.Allows(thing)))
                         continue;
-                        
+
                     float valuePerUnit = bill.recipe.IngredientValueGetter.ValuePerUnitOf(thing.def);
                     int numToTake = Mathf.Min(Mathf.CeilToInt(countNeeded / valuePerUnit), thing.stackCount);
-                    
+
                     ThingCountUtility.AddToList(chosen, thing, numToTake);
                     countNeeded -= numToTake * valuePerUnit;
-                    
+
                     if (countNeeded <= 0.0001f)
                         break;
                 }
-                
+
                 // If we couldn't satisfy this ingredient
                 if (countNeeded > 0.0001f)
                 {
                     if (missingIngredients == null)
                         return false;
-                        
+
                     missingIngredients.Add(ingredientNeeded);
                 }
             }
-            
+
             // Report if any ingredients are missing
             if (missingIngredients != null)
                 return missingIngredients.Count == 0;
-                
+
             return true;
         }
 

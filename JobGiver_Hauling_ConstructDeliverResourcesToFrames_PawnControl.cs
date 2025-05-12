@@ -1,5 +1,4 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -26,6 +25,11 @@ namespace emitbreaker.PawnControl
         protected override string JobDescription => "delivering resources to frames (hauling) assignment";
 
         /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+
+        /// <summary>
         /// Frame delivery is important hauling
         /// </summary>
         protected override float GetBasePriority(string workTag)
@@ -42,10 +46,10 @@ namespace emitbreaker.PawnControl
 
             var result = new List<Frame>();
 
-            // Find all frames needing materials
+            // Find all frames needing materials, regardless of faction
             foreach (Frame frame in map.listerThings.ThingsInGroup(ThingRequestGroup.Construction))
             {
-                if (frame != null && frame.Spawned && !frame.IsForbidden(Faction.OfPlayer))
+                if (frame != null && frame.Spawned)
                 {
                     result.Add(frame);
                 }
@@ -62,25 +66,37 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Override TryGiveJob to use StandardTryGiveJob pattern
-        /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return CreateDeliveryJob<JobGiver_Hauling_ConstructDeliverResourcesToFrames_PawnControl>(pawn);
-        }
-
-        /// <summary>
         /// Processes cached targets to create a job for the pawn.
         /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            foreach (var target in targets)
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
+
+            // First check faction validation
+            if (!IsValidFactionForConstruction(pawn))
+                return null;
+
+            // Convert to frames and filter for valid faction match
+            List<Frame> frames = targets
+                .OfType<Frame>()
+                .Where(f => f.Spawned && !f.IsForbidden(pawn) && IsValidTargetFaction(f, pawn))
+                .ToList();
+
+            if (frames.Count == 0)
+                return null;
+
+            // Try to create a job for each valid frame
+            foreach (Frame frame in frames)
             {
-                if (target is Frame frame && !frame.IsForbidden(pawn) && pawn.CanReserve(frame))
+                if (pawn.CanReserve(frame))
                 {
-                    return ResourceDeliverJobFor(pawn, frame);
+                    Job job = ResourceDeliverJobFor(pawn, frame);
+                    if (job != null)
+                        return job;
                 }
             }
+
             return null;
         }
 
@@ -133,15 +149,16 @@ namespace emitbreaker.PawnControl
 
         /// <summary>
         /// Determines if a thing is a valid nearby construction site needing resources
+        /// Ensures proper faction matching
         /// </summary>
         protected override bool IsNewValidNearbyNeeder(Thing t, HashSet<Thing> nearbyNeeders, Frame originalTarget, Pawn pawn)
         {
-            return t is Frame &&
-                   t != originalTarget &&
-                   t.Faction == pawn.Faction &&
-                   !nearbyNeeders.Contains(t) &&
-                   !t.IsForbidden(pawn) &&
-                   pawn.CanReserve(t);
+            return t is Frame frame &&
+                   frame != originalTarget &&
+                   frame.Faction == pawn.Faction &&  // Must match pawn's faction
+                   !nearbyNeeders.Contains(frame) &&
+                   !frame.IsForbidden(pawn) &&
+                   pawn.CanReserve(frame);
         }
 
         #endregion

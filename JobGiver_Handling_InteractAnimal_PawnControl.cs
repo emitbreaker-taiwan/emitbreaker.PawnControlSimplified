@@ -15,6 +15,11 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.TakeInventory;
+
+        /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
         protected abstract override string DebugName { get; }
@@ -466,7 +471,7 @@ namespace emitbreaker.PawnControl
             int count = FoodUtility.StackCountForNutrition(nutrition, nutritionPerItem);
 
             // Create the job
-            Job job = JobMaker.MakeJob(JobDefOf.TakeInventory, foodSource);
+            Job job = JobMaker.MakeJob(WorkJobDef, foodSource);
             job.count = count;
             return job;
         }

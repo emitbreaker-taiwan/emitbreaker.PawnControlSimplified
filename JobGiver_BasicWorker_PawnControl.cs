@@ -1,5 +1,7 @@
 using RimWorld;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -12,47 +14,172 @@ namespace emitbreaker.PawnControl
     public abstract class JobGiver_BasicWorker_PawnControl : JobGiver_Scan_PawnControl
     {
         #region Configuration
-        
+
         /// <summary>
         /// All BasicWorker job givers share this work tag
         /// </summary>
         protected override string WorkTag => "BasicWorker";
-        
+
         /// <summary>
-        /// Default distance thresholds for bucketing (20, 40, 50 tiles)
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected virtual float[] DistanceThresholds => new float[] { 400f, 1600f, 2500f };
-        
+        protected override bool RequiresMapZoneorArea => false;
+
         /// <summary>
-        /// The designation type this job giver handles
+        /// Whether this job giver requires player faction (default true for designation-based jobs)
         /// </summary>
-        protected abstract DesignationDef TargetDesignation { get; }
-        
+        protected override bool RequiresPlayerFaction => true;
+
         /// <summary>
-        /// The job to create when a valid target is found
+        /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected abstract JobDef WorkJobDef { get; }
-        
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_BasicWorker;
+
         /// <summary>
         /// Update cache every 5 seconds by default
         /// </summary>
         protected override int CacheUpdateInterval => 300;
-        
+
+        /// <summary>
+        /// Default distance thresholds for bucketing (20, 40, 50 tiles)
+        /// </summary>
+        protected virtual float[] DistanceThresholds => new float[] { 400f, 1600f, 2500f };
+
         #endregion
 
         #region Caching
-        
+
         /// <summary>
         /// Domain-specific caches for BasicWorker jobs
         /// </summary>
         protected static readonly Dictionary<int, List<Thing>> _designationCache = new Dictionary<int, List<Thing>>();
         protected static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
         protected static readonly Dictionary<int, int> _lastDesignationCacheUpdate = new Dictionary<int, int>();
-        
+
         #endregion
 
-        #region Target selection
-        
+        #region Faction Validation
+
+        /// <summary>
+        /// Common implementation for ShouldSkip that enforces faction requirements
+        /// </summary>
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            if (base.ShouldSkip(pawn))
+                return true;
+
+            // Check faction validation
+            if (!IsValidFactionForDesignationWork(pawn))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Determines if the pawn's faction is allowed to perform designation-based work
+        /// Can be overridden by derived classes to customize faction rules
+        /// </summary>
+        protected virtual bool IsValidFactionForDesignationWork(Pawn pawn)
+        {
+            // For designation-based jobs, only player pawns or player's slaves should perform them
+            return Utility_JobGiverManager.IsValidFactionInteraction(null, pawn, RequiresDesignator);
+        }
+
+        #endregion
+
+        #region Job Creation
+
+        /// <summary>
+        /// Standard implementation of TryGiveJob that ensures proper faction validation
+        /// </summary>
+        protected override Job TryGiveJob(Pawn pawn)
+        {
+            // Use the standardized job creation pattern
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_BasicWorker_PawnControl>(
+                pawn,
+                WorkTag,
+                (p, forced) => {
+                    // Extra faction validation in case this is called directly
+                    if (!IsValidFactionForDesignationWork(p))
+                        return null;
+
+                    // Check if map has the required designations
+                    if (!AreMapRequirementsMet(p))
+                        return null;
+
+                    // Get targets from the map based on designation
+                    List<Thing> targets = _cachedTargets.TryGetValue(p.Map.uniqueID, out var cachedTargets) && cachedTargets.Count > 0
+                        ? cachedTargets
+                        : GetTargets(p.Map).ToList();
+
+                    if (targets.Count == 0)
+                        return null;
+
+                    // Create job for the best target
+                    return CreateBasicWorkerJob(p, targets, forced);
+                },
+                debugJobDesc: DebugName);
+        }
+
+        /// <summary>
+        /// Creates a job for the pawn using the cached targets
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // Skip if pawn invalid or no targets
+            if (pawn == null || !IsValidFactionForDesignationWork(pawn) || targets == null || targets.Count == 0)
+                return null;
+
+            // Create job for the best target
+            return CreateBasicWorkerJob(pawn, targets, forced);
+        }
+
+        /// <summary>
+        /// Checks if the map meets requirements for this job giver
+        /// </summary>
+        protected virtual bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // Check if map has the required designations
+            return pawn?.Map != null &&
+                   pawn.Map.designationManager.SpawnedDesignationsOfDef(TargetDesignation).Any();
+        }
+
+        /// <summary>
+        /// Creates a job for the basic worker task based on targets
+        /// </summary>
+        protected virtual Job CreateBasicWorkerJob(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
+
+            // Use bucketing system to find closest valid target
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                targets,
+                thing => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find the first valid target
+            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets, pawn, IsValidTarget, _reachabilityCache);
+
+            // Create a job for the target if found
+            if (bestTarget != null)
+            {
+                return CreateJobForTarget(bestTarget);
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Gets all targets with the specified designation
+        /// </summary>
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
             // Return all things with the specified designation
@@ -67,16 +194,16 @@ namespace emitbreaker.PawnControl
                 }
             }
         }
-        
+
         /// <summary>
         /// Determines if a target is valid for the job
         /// </summary>
         protected virtual bool IsValidTarget(Thing thing, Pawn worker)
         {
-            return !thing.IsForbidden(worker) && 
+            return !thing.IsForbidden(worker) &&
                    worker.CanReserveAndReach(thing, PathEndMode.ClosestTouch, Danger.Deadly);
         }
-        
+
         /// <summary>
         /// Creates a job for the specified target
         /// </summary>
@@ -84,11 +211,22 @@ namespace emitbreaker.PawnControl
         {
             return JobMaker.MakeJob(WorkJobDef, target);
         }
-        
+
         #endregion
 
-        #region Cache management
-        
+        #region Utility
+
+        /// <summary>
+        /// Sanitizes a list by limiting its size to avoid performance issues
+        /// </summary>
+        protected List<T> LimitListSize<T>(List<T> list, int maxSize = 1000)
+        {
+            if (list == null || list.Count <= maxSize)
+                return list;
+
+            return list.Take(maxSize).ToList();
+        }
+
         /// <summary>
         /// Reset caches when loading game or changing maps
         /// </summary>
@@ -97,7 +235,7 @@ namespace emitbreaker.PawnControl
             Utility_CacheManager.ResetJobGiverCache(_designationCache, _reachabilityCache);
             _lastDesignationCacheUpdate.Clear();
         }
-        
+
         #endregion
     }
 }

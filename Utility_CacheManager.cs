@@ -393,5 +393,44 @@ namespace emitbreaker.PawnControl
                 }
             }
         }
+
+        public static void CleanupAllRuntimeModExtensionsForNewGame()
+        {
+            Log.Message("[PawnControl] Cleaning up runtime mod extensions for new game");
+
+            int removedCount = 0;
+
+            // Clean all ThingDefs that have our extensions
+            foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
+            {
+                if (def?.modExtensions == null) continue;
+
+                // Look for and remove our extensions (non-XML ones)
+                for (int i = def.modExtensions.Count - 1; i >= 0; i--)
+                {
+                    if (def.modExtensions[i] is NonHumanlikePawnControlExtension ext && !ext.fromXML)
+                    {
+                        def.modExtensions.RemoveAt(i);
+                        removedCount++;
+                    }
+                }
+            }
+
+            // Clear all runtime caches
+            _modExtensionCache.Clear();
+            _tagCache.Clear();
+            _forcedAnimalCache.Clear();
+            _workEnabledCache.Clear();
+            _workTypeEnabledCache.Clear();
+            _workDisabledCache.Clear();
+            _forceDraftableCache.Clear();
+            _forceEquipWeaponCache.Clear();
+            _forceWearApparelCache.Clear();
+            _isAnimalCache.Clear();
+            _isHumanlikeCache.Clear();
+            _isMechanoidCache.Clear();
+
+            Log.Message($"[PawnControl] Removed {removedCount} runtime mod extensions when starting new game");
+        }
     }
 }

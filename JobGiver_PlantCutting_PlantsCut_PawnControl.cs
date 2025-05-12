@@ -14,6 +14,14 @@ namespace emitbreaker.PawnControl
     {
         #region Overrides
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        protected override JobDef WorkJobDef => JobDefOf.CutPlant;
+
         protected override string WorkTag => "PlantCutting";
         protected override int CacheUpdateInterval => 500;
 
@@ -51,7 +59,7 @@ namespace emitbreaker.PawnControl
                     }
 
                     return best != null
-                        ? JobMaker.MakeJob(JobDefOf.CutPlant, best)
+                        ? JobMaker.MakeJob(WorkJobDef, best)
                         : null;
                 },
                 debugJobDesc: "plant cutting assignment");
@@ -77,7 +85,7 @@ namespace emitbreaker.PawnControl
             }
 
             return best != null
-                ? JobMaker.MakeJob(JobDefOf.CutPlant, best)
+                ? JobMaker.MakeJob(WorkJobDef, best)
                 : null;
         }
 

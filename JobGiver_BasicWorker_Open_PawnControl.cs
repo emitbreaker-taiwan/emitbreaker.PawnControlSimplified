@@ -32,102 +32,26 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.Open;
 
+        /// <summary>
+        /// This job requires player faction
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
+
         #endregion
 
-        #region Core flow
-
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            // Quick early exit if there are no relevant designations
-            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation))
-            {
-                return null;
-            }
-
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_BasicWorker_Open_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    int mapId = p.Map.uniqueID;
-
-                    // Get the current last update time, or default if not set
-                    if (!_lastDesignationCacheUpdate.TryGetValue(mapId, out int lastUpdateTick))
-                    {
-                        lastUpdateTick = -999;
-                    }
-
-                    // Update cache of items with designations
-                    Utility_CacheManager.UpdateDesignationBasedCache(
-                        p.Map,
-                        ref lastUpdateTick,
-                        CacheUpdateInterval,
-                        _designationCache,
-                        _reachabilityCache,
-                        TargetDesignation,
-                        (des) => des?.target.Thing,
-                        100);
-
-                    // Store the updated tick back in the dictionary
-                    _lastDesignationCacheUpdate[mapId] = lastUpdateTick;
-
-                    // Find a valid target and create a job
-                    var targets = _designationCache.TryGetValue(mapId, out var list) ? list : null;
-                    if (targets == null || targets.Count == 0)
-                        return null;
-
-                    // Use the bucketing system to find the closest valid target
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        targets,
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Find the best target using the provided validation function 
-                    Thing target = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, worker) => IsValidTarget(thing, worker),
-                        _reachabilityCache);
-
-                    // Create and return job if we found a valid target
-                    if (target != null)
-                    {
-                        return CreateJobForTarget(target);
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
-        }
+        #region Target Selection
 
         /// <summary>
-        /// Process the cached targets and create a job for the pawn
+        /// Additional validation for open targets
         /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        protected override bool IsValidTarget(Thing thing, Pawn worker)
         {
-            // Skip if no targets
-            if (targets.Count == 0)
-                return null;
+            // Use base validation first
+            if (!base.IsValidTarget(thing, worker))
+                return false;
 
-            // Use bucketing system to find closest valid target
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                targets,
-                thing => (thing.Position - pawn.Position).LengthHorizontalSquared,
-                DistanceThresholds);
-
-            // Find the first valid target
-            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets, pawn, IsValidTarget, _reachabilityCache);
-
-            // Create a job for the target if found
-            if (bestTarget != null)
-            {
-                return CreateJobForTarget(bestTarget);
-            }
-
-            return null;
+            // Specific validation for open targets could be added here if needed
+            return true;
         }
 
         #endregion

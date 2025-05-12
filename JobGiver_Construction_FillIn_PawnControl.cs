@@ -1,7 +1,5 @@
 ﻿using RimWorld;
-using System;
 using System.Collections.Generic;
-using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -16,14 +14,19 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
+
+        /// <summary>
         /// Use FillIn designation
         /// </summary>
-        protected override DesignationDef Designation => DesignationDefOf.FillIn;
+        protected override DesignationDef TargetDesignation => DesignationDefOf.FillIn;
 
         /// <summary>
         /// Use FillIn job
         /// </summary>
-        protected override JobDef RemoveBuildingJob => JobDefOf.FillIn;
+        protected override JobDef WorkJobDef => JobDefOf.FillIn;
 
         #endregion
 
@@ -63,8 +66,12 @@ namespace emitbreaker.PawnControl
             if (pawn == null || targets == null || targets.Count == 0)
                 return null;
 
-            // Reuse the existing job execution logic from the parent class
-            return ExecuteJobGiverInternal(pawn, targets);
+            // Extra faction validation to ensure only allowed pawns can perform this job
+            if (!IsPawnValidFaction(pawn))
+                return null;
+
+            // Use the parent class's ExecuteJobGiverInternal method for consistent behavior
+            return ExecuteJobGiverInternal(pawn, LimitListSize(targets));
         }
 
         /// <summary>

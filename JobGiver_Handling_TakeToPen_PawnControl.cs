@@ -15,6 +15,11 @@ namespace emitbreaker.PawnControl
     {
         #region Configuration
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
         protected override string WorkTag => "Handling";
         protected override int CacheUpdateInterval => 300; // Update every 5 seconds
         protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles

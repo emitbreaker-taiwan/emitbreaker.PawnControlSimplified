@@ -66,6 +66,8 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="JobGiver_Cleaning_PawnControl.cs" />
+    <Compile Include="JobGiver_Construction_PawnControl.cs" />
     <Compile Include="JobGiver_Warden_ExecuteEntity_PawnControl.cs" />
     <Compile Include="JobGiver_Handling_InteractAnimal_PawnControl.cs" />
     <Compile Include="JobGiver_PawnControl.cs" />
@@ -75,7 +77,7 @@
     <Compile Include="JobGiver_BasicWorker_PawnControl.cs" />
     <Compile Include="JobGiver_Construction_FillIn_PawnControl.cs" />
     <Compile Include="JobGiver_Cleaning_ClearPollution_PawnControl.cs" />
-    <Compile Include="JobGiver_Common_Growing_PawnControl.cs" />
+    <Compile Include="JobGiver_Growing_PawnControl.cs" />
     <Compile Include="JobGiver_Handling_PawnControl.cs" />
     <Compile Include="JobGiver_Hauling_PawnControl.cs" />
     <Compile Include="JobGiver_Warden_Convert_PawnControl.cs" />

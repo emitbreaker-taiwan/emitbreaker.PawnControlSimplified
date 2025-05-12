@@ -1,6 +1,7 @@
 using RimWorld;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 using Verse;
 using Verse.AI;
 
@@ -13,6 +14,17 @@ namespace emitbreaker.PawnControl
     public class JobGiver_Hauling_UnloadCarriers_PawnControl : JobGiver_Hauling_PawnControl
     {
         #region Configuration
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.UnloadInventory;
 
         /// <summary>
         /// Human-readable name for debug logging
@@ -94,7 +106,7 @@ namespace emitbreaker.PawnControl
                     // Create job if target found
                     if (targetThing != null && targetThing is Pawn targetPawn)
                     {
-                        Job job = JobMaker.MakeJob(JobDefOf.UnloadInventory, targetPawn);
+                        Job job = JobMaker.MakeJob(WorkJobDef, targetPawn);
                         Utility_DebugManager.LogNormal($"{p.LabelShort} created job to unload inventory of {targetPawn.LabelCap}");
                         return job;
                     }
@@ -131,7 +143,7 @@ namespace emitbreaker.PawnControl
             // Create job if target found
             if (targetThing != null && targetThing is Pawn targetPawn)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.UnloadInventory, targetPawn);
+                Job job = JobMaker.MakeJob(WorkJobDef, targetPawn);
                 Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to unload inventory of {targetPawn.LabelCap}");
                 return job;
             }
@@ -194,6 +206,10 @@ namespace emitbreaker.PawnControl
 
             // Skip if no longer valid
             if (carrier.Dead || !carrier.Spawned || carrier == pawn)
+                return false;
+
+            // skip if pawn isn't allowed to interact (no designator needed here)
+            if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, pawn, requiresDesignator: false))
                 return false;
 
             // Skip if no longer needs unloading

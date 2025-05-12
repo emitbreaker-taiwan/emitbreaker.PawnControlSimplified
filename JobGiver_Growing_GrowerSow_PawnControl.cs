@@ -12,7 +12,7 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns sowing tasks to pawns with the Growing work type.
     /// Optimized for large colonies with many growing zones using distance-based bucketing.
     /// </summary>
-    public class JobGiver_Growing_GrowerSow_PawnControl : JobGiver_Common_Growing_PawnControl
+    public class JobGiver_Growing_GrowerSow_PawnControl : JobGiver_Growing_PawnControl
     {
         #region Configuration
 
@@ -25,6 +25,11 @@ namespace emitbreaker.PawnControl
         #region Overrides
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Sow;
+
+        /// <summary>
         /// Description for logging
         /// </summary>
         protected override string JobDescription => "sowing assignment";
@@ -35,6 +40,17 @@ namespace emitbreaker.PawnControl
         protected override float GetBasePriority(string workTag)
         {
             return 5.7f;
+        }
+
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            if (base.ShouldSkip(pawn))
+                return true;
+
+            if (Utility_Common.PawnIsNotPlayerFaction(pawn))
+                return true;
+
+            return false;
         }
 
         /// <summary>
@@ -125,7 +141,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Create and return the sow job
-            var job = JobMaker.MakeJob(JobDefOf.Sow, targetCell);
+            var job = JobMaker.MakeJob(WorkJobDef, targetCell);
             job.plantDefToSow = plantDefToSow;
             Utility_DebugManager.LogNormal($"{pawn.LabelShort} created sow job for {plantDefToSow.label} at {targetCell}");
             return job;

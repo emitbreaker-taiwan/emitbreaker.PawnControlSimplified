@@ -1,5 +1,4 @@
 ﻿using RimWorld;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -35,47 +34,14 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.ExtractSkull;
 
+        /// <summary>
+        /// This job requires player faction
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
+
         #endregion
 
-        #region Validation overrides
-
-        /// <summary>
-        /// Override the target filtering to ensure only valid corpses with heads are processed
-        /// </summary>
-        protected override bool IsValidTarget(Thing thing, Pawn worker)
-        {
-            // First do the base class validation
-            if (!base.IsValidTarget(thing, worker))
-                return false;
-
-            // Additional validation for skull extraction
-            if (thing is Corpse corpse && corpse.InnerPawn?.health?.hediffSet != null)
-            {
-                return corpse.InnerPawn.health.hediffSet.HasHead;
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Override TryGiveJob to add additional checks specific to skull extraction
-        /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            // IMPORTANT: Only player pawns and slaves owned by player should extract skulls
-            if (pawn.Faction != Faction.OfPlayer &&
-                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
-                return null;
-
-            // Make sure we can extract skulls on this game
-            if (ModsConfig.IdeologyActive && !CanPawnExtractSkull(pawn))
-            {
-                return null;
-            }
-
-            // Let the base class handle the rest of the job creation process
-            return base.TryGiveJob(pawn);
-        }
+        #region Target Selection
 
         /// <summary>
         /// Override GetTargets to filter corpses that have heads
@@ -97,37 +63,43 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Process the cached targets and create a job for the pawn
+        /// Override the target filtering to ensure only valid corpses with heads are processed
         /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        protected override bool IsValidTarget(Thing thing, Pawn worker)
         {
-            // Skip if no targets or if the pawn can't extract skulls
-            if (targets.Count == 0 || (ModsConfig.IdeologyActive && !CanPawnExtractSkull(pawn)))
-                return null;
+            // First do the base class validation
+            if (!base.IsValidTarget(thing, worker))
+                return false;
 
-            // Use bucketing system to find closest valid target
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                targets,
-                thing => (thing.Position - pawn.Position).LengthHorizontalSquared,
-                DistanceThresholds);
-
-            // Find the first valid target
-            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets, pawn, IsValidTarget, _reachabilityCache);
-
-            // Create a job for the target if found
-            if (bestTarget != null)
+            // Additional validation for skull extraction
+            if (thing is Corpse corpse && corpse.InnerPawn?.health?.hediffSet != null)
             {
-                return CreateJobForTarget(bestTarget);
+                return corpse.InnerPawn.health.hediffSet.HasHead;
             }
 
-            return null;
+            return false;
         }
 
         #endregion
 
-        #region Ideology compatibility
+        #region Job Creation
+
+        /// <summary>
+        /// Override CreateBasicWorkerJob to add Ideology-specific checks
+        /// </summary>
+        protected override Job CreateBasicWorkerJob(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // Check Ideology requirements first
+            if (ModsConfig.IdeologyActive && !CanPawnExtractSkull(pawn))
+                return null;
+
+            // Let the base method handle target selection and job creation
+            return base.CreateBasicWorkerJob(pawn, targets, forced);
+        }
+
+        #endregion
+
+        #region Ideology Compatibility
 
         /// <summary>
         /// Checks if the pawn can extract skulls based on ideology requirements

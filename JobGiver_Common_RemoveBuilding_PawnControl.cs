@@ -18,10 +18,32 @@ namespace emitbreaker.PawnControl
         protected static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
 
         // Must be implemented by subclasses to specify which designation to target
-        protected abstract DesignationDef Designation { get; }
+        protected override DesignationDef TargetDesignation => null; // Must be overridden in subclasses
 
         // Must be implemented by subclasses to specify which job to use for removal
-        protected abstract JobDef RemoveBuildingJob { get; }
+        protected override JobDef WorkJobDef => null; // Must be overridden in subclasses
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresDesignator => true;
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        /// <summary>
+        /// Whether this job giver requires player faction (always true for designations)
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
+
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
 
         #endregion
 
@@ -34,7 +56,7 @@ namespace emitbreaker.PawnControl
         protected override int CacheUpdateInterval => 180; // 3 seconds
 
         // Override debug name for better logging
-        protected override string DebugName => $"RemoveBuilding({Designation?.defName ?? "null"})";
+        protected override string DebugName => $"RemoveBuilding({TargetDesignation?.defName ?? "null"})";
 
         // Override GetTargets to provide buildings that need removal
         protected override IEnumerable<Thing> GetTargets(Map map)
@@ -44,7 +66,7 @@ namespace emitbreaker.PawnControl
 
             // Find all designated things for removal
             var targets = new List<Thing>();
-            var designations = map.designationManager.SpawnedDesignationsOfDef(Designation);
+            var designations = map.designationManager.SpawnedDesignationsOfDef(TargetDesignation);
             foreach (Designation designation in designations)
             {
                 Thing thing = designation.target.Thing;
@@ -61,10 +83,51 @@ namespace emitbreaker.PawnControl
             return targets;
         }
 
+        /// <summary>
+        /// Common implementation for ShouldSkip that enforces faction requirements
+        /// </summary>
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            if (base.ShouldSkip(pawn))
+                return true;
+
+            // Check faction validation - building removal requires player/slave/mechanoid pawns
+            if (!IsPawnValidFaction(pawn))
+                return true;
+
+            return false;
+        }
+
         // Override TryGiveJob to directly implement job creation logic
         protected override Job TryGiveJob(Pawn pawn)
         {
             return CreateRemovalJob<JobGiver_Common_RemoveBuilding_PawnControl>(pawn);
+        }
+
+        #endregion
+
+        #region Faction Validation
+
+        /// <summary>
+        /// Consolidated faction validation check - only player pawns, mechanoids, or slaves can perform
+        /// designation-based jobs.
+        /// </summary>
+        /// <param name="pawn">The pawn to check</param>
+        /// <returns>True if the pawn is allowed to perform the job</returns>
+        protected virtual bool IsPawnValidFaction(Pawn pawn)
+        {
+            // Since designations can only be issued by player, only player pawns, 
+            // player's mechanoids or player's slaves should perform them
+            return Utility_JobGiverManager.IsValidFactionInteraction(null, pawn, RequiresPlayerFaction);
+        }
+
+        /// <summary>
+        /// Legacy method for backward compatibility
+        /// </summary>
+        [System.Obsolete("Use IsPawnValidFaction instead")]
+        protected virtual bool IsValidFactionForRemoval(Pawn pawn)
+        {
+            return IsPawnValidFaction(pawn);
         }
 
         #endregion
@@ -75,7 +138,7 @@ namespace emitbreaker.PawnControl
         protected virtual bool ValidateTarget(Thing thing, Pawn pawn)
         {
             // IMPORTANT: Check faction interaction validity first
-            if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, pawn, requiresDesignator: true))
+            if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, pawn, RequiresPlayerFaction))
                 return false;
 
             // Skip if no longer valid
@@ -83,7 +146,7 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Skip if no longer designated
-            if (thing.Map.designationManager.DesignationOn(thing, Designation) == null)
+            if (thing.Map.designationManager.DesignationOn(thing, TargetDesignation) == null)
                 return false;
 
             // Check for timed explosives - avoid removing things about to explode
@@ -109,7 +172,6 @@ namespace emitbreaker.PawnControl
         /// </summary>
         /// <typeparam name="T">The specific target type to use with JobGiverManager</typeparam>
         /// <param name="pawn">The pawn that will perform the removal job</param>
-        /// <param name="workTag">The work tag to use for eligibility checks</param>
         /// <returns>A job to remove a designated building, or null if no valid job could be created</returns>
         protected Job CreateRemovalJob<T>(Pawn pawn) where T : JobGiver_Common_RemoveBuilding_PawnControl
         {
@@ -118,6 +180,10 @@ namespace emitbreaker.PawnControl
                 pawn,
                 WorkTag,
                 (p, forced) => {
+                    // Extra faction validation in case this is called directly
+                    if (!IsPawnValidFaction(p))
+                        return null;
+
                     if (p?.Map == null)
                         return null;
 
@@ -145,8 +211,8 @@ namespace emitbreaker.PawnControl
                     // Create job if target found
                     if (bestTarget != null)
                     {
-                        Job job = JobMaker.MakeJob(RemoveBuildingJob, bestTarget);
-                        Utility_DebugManager.LogNormal($"{p.LabelShort} created job to {RemoveBuildingJob.defName} {bestTarget.LabelCap}");
+                        Job job = JobMaker.MakeJob(WorkJobDef, bestTarget);
+                        Utility_DebugManager.LogNormal($"{p.LabelShort} created job to {WorkJobDef.defName} {bestTarget.LabelCap}");
                         return job;
                     }
 
@@ -162,6 +228,10 @@ namespace emitbreaker.PawnControl
         protected Job ExecuteJobGiverInternal(Pawn pawn, List<Thing> targets)
         {
             if (pawn?.Map == null || targets.Count == 0)
+                return null;
+
+            // Extra faction validation in case this is called directly
+            if (!IsPawnValidFaction(pawn))
                 return null;
 
             // Use JobGiverManager for distance bucketing
@@ -183,12 +253,23 @@ namespace emitbreaker.PawnControl
             // Create job if target found
             if (bestTarget != null)
             {
-                Job job = JobMaker.MakeJob(RemoveBuildingJob, bestTarget);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to {RemoveBuildingJob.defName} {bestTarget.LabelCap}");
+                Job job = JobMaker.MakeJob(WorkJobDef, bestTarget);
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to {WorkJobDef.defName} {bestTarget.LabelCap}");
                 return job;
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Sanitizes a list by limiting its size to avoid performance issues
+        /// </summary>
+        protected List<T> LimitListSize<T>(List<T> list, int maxSize = 1000)
+        {
+            if (list == null || list.Count <= maxSize)
+                return list;
+
+            return list.Take(maxSize).ToList();
         }
 
         #endregion
@@ -197,7 +278,7 @@ namespace emitbreaker.PawnControl
 
         public override string ToString()
         {
-            return $"JobGiver_RemoveBuilding_PawnControl({Designation?.defName ?? "null"})";
+            return $"JobGiver_RemoveBuilding_PawnControl({TargetDesignation?.defName ?? "null"})";
         }
 
         #endregion

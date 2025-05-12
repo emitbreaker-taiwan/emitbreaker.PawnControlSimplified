@@ -1,7 +1,5 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
-using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -14,9 +12,9 @@ namespace emitbreaker.PawnControl
     {
         #region Overrides
 
-        protected override DesignationDef Designation => DesignationDefOf.Uninstall;
+        protected override DesignationDef TargetDesignation => DesignationDefOf.Uninstall;
 
-        protected override JobDef RemoveBuildingJob => JobDefOf.Uninstall;
+        protected override JobDef WorkJobDef => JobDefOf.Uninstall;
 
         // Override debug name for better logging
         protected override string DebugName => "Uninstall";
@@ -37,7 +35,15 @@ namespace emitbreaker.PawnControl
 
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            return ExecuteJobGiverWithUninstallValidation(pawn, targets, forced);
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
+
+            // Extra faction validation to ensure only allowed pawns can perform this job
+            if (!IsPawnValidFaction(pawn))
+                return null;
+
+            // Use the parent class's ExecuteJobGiverInternal method for consistent behavior
+            return ExecuteJobGiverInternal(pawn, LimitListSize(targets));
         }
 
         protected override bool ValidateTarget(Thing thing, Pawn pawn)
@@ -58,45 +64,6 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return true;
-        }
-
-        #endregion
-
-        #region Uninstall-specific helpers
-
-        /// <summary>
-        /// Uninstall-specific job execution logic
-        /// </summary>
-        private Job ExecuteJobGiverWithUninstallValidation(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            if (pawn?.Map == null || targets.Count == 0)
-                return null;
-
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                targets,
-                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find the best target with additional uninstall-specific validation
-            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (thing, p) => ValidateTarget(thing, p) && p.CanReserve(thing, 1, -1, null, forced),
-                null  // No need for reachability cache as base class already handles caching
-            );
-
-            // Create job if target found
-            if (bestTarget != null)
-            {
-                Job job = JobMaker.MakeJob(RemoveBuildingJob, bestTarget);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to uninstall {bestTarget.LabelCap}");
-                return job;
-            }
-
-            return null;
         }
 
         #endregion

@@ -12,9 +12,14 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns harvesting tasks to pawns with the Growing work type.
     /// Optimized for large colonies with many plants using distance-based bucketing.
     /// </summary>
-    public class JobGiver_Growing_GrowerHarvest_PawnControl : JobGiver_Common_Growing_PawnControl
+    public class JobGiver_Growing_GrowerHarvest_PawnControl : JobGiver_Growing_PawnControl
     {
         #region Configuration
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Harvest;
 
         // Maximum harvest work amount per job
         private const float MAX_HARVEST_WORK_PER_JOB = 2400f;
@@ -37,6 +42,16 @@ namespace emitbreaker.PawnControl
         protected override float GetBasePriority(string workTag)
         {
             return 5.8f;
+        }
+
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            base.ShouldSkip(pawn);
+
+            if (Utility_Common.PawnIsNotPlayerFaction(pawn))
+                return true;
+
+            return false;
         }
 
         /// <summary>
@@ -112,7 +127,7 @@ namespace emitbreaker.PawnControl
 
             // Create harvesting job with primary plant
             Plant targetPlant = harvestablePlants[0];
-            Job job = JobMaker.MakeJob(JobDefOf.Harvest);
+            Job job = JobMaker.MakeJob(WorkJobDef);
             job.AddQueuedTarget(TargetIndex.A, targetPlant);
 
             // Add additional nearby harvestable plants of the same type

@@ -9,9 +9,14 @@ namespace emitbreaker.PawnControl
     {
         #region Overrides
 
-        protected override DesignationDef Designation => DesignationDefOf.ExtractTree;
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_PlantCutting;
 
-        protected override JobDef RemoveBuildingJob => JobDefOf.ExtractTree;
+        protected override DesignationDef TargetDesignation => DesignationDefOf.ExtractTree;
+
+        protected override JobDef WorkJobDef => JobDefOf.ExtractTree;
 
         protected override string WorkTag => "PlantCutting";
 
@@ -32,46 +37,35 @@ namespace emitbreaker.PawnControl
             if (!base.ValidateTarget(thing, pawn))
                 return false;
 
-            return thing is Plant;
+            // Must be a plant
+            if (!(thing is Plant plant))
+                return false;
+
+            // Check plant skill requirements
+            if (plant.def.plant.sowMinSkill > 0)
+            {
+                int plantSkill = pawn.skills?.GetSkill(SkillDefOf.Plants)?.Level ?? 0;
+                if (plantSkill < plant.def.plant.sowMinSkill)
+                {
+                    JobFailReason.Is("UnderAllowedSkill".Translate(plant.def.plant.sowMinSkill));
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Process the cached targets to create a job for the pawn
-            foreach (var target in targets)
-            {
-                if (ValidateTarget(target, pawn))
-                {
-                    return JobMaker.MakeJob(RemoveBuildingJob, target);
-                }
-            }
-            return null;
-        }
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
 
-        #endregion
+            // Extra faction validation to ensure only allowed pawns can perform this job
+            if (!IsPawnValidFaction(pawn))
+                return null;
 
-        #region Plant-specific helpers
-
-        private Job ExecuteJobGiverWithPlantValidation(Pawn pawn, List<Thing> targets)
-        {
-            Job baseJob = ExecuteJobGiverInternal(pawn, targets);
-
-            if (baseJob != null && baseJob.targetA.Thing is Plant tree)
-            {
-                if (tree.def.plant.sowMinSkill > 0)
-                {
-                    int plantSkill = pawn.skills?.GetSkill(SkillDefOf.Plants)?.Level ?? 0;
-                    if (plantSkill < tree.def.plant.sowMinSkill)
-                    {
-                        JobFailReason.Is("UnderAllowedSkill".Translate(tree.def.plant.sowMinSkill));
-                        return null;
-                    }
-                }
-
-                return baseJob;
-            }
-
-            return null;
+            // Use the parent class's ExecuteJobGiverInternal method for consistent behavior
+            return ExecuteJobGiverInternal(pawn, LimitListSize(targets));
         }
 
         #endregion

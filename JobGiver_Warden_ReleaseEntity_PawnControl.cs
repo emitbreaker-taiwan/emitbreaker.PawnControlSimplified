@@ -14,6 +14,11 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.ReleaseEntity;
+
+        /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
         protected override string DebugName => "ReleaseEntity";
@@ -196,7 +201,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         private Job CreateReleaseJob(Pawn warden, Building_HoldingPlatform platform, Pawn entity)
         {
-            Job job = JobMaker.MakeJob(JobDefOf.ReleaseEntity, platform, entity);
+            Job job = JobMaker.MakeJob(WorkJobDef, platform, entity);
             job.count = 1;
 
             Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to release entity {entity.LabelShort}");

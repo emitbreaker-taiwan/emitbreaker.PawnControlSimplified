@@ -1,7 +1,5 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
-using System.Linq;
 using Verse;
 using Verse.AI;
 
@@ -14,12 +12,17 @@ namespace emitbreaker.PawnControl
     {
         #region Overrides
 
-        protected override DesignationDef Designation => DesignationDefOf.Deconstruct;
+        protected override DesignationDef TargetDesignation => DesignationDefOf.Deconstruct;
 
-        protected override JobDef RemoveBuildingJob => JobDefOf.Deconstruct;
+        protected override JobDef WorkJobDef => JobDefOf.Deconstruct;
 
         // Override debug name for better logging
         protected override string DebugName => "Deconstruct";
+
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
 
         protected override float GetBasePriority(string workTag)
         {
@@ -32,6 +35,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // Use the type-specific CreateRemovalJob to ensure proper job creation
             return CreateRemovalJob<JobGiver_Construction_Deconstruct_PawnControl>(pawn);
         }
 
@@ -43,9 +47,12 @@ namespace emitbreaker.PawnControl
             if (pawn == null || targets == null || targets.Count == 0)
                 return null;
 
-            // The deconstruct-specific job execution logic is already defined in a helper method
-            // Reuse it for processing cached targets
-            return ExecuteJobGiverWithDeconstructValidation(pawn, targets, forced);
+            // Extra faction validation to ensure only allowed pawns can perform this job
+            if (!IsPawnValidFaction(pawn))
+                return null;
+
+            // Use the parent class's ExecuteJobGiverInternal method for consistent behavior
+            return ExecuteJobGiverInternal(pawn, LimitListSize(targets));
         }
 
         // Override ValidateTarget to add deconstruct-specific validation
@@ -64,45 +71,6 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return true;
-        }
-
-        #endregion
-
-        #region Deconstruct-specific helpers
-
-        /// <summary>
-        /// Deconstruct-specific job execution logic
-        /// </summary>
-        private Job ExecuteJobGiverWithDeconstructValidation(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            if (pawn?.Map == null || targets.Count == 0)
-                return null;
-
-            // Use JobGiverManager for distance bucketing and target selection
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                targets,
-                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find the best target with additional deconstruct-specific validation
-            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (thing, p) => ValidateTarget(thing, p) && p.CanReserve(thing, 1, -1, null, forced),
-                null  // No need for reachability cache as base class already handles caching
-            );
-
-            // Create job if target found
-            if (bestTarget != null)
-            {
-                Job job = JobMaker.MakeJob(RemoveBuildingJob, bestTarget);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to deconstruct {bestTarget.LabelCap}");
-                return job;
-            }
-
-            return null;
         }
 
         #endregion

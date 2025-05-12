@@ -13,10 +13,21 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Construction_ConstructFinishFrames_PawnControl : JobGiver_Scan_PawnControl
     {
+        #region Overrides
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.FinishFrame;
+
         // Distance thresholds for bucketing
         private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
 
-        #region Overrides
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Use Construction work tag
@@ -167,7 +178,7 @@ namespace emitbreaker.PawnControl
                     // Create job if valid frame found
                     if (bestFrame != null)
                     {
-                        Job job = JobMaker.MakeJob(JobDefOf.FinishFrame, bestFrame);
+                        Job job = JobMaker.MakeJob(WorkJobDef, bestFrame);
                         Utility_DebugManager.LogNormal($"{p.LabelShort} created job to finish construction of {bestFrame.Label}");
                         return job;
                     }
@@ -242,7 +253,7 @@ namespace emitbreaker.PawnControl
                     continue;
 
                 // Create job if valid frame found
-                Job job = JobMaker.MakeJob(JobDefOf.FinishFrame, frame);
+                Job job = JobMaker.MakeJob(WorkJobDef, frame);
                 Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to finish construction of {frame.Label}");
                 return job;
             }

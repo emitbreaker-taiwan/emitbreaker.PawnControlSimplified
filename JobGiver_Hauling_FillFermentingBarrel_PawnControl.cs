@@ -38,6 +38,17 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.FillFermentingBarrel;
+
         protected override float GetBasePriority(string workTag)
         {
             // Filling barrels is moderately important
@@ -104,7 +115,7 @@ namespace emitbreaker.PawnControl
 
                         if (wort != null)
                         {
-                            Job job = JobMaker.MakeJob(JobDefOf.FillFermentingBarrel, barrel, wort);
+                            Job job = JobMaker.MakeJob(WorkJobDef, barrel, wort);
                             Utility_DebugManager.LogNormal($"{p.LabelShort} created job to fill fermenting barrel with wort");
                             return job;
                         }
@@ -128,7 +139,7 @@ namespace emitbreaker.PawnControl
                         Thing wort = FindWort(pawn, barrel);
                         if (wort != null)
                         {
-                            Job job = JobMaker.MakeJob(JobDefOf.FillFermentingBarrel, barrel, wort);
+                            Job job = JobMaker.MakeJob(WorkJobDef, barrel, wort);
                             return job;
                         }
                     }

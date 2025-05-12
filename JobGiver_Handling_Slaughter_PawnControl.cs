@@ -13,6 +13,17 @@ namespace emitbreaker.PawnControl
     public class JobGiver_Handling_Slaughter_PawnControl : JobGiver_Handling_PawnControl
     {
         #region Configuration
+ 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Slaughter;
 
         /// <summary>
         /// Human-readable name for debug logging 
@@ -147,7 +158,7 @@ namespace emitbreaker.PawnControl
             // Create job if target found
             if (targetAnimal != null)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.Slaughter, targetAnimal);
+                Job job = JobMaker.MakeJob(WorkJobDef, targetAnimal);
                 Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to slaughter {targetAnimal.LabelShort}");
                 return job;
             }

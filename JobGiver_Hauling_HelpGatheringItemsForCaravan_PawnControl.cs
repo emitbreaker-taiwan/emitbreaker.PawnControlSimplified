@@ -18,6 +18,17 @@ namespace emitbreaker.PawnControl
     {
         #region Configuration
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+        
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.PrepareCaravan_GatherItems;
+
         // Use higher priority since caravan forming is important
         protected override float GetBasePriority(string workTag)
         {
@@ -145,7 +156,7 @@ namespace emitbreaker.PawnControl
                     // Check if there's a reachable carrier or colonist
                     if (AnyReachableCarrierOrColonist(pawn, lord))
                     {
-                        Job job = JobMaker.MakeJob(JobDefOf.PrepareCaravan_GatherItems, thingToHaul);
+                        Job job = JobMaker.MakeJob(WorkJobDef, thingToHaul);
                         job.lord = lord;
 
                         Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to gather {thingToHaul.LabelCap} for caravan");

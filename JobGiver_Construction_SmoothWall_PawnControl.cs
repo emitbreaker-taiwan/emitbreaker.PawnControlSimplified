@@ -10,139 +10,38 @@ namespace emitbreaker.PawnControl
     /// JobGiver that allows pawns to smooth walls in designated areas.
     /// Uses the Construction work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Construction_SmoothWall_PawnControl : JobGiver_Scan_PawnControl
+    public class JobGiver_Construction_SmoothWall_PawnControl : JobGiver_Common_ConstructAffectFloor_PawnControl
     {
-        #region Overrides
+        #region Configuration
 
-        protected override string WorkTag => "Construction";
-        protected override int CacheUpdateInterval => 180; // Update every 3 seconds
-        protected override string DebugName => "wall smoothing assignment";
+        /// <summary>
+        /// The designation this job giver targets
+        /// </summary>
+        protected override DesignationDef TargetDesignation => DesignationDefOf.SmoothWall;
 
-        protected override bool ShouldExecuteNow(int mapId)
-        {
-            // Quick check if there are wall smoothing designations on the map
-            var map = Find.Maps.FirstOrDefault(m => m.uniqueID == mapId);
-            return map != null && map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.SmoothWall);
-        }
-
-        protected override IEnumerable<Thing> GetTargets(Map map)
-        {
-            if (map == null) return Enumerable.Empty<Thing>();
-
-            var buildings = new List<Building>();
-
-            // Find all designated walls for smoothing
-            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.SmoothWall))
-            {
-                // Get the building at this cell
-                Building edifice = designation.target.Cell.GetEdifice(map);
-
-                // Skip if there's no building or it's not smoothable
-                if (edifice == null || !edifice.def.IsSmoothable)
-                    continue;
-
-                buildings.Add(edifice);
-            }
-
-            return buildings;
-        }
-
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            // Use the StandardTryGiveJob pattern directly
-            return Utility_JobGiverManager.StandardTryGiveJob<Building>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Get buildings that need smoothing from cache
-                    int mapId = p.Map.uniqueID;
-                    var targets = _cachedTargets.TryGetValue(mapId, out var list) ? list : null;
-                    if (targets == null || targets.Count == 0) return null;
-
-                    // Use distance bucketing for efficient target selection
-                    float[] distanceThresholds = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        targets.OfType<Building>(),
-                        building => (building.Position - p.Position).LengthHorizontalSquared,
-                        distanceThresholds
-                    );
-
-                    // Find the best wall to smooth
-                    Building bestBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Building>(
-                        buckets,
-                        p,
-                        (building, builder) => ValidateBuildingTarget(building, builder, forced)
-                    );
-
-                    // Create job if target found
-                    if (bestBuilding != null)
-                    {
-                        Job job = JobMaker.MakeJob(JobDefOf.SmoothWall, bestBuilding);
-                        Utility_DebugManager.LogNormal($"{p.LabelShort} created job to smooth wall: {bestBuilding}");
-                        return job;
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
-        }
-
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            if (targets == null || targets.Count == 0)
-                return null;
-
-            // Use distance bucketing for efficient target selection
-            float[] distanceThresholds = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                targets.OfType<Building>(),
-                building => (building.Position - pawn.Position).LengthHorizontalSquared,
-                distanceThresholds
-            );
-
-            // Find the best wall to smooth
-            Building bestBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Building>(
-                buckets,
-                pawn,
-                (building, builder) => ValidateBuildingTarget(building, builder, forced)
-            );
-
-            // Create job if target found
-            if (bestBuilding != null)
-            {
-                Job job = JobMaker.MakeJob(JobDefOf.SmoothWall, bestBuilding);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to smooth wall: {bestBuilding}");
-                return job;
-            }
-
-            return null;
-        }
+        /// <summary>
+        /// The job to create
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.SmoothWall;
 
         #endregion
 
-        #region Building-selection helpers
+        #region Validation
 
-        private bool ValidateBuildingTarget(Building building, Pawn pawn, bool forced)
+        /// <summary>
+        /// Override to add wall-specific validation logic
+        /// </summary>
+        protected override bool ValidateFloorCell(IntVec3 cell, Pawn pawn, bool forced)
         {
-            // Skip if no longer valid
-            if (building == null || building.Destroyed || !building.Spawned)
+            // First do the base validation
+            if (!base.ValidateFloorCell(cell, pawn, forced))
                 return false;
 
-            // Skip if no longer designated
-            if (pawn.Map.designationManager.DesignationAt(building.Position, DesignationDefOf.SmoothWall) == null)
-                return false;
+            // Additional validation for wall smoothing
+            Building edifice = cell.GetEdifice(pawn.Map);
 
-            // Skip if no longer smoothable
-            if (!building.def.IsSmoothable)
-                return false;
-
-            // Skip if forbidden or unreachable
-            if (building.IsForbidden(pawn) ||
-                !pawn.CanReserve(building, 1, -1, null, forced) ||
-                !pawn.CanReserve(building.Position, 1, -1, null, forced) ||
-                !pawn.CanReach(building, PathEndMode.Touch, Danger.Some))
+            // Check if the edifice at this cell is smoothable
+            if (edifice == null || !edifice.def.IsSmoothable)
                 return false;
 
             return true;
@@ -150,11 +49,26 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Utility
+        #region Job Creation
 
-        public override string ToString()
+        /// <summary>
+        /// Creates a construction job for smoothing walls.
+        /// </summary>
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
         {
-            return "JobGiver_SmoothWall_PawnControl";
+            // Find the best cell for smoothing
+            IntVec3 cell = FindBestCell(
+                CreateDistanceBuckets(pawn, _designatedCellsCache[pawn.Map.uniqueID][TargetDesignation]),
+                pawn,
+                (c, p) => ValidateFloorCell(c, p, forced)
+            );
+
+            if (cell.IsValid)
+            {
+                return JobMaker.MakeJob(WorkJobDef, cell);
+            }
+
+            return null;
         }
 
         #endregion

@@ -14,9 +14,15 @@ namespace emitbreaker.PawnControl
         #region Overrides
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
         /// The JobDef to use for shearing animals
         /// </summary>
-        protected override JobDef JobDef => JobDefOf.Shear;
+        protected override JobDef WorkJobDef => JobDefOf.Shear;
 
         /// <summary>
         /// Gets the shearable component from the animal

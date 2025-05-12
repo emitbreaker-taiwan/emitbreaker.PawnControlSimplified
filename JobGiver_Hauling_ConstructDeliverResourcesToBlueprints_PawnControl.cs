@@ -1,8 +1,6 @@
 ﻿using RimWorld;
-using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
 using Verse;
 using Verse.AI;
 
@@ -17,6 +15,11 @@ namespace emitbreaker.PawnControl
         #region Overrides
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.HaulToContainer;
+
+        /// <summary>
         /// Use Hauling work tag
         /// </summary>
         protected override string WorkTag => "Hauling";
@@ -25,6 +28,11 @@ namespace emitbreaker.PawnControl
         /// Unique name for debug messages
         /// </summary>
         protected override string JobDescription => "delivering resources to blueprints (hauling) assignment";
+
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
 
         /// <summary>
         /// Blueprint delivery is slightly more important than frame delivery
@@ -44,11 +52,11 @@ namespace emitbreaker.PawnControl
             var result = new List<Blueprint>();
 
             // Find all blueprints needing materials - except plants and installations
+            // Don't filter by faction here - let the job creation process handle that
             foreach (Blueprint blueprint in map.listerThings.ThingsInGroup(ThingRequestGroup.Blueprint))
             {
                 if (blueprint != null &&
                     blueprint.Spawned &&
-                    !blueprint.IsForbidden(Faction.OfPlayer) &&
                     !(blueprint is Blueprint_Install) &&
                     !(blueprint.def.entityDefToBuild is ThingDef entityDefToBuild && entityDefToBuild.plant != null))
                 {
@@ -67,29 +75,34 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Override TryGiveJob to use StandardTryGiveJob pattern
-        /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return CreateDeliveryJob<JobGiver_Hauling_ConstructDeliverResourcesToBlueprints_PawnControl>(pawn);
-        }
-
-        /// <summary>
         /// Processes cached targets to create a job for the pawn.
         /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            foreach (var target in targets)
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
+
+            // First check faction validation
+            if (!IsValidFactionForConstruction(pawn))
+                return null;
+
+            // Convert to blueprints and filter for valid faction match
+            List<Blueprint> blueprints = targets
+                .OfType<Blueprint>()
+                .Where(b => b.Spawned && !b.IsForbidden(pawn) && IsValidTargetFaction(b, pawn))
+                .ToList();
+
+            if (blueprints.Count == 0)
+                return null;
+
+            // Try to create a job for each valid blueprint
+            foreach (Blueprint blueprint in blueprints)
             {
-                if (target is Blueprint blueprint && !blueprint.IsForbidden(pawn))
-                {
-                    Job job = ResourceDeliverJobFor(pawn, blueprint);
-                    if (job != null)
-                    {
-                        return job;
-                    }
-                }
+                Job job = ResourceDeliverJobFor(pawn, blueprint);
+                if (job != null)
+                    return job;
             }
+
             return null;
         }
 
@@ -166,16 +179,17 @@ namespace emitbreaker.PawnControl
 
         /// <summary>
         /// Determines if a thing is a valid nearby blueprint needing resources
+        /// Ensures proper faction matching
         /// </summary>
         protected override bool IsNewValidNearbyNeeder(Thing t, HashSet<Thing> nearbyNeeders, Blueprint originalTarget, Pawn pawn)
         {
-            return t is Blueprint &&
-                   t != originalTarget &&
-                   t.Faction == pawn.Faction &&
-                   !(t is Blueprint_Install) &&
-                   !nearbyNeeders.Contains(t) &&
-                   !t.IsForbidden(pawn) &&
-                   GenConstruct.CanConstruct(t, pawn, false, jobForReservation: JobDefOf.HaulToContainer);
+            return t is Blueprint blueprint &&
+                   blueprint != originalTarget &&
+                   blueprint.Faction == pawn.Faction &&  // Must match pawn's faction
+                   !(blueprint is Blueprint_Install) &&
+                   !nearbyNeeders.Contains(blueprint) &&
+                   !blueprint.IsForbidden(pawn) &&
+                   GenConstruct.CanConstruct(blueprint, pawn, false, jobForReservation: WorkJobDef);
         }
 
         #endregion

@@ -202,10 +202,16 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            // For designator-oriented tasks, only player pawns can perform them
-            if (requiresDesignator && pawn.Faction != Faction.OfPlayer)
+            // If target is null, we're just checking if the pawn's faction can perform the job
+            // This is used for floor construction and other cell-based jobs
+            if (target == null)
             {
-                return false;
+                // For designator-oriented tasks, only player pawns can perform them
+                if (requiresDesignator && pawn.Faction != Faction.OfPlayer)
+                {
+                    return false;
+                }
+                return true;
             }
 
             Pawn targetPawn = target as Pawn;

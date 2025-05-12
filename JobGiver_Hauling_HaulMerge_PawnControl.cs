@@ -16,6 +16,17 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.HaulToCell;
+
+        /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
         protected override string DebugName => "Merge";
@@ -254,7 +265,7 @@ namespace emitbreaker.PawnControl
                     continue;
 
                 // Create the hauling job
-                Job job = JobMaker.MakeJob(JobDefOf.HaulToCell, thing, heldThing.Position);
+                Job job = JobMaker.MakeJob(WorkJobDef, thing, heldThing.Position);
                 job.count = Mathf.Min(heldThing.def.stackLimit - heldThing.stackCount, thing.stackCount);
                 job.haulMode = HaulMode.ToCellStorage;
                 Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to merge {thing.Label} ({thing.stackCount}) with {heldThing.Label} ({heldThing.stackCount})");

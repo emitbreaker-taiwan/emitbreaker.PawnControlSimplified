@@ -11,87 +11,87 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to clear pollution from designated areas.
     /// Uses the Cleaning work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Cleaning_ClearPollution_PawnControl : JobGiver_Scan_PawnControl
+    public class JobGiver_Cleaning_ClearPollution_PawnControl : JobGiver_Cleaning_PawnControl
     {
         #region Configuration
 
-        // Constants from vanilla JobDriver_ClearPollution
-        private const int MAX_DISTANCE_TO_CLEAR = 10;
-        private const int MAX_DISTANCE_TO_CLEAR_SQUARED = 100;
-        private const int POLLUTION_CELLS_TO_CLEAR_PER_JOB = 6;
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 100f, 400f, 1600f }; // 10, 20, 40 tiles
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.ClearPollution;
 
-        #endregion
-
-        #region Overrides
-
-        protected override string WorkTag => "Cleaning";
-
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
         protected override string DebugName => "PollutionClearing";
 
-        protected override int CacheUpdateInterval => 600; // Update every 10 seconds (pollution changes slowly)
+        /// <summary>
+        /// Update cache every 10 seconds (pollution changes slowly)
+        /// </summary>
+        protected override int CacheUpdateInterval => 600;
 
+        /// <summary>
+        /// Pollution clearing is slightly higher priority than filth cleaning
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             return 4.8f;
         }
 
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Pollution clearing doesn't use Thing targets
+        /// </summary>
+        protected override bool RequiresThingTargets()
+        {
+            return false;
+        }
+
+        /// <summary>
+        /// Pollution clearing doesn't use Thing targets
+        /// </summary>
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            // Pollution clearing doesn't have "Thing" targets - this will return an empty collection
-            // but we'll handle the cell-based targets separately
+            // Pollution clearing doesn't have "Thing" targets
             return Enumerable.Empty<Thing>();
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
+        /// <summary>
+        /// Check if map has a pollution clear area with pollution in it
+        /// </summary>
+        protected override bool AreMapRequirementsMet(Pawn pawn)
         {
-            // Use the StandardTryGiveJob pattern that works
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Cleaning_ClearPollution_PawnControl>(
-                pawn,
-                WorkTag,  // Use WorkTag property for consistency
-                (p, forced) => {
-                    // IMPORTANT: Only player pawns and slaves owned by player should clear pollution
-                    if (p.Faction != Faction.OfPlayer &&
-                        !(p.IsSlave && p.HostFaction == Faction.OfPlayer))
-                        return null;
-
-                    // Check if map has any designated pollution clear areas
-                    if (p?.Map == null || p.Map.areaManager.PollutionClear.TrueCount == 0)
-                        return null;
-
-                    // Get pollution cells to clear (our target cells)
-                    return TryCreatePollutionClearingJob(p, forced);
-                },
-                debugJobDesc: "pollution clearing assignment");
+            // Check if map has any designated pollution clear areas
+            return pawn?.Map != null &&
+                   pawn.Map.areaManager.PollutionClear != null &&
+                   pawn.Map.areaManager.PollutionClear.TrueCount > 0;
         }
 
+        /// <summary>
+        /// Biotech check
+        /// </summary>
         protected override bool ShouldExecuteNow(int mapId)
         {
             return ModLister.CheckBiotech("Clear pollution");
         }
 
-        /// <summary>
-        /// Creates a job for the pawn using the cached targets
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            // Note: For pollution clearing, we don't actually use the Thing targets
-            // because pollution is cell-based, not thing-based
-
-            // Delegate to our specialized method that handles pollution cells
-            return TryCreatePollutionClearingJob(pawn, forced);
-        }
-
         #endregion
 
-        #region Pollution-clearing helpers
+        #region Job Creation
 
         /// <summary>
         /// Creates a job for clearing pollution
         /// </summary>
-        private Job TryCreatePollutionClearingJob(Pawn pawn, bool forced)
+        protected override Job CreateCleaningJob(Pawn pawn, bool forced)
         {
             if (pawn?.Map == null) return null;
 
@@ -100,60 +100,27 @@ namespace emitbreaker.PawnControl
             if (pollutedCells.Count == 0)
                 return null;
 
-            // Create distance buckets for efficient cell selection
-            List<IntVec3>[] buckets = new List<IntVec3>[DISTANCE_THRESHOLDS.Length + 1];
-            for (int i = 0; i < buckets.Length; i++)
-            {
-                buckets[i] = new List<IntVec3>();
-            }
-
-            // Sort cells into buckets by distance
-            foreach (IntVec3 cell in pollutedCells)
-            {
-                float distanceSq = (cell - pawn.Position).LengthHorizontalSquared;
-
-                int bucketIndex = 0;
-                while (bucketIndex < DISTANCE_THRESHOLDS.Length && distanceSq > DISTANCE_THRESHOLDS[bucketIndex])
-                {
-                    bucketIndex++;
-                }
-
-                buckets[bucketIndex].Add(cell);
-            }
+            // Create distance buckets
+            var buckets = CreateDistanceBuckets(pawn, pollutedCells);
+            if (buckets == null)
+                return null;
 
             // Find the closest valid cell with pollution
-            IntVec3 targetCell = IntVec3.Invalid;
-
-            for (int b = 0; b < buckets.Length; b++)
-            {
-                if (buckets[b].Count == 0)
-                    continue;
-
-                // Randomize within each bucket for even distribution
-                buckets[b].Shuffle();
-
-                foreach (IntVec3 cell in buckets[b])
-                {
-                    if (ValidatePollutionCell(cell, pawn, forced))
-                    {
-                        targetCell = cell;
-                        break;
-                    }
-                }
-
-                if (targetCell.IsValid)
-                    break;
-            }
+            IntVec3 targetCell = FindBestCell(buckets, pawn, (cell, p) => ValidatePollutionCell(cell, p, forced));
 
             if (!targetCell.IsValid)
                 return null;
 
             // Create the pollution clearing job
-            Job job = JobMaker.MakeJob(JobDefOf.ClearPollution, targetCell);
+            Job job = JobMaker.MakeJob(WorkJobDef, targetCell);
 
             Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to clear pollution at {targetCell}");
             return job;
         }
+
+        #endregion
+
+        #region Helper Methods
 
         /// <summary>
         /// Gets cells from the pollution clear area that actually have pollution
@@ -178,13 +145,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Limit collection size for performance
-            int maxCells = 1000;
-            if (result.Count > maxCells)
-            {
-                result = result.Take(maxCells).ToList();
-            }
-
-            return result;
+            return LimitListSize(result);
         }
 
         /// <summary>
@@ -192,7 +153,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         private bool ValidatePollutionCell(IntVec3 cell, Pawn pawn, bool forced)
         {
-            if (!cell.IsValid || pawn?.Map == null)
+            if (!IsValidCell(cell, pawn?.Map))
                 return false;
 
             // Must be polluted
@@ -212,42 +173,10 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Check if anyone else is already working on this cell
-            if (AnyOtherPawnCleaning(pawn, cell))
+            if (IsCellReservedByAnother(pawn, cell, WorkJobDef))
                 return false;
 
             return true;
-        }
-
-        /// <summary>
-        /// Checks if any other pawn is already clearing this cell
-        /// </summary>
-        private bool AnyOtherPawnCleaning(Pawn pawn, IntVec3 cell)
-        {
-            List<Pawn> freeColonistsSpawned = pawn.Map.mapPawns.FreeColonistsSpawned;
-
-            for (int i = 0; i < freeColonistsSpawned.Count; i++)
-            {
-                if (freeColonistsSpawned[i] != pawn &&
-                    freeColonistsSpawned[i].CurJobDef == JobDefOf.ClearPollution)
-                {
-                    LocalTargetInfo target = freeColonistsSpawned[i].CurJob.GetTarget(TargetIndex.A);
-                    if (target.IsValid && target.Cell == cell)
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        #endregion
-
-        #region Utility
-
-        public override string ToString()
-        {
-            return "JobGiver_Cleaning_ClearPollution_PawnControl";
         }
 
         #endregion

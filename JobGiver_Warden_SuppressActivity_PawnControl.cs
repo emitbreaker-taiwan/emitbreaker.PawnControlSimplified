@@ -14,6 +14,11 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.ActivitySuppression;
+
+        /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
         protected override string DebugName => "SuppressActivity";
@@ -222,7 +227,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         private Job CreateSuppressionJob(Pawn warden, Thing target, bool forced)
         {
-            Job job = JobMaker.MakeJob(JobDefOf.ActivitySuppression, target);
+            Job job = JobMaker.MakeJob(WorkJobDef, target);
             job.playerForced = forced;
 
             Thing thingToSuppress = GetThingToSuppress(target, forced);

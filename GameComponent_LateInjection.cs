@@ -236,7 +236,7 @@ namespace emitbreaker.PawnControl
             // Plant cutting job givers
 
             // Growing job givers
-            JobGiver_Common_Growing_PawnControl.ResetGrowingCache();
+            JobGiver_Growing_PawnControl.ResetGrowingCache();
 
             // Fire Fighting job givers
             JobGiver_Firefighter_FightFires_PawnControl.ResetFightFiresCache();

@@ -1,5 +1,4 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -42,7 +41,7 @@ namespace emitbreaker.PawnControl
 
             var result = new List<Frame>();
 
-            // Find all frames needing materials
+            // Find all frames needing materials, regardless of faction
             foreach (Frame frame in map.listerThings.ThingsInGroup(ThingRequestGroup.Construction))
             {
                 if (frame != null && frame.Spawned && !frame.IsForbidden(Faction.OfPlayer))
@@ -62,14 +61,6 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Override TryGiveJob to use StandardTryGiveJob pattern
-        /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return CreateDeliveryJob<JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl>(pawn);
-        }
-
-        /// <summary>
         /// Processes the cached targets to find valid frames for resource delivery jobs
         /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
@@ -77,10 +68,14 @@ namespace emitbreaker.PawnControl
             if (pawn == null || targets == null || targets.Count == 0)
                 return null;
 
-            // Convert generic Things to Frames and filter invalid ones
+            // First check faction validation
+            if (!IsValidFactionForConstruction(pawn))
+                return null;
+
+            // Convert generic Things to Frames and filter for valid faction match
             List<Frame> frames = targets
                 .OfType<Frame>()
-                .Where(f => f.Spawned && !f.IsForbidden(pawn.Faction))
+                .Where(f => f.Spawned && !f.IsForbidden(pawn) && IsValidTargetFaction(f, pawn))
                 .ToList();
 
             if (frames.Count == 0)
@@ -146,15 +141,16 @@ namespace emitbreaker.PawnControl
 
         /// <summary>
         /// Determines if a thing is a valid nearby construction site needing resources
+        /// Ensures proper faction matching
         /// </summary>
         protected override bool IsNewValidNearbyNeeder(Thing t, HashSet<Thing> nearbyNeeders, Frame originalTarget, Pawn pawn)
         {
-            return t is Frame &&
-                   t != originalTarget &&
-                   t.Faction == pawn.Faction &&
-                   !nearbyNeeders.Contains(t) &&
-                   !t.IsForbidden(pawn) &&
-                   pawn.CanReserve(t);
+            return t is Frame frame &&
+                   frame != originalTarget &&
+                   frame.Faction == pawn.Faction &&  // Must match pawn's faction
+                   !nearbyNeeders.Contains(frame) &&
+                   !frame.IsForbidden(pawn) &&
+                   pawn.CanReserve(frame);
         }
 
         #endregion

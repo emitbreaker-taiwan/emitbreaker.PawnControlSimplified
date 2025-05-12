@@ -15,6 +15,16 @@ namespace emitbreaker.PawnControl
     {
         #region Overrides
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.FixBrokenDownBuilding;
         protected override string WorkTag => "Construction";
         protected override int CacheUpdateInterval => 300; // Update every 5 seconds (broken buildings don't change often)
         protected override string DebugName => "broken building repair assignment";
@@ -92,7 +102,7 @@ namespace emitbreaker.PawnControl
                     if (bestTarget != null && bestComponent != null)
                     {
                         // Create the job
-                        Job job = JobMaker.MakeJob(JobDefOf.FixBrokenDownBuilding, bestTarget, bestComponent);
+                        Job job = JobMaker.MakeJob(WorkJobDef, bestTarget, bestComponent);
                         job.count = 1;
                         Utility_DebugManager.LogNormal($"{p.LabelShort} created job to repair broken {bestTarget.LabelCap}");
                         return job;
@@ -136,7 +146,7 @@ namespace emitbreaker.PawnControl
                 if (component != null)
                 {
                     // Create the job
-                    Job job = JobMaker.MakeJob(JobDefOf.FixBrokenDownBuilding, bestTarget, component);
+                    Job job = JobMaker.MakeJob(WorkJobDef, bestTarget, component);
                     job.count = 1;
                     Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to repair broken {bestTarget.LabelCap}");
                     return job;

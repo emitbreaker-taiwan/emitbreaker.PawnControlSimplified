@@ -1,5 +1,4 @@
 using RimWorld;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -11,33 +10,54 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to clean filth in the home area.
     /// Uses the Cleaning work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Cleaning_CleanFilth_PawnControl : JobGiver_Scan_PawnControl
+    public class JobGiver_Cleaning_CleanFilth_PawnControl : JobGiver_Cleaning_PawnControl
     {
         #region Configuration
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Clean;
+
         // Constants
         private const int MIN_TICKS_SINCE_THICKENED = 600;
-        private const int MAX_FILTH_PER_JOB = 15;
-        private const int MAX_SEARCH_RADIUS = 10;
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 100f, 400f, 1600f }; // 10, 20, 40 tiles
-
-        #endregion
-
-        #region Overrides
-
-        protected override string WorkTag => "Cleaning";
-
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
         protected override string DebugName => "FilthCleaning";
 
-        protected override int CacheUpdateInterval => 450; // Update every 7.5 seconds
+        /// <summary>
+        /// Update cache every 7.5 seconds
+        /// </summary>
+        protected override int CacheUpdateInterval => 450;
 
+        /// <summary>
+        /// FilthCleaning is considered medium-low priority
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             return 4.7f;
         }
 
+        /// <summary>
+        /// Maximum filth per job
+        /// </summary>
+        protected override int MaxItemsPerJob => 15;
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Get all filth in the home area as targets
+        /// </summary>
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
             if (map?.listerFilthInHomeArea == null)
@@ -45,58 +65,45 @@ namespace emitbreaker.PawnControl
 
             return map.listerFilthInHomeArea.FilthInHomeArea
                 .Where(f => f != null && !f.Destroyed && f is Filth filth && filth.TicksSinceThickened >= MIN_TICKS_SINCE_THICKENED)
-                .Take(1000);  // No need for Cast<Thing>() since FilthInHomeArea already contains Thing objects
-        }
-
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            // Use the StandardTryGiveJob pattern that works
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Cleaning_CleanFilth_PawnControl>(
-                pawn,
-                WorkTag,  // Use WorkTag property for consistency
-                (p, forced) => {
-                    // IMPORTANT: Only player pawns and slaves owned by player should clean filth
-                    if (p.Faction != Faction.OfPlayer &&
-                        !(p.IsSlave && p.HostFaction == Faction.OfPlayer))
-                        return null;
-
-                    // Check if map has any filth in home area
-                    if (p?.Map?.listerFilthInHomeArea == null ||
-                        p.Map.listerFilthInHomeArea.FilthInHomeArea.Count == 0)
-                        return null;
-
-                    // Get targets from the base class cache
-                    List<Thing> targets = GetTargets(p.Map).ToList();
-
-                    // Return filth cleaning job
-                    return TryCreateCleanFilthJob(p, targets);
-                },
-                debugJobDesc: "filth cleaning assignment");
+                .Take(1000);
         }
 
         /// <summary>
-        /// Creates a job for the pawn using the cached targets
+        /// Check if the map has filth that needs cleaning
         /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        protected override bool AreMapRequirementsMet(Pawn pawn)
         {
-            // Skip if no targets
-            if (targets == null || targets.Count == 0)
-                return null;
+            // Make sure the map has filth in the home area
+            return pawn?.Map?.listerFilthInHomeArea != null &&
+                   pawn.Map.listerFilthInHomeArea.FilthInHomeArea.Count > 0;
+        }
 
-            // Use the existing logic for cleaning filth
-            return TryCreateCleanFilthJob(pawn, targets);
+        /// <summary>
+        /// Filth cleaning uses Thing targets
+        /// </summary>
+        protected override bool RequiresThingTargets()
+        {
+            return true;
         }
 
         #endregion
 
-        #region Filth-cleaning helpers
+        #region Job Creation
 
         /// <summary>
         /// Creates a job for cleaning filth
         /// </summary>
-        private Job TryCreateCleanFilthJob(Pawn pawn, List<Thing> filthTargets)
+        protected override Job CreateCleaningJob(Pawn pawn, bool forced)
         {
-            if (pawn?.Map == null || filthTargets == null || filthTargets.Count == 0)
+            if (pawn?.Map == null)
+                return null;
+
+            // Get targets from cache or directly
+            List<Thing> filthTargets = _cachedTargets.TryGetValue(pawn.Map.uniqueID, out var targets) && targets.Count > 0
+                ? targets
+                : GetTargets(pawn.Map).ToList();
+
+            if (filthTargets.Count == 0)
                 return null;
 
             // Use JobGiverManager for distance bucketing
@@ -104,7 +111,7 @@ namespace emitbreaker.PawnControl
                 pawn,
                 filthTargets,
                 (filth) => (filth.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
+                DistanceThresholds
             );
 
             // Find a valid filth to clean
@@ -123,7 +130,7 @@ namespace emitbreaker.PawnControl
                         continue;
 
                     // Create a cleaning job with this filth as the primary target
-                    Job job = JobMaker.MakeJob(JobDefOf.Clean);
+                    Job job = JobMaker.MakeJob(WorkJobDef);
                     job.AddQueuedTarget(TargetIndex.A, filth);
 
                     // Find nearby filth to clean in the same job
@@ -143,6 +150,10 @@ namespace emitbreaker.PawnControl
             return null;
         }
 
+        #endregion
+
+        #region Validation
+
         /// <summary>
         /// Validates if a filth target is valid for cleaning
         /// </summary>
@@ -157,6 +168,10 @@ namespace emitbreaker.PawnControl
                    pawn.CanReserve(filth);
         }
 
+        #endregion
+
+        #region Helper Methods
+
         /// <summary>
         /// Adds nearby filth to the job queue for batched cleaning
         /// </summary>
@@ -167,7 +182,7 @@ namespace emitbreaker.PawnControl
             Room primaryRoom = primaryFilth.GetRoom();
 
             // Search in a radial pattern around the primary filth
-            for (int i = 0; i < 100 && queuedCount < MAX_FILTH_PER_JOB; i++)
+            for (int i = 0; i < 100 && queuedCount < MaxItemsPerJob; i++)
             {
                 IntVec3 cell = primaryFilth.Position + GenRadial.RadialPattern[i];
                 if (ShouldCleanCell(cell, map, primaryRoom))
@@ -180,7 +195,7 @@ namespace emitbreaker.PawnControl
                             job.AddQueuedTarget(TargetIndex.A, nearbyFilth);
                             queuedCount++;
 
-                            if (queuedCount >= MAX_FILTH_PER_JOB)
+                            if (queuedCount >= MaxItemsPerJob)
                                 break;
                         }
                     }
@@ -225,15 +240,6 @@ namespace emitbreaker.PawnControl
             }
 
             return false;
-        }
-
-        #endregion
-
-        #region Utility
-
-        public override string ToString()
-        {
-            return "JobGiver_Cleaning_CleanFilth_PawnControl";
         }
 
         #endregion

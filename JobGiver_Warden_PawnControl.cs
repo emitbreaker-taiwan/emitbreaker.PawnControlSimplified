@@ -12,6 +12,13 @@ namespace emitbreaker.PawnControl
     public abstract class JobGiver_Warden_PawnControl : JobGiver_Scan_PawnControl
     {
         #region Configuration
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
         protected override string WorkTag => "Warden";
         protected virtual float[] DistanceThresholds => new float[] { 100f, 225f, 625f }; // 10, 15, 25 tiles
         #endregion

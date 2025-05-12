@@ -17,6 +17,12 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>  
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
         /// Human-readable name for debug logging
         /// </summary>
         protected override string DebugName => "Refuel";

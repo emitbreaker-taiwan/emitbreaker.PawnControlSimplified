@@ -10,6 +10,86 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public abstract class JobGiver_Scan_PawnControl : JobGiver_PawnControl
     {
+        #region Configuration
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresDesignator
+        {
+            get
+            {
+                if (TargetDesignation != null)
+                    return true;
+
+                if (RequiresMapZoneorArea)
+                    return true;
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Whether this job giver requires player faction specifically (for jobs like deconstruct)
+        /// </summary>
+        protected override bool RequiresPlayerFaction => false;
+
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.Unknown;
+
+        /// <summary>
+        /// Checks if a non-humanlike pawn has the required capabilities for this job giver
+        /// </summary>
+        protected override bool HasRequiredCapabilities(Pawn pawn)
+        {
+            // For humanlike pawns, no additional capability checks
+            if (pawn.RaceProps.Humanlike)
+                return true;
+
+            // For non-humanlike pawns, check for the required mod extension
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null)
+                return false;
+
+            if (modExtension.tags == null || modExtension.tags.Count == 0)
+                return false;
+
+            // Check for work type enablement
+            if (!Utility_TagManager.WorkTypeEnabled(pawn.def, WorkTag))
+                return false;
+
+            // Allow if pawn has the AllowAllWork tag
+            if (modExtension.tags.Contains(PawnEnumTags.AllowAllWork.ToString()))
+                return true;
+
+            if (modExtension.tags.Contains(PawnEnumTags.BlockAllWork.ToString()))
+                return false;
+
+            // Check for specific required tag if specified
+            if (RequiredTag != PawnEnumTags.Unknown && !modExtension.tags.Contains(RequiredTag.ToString()))
+                return false;
+
+            if (modExtension.tags.Contains(PawnEnumTags.BlockWork_Construction.ToString()))
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// The designation type this job giver handles
+        /// </summary>
+        protected override DesignationDef TargetDesignation => null;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => null;
+
+        #endregion
+
         #region Caching
 
         protected static readonly Dictionary<int, int> _lastCacheTick = new Dictionary<int, int>();

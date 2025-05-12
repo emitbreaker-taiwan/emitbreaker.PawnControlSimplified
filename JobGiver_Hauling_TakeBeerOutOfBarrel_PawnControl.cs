@@ -16,6 +16,22 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The designation type this job giver handles
+        /// </summary>
+        protected override DesignationDef TargetDesignation => DesignationDefOf.Deconstruct;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.TakeBeerOutOfFermentingBarrel;
+
+        /// <summary>
         /// Human-readable name for debug logging
         /// </summary>
         protected override string DebugName => "TakeBeerOutOfBarrel";
@@ -90,7 +106,7 @@ namespace emitbreaker.PawnControl
                     // Create job if target found
                     if (targetThing != null && targetThing is Building_FermentingBarrel barrel)
                     {
-                        Job job = JobMaker.MakeJob(JobDefOf.TakeBeerOutOfFermentingBarrel, barrel);
+                        Job job = JobMaker.MakeJob(WorkJobDef, barrel);
                         Utility_DebugManager.LogNormal($"{p.LabelShort} created job to take beer out of fermenting barrel");
                         return job;
                     }
@@ -124,7 +140,7 @@ namespace emitbreaker.PawnControl
             // Create job if target found
             if (targetThing != null && targetThing is Building_FermentingBarrel barrel)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.TakeBeerOutOfFermentingBarrel, barrel);
+                Job job = JobMaker.MakeJob(WorkJobDef, barrel);
                 Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to take beer out of fermenting barrel");
                 return job;
             }
@@ -174,7 +190,7 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Skip if being deconstructed
-            if (pawn.Map.designationManager.DesignationOn(barrel, DesignationDefOf.Deconstruct) != null)
+            if (pawn.Map.designationManager.DesignationOn(barrel, TargetDesignation) != null)
                 return false;
 
             // Skip if unreachable or can't be reserved

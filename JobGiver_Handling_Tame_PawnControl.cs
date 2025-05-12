@@ -16,6 +16,17 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Tame;
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
         /// Human-readable name for debug logging
         /// </summary>
         protected override string DebugName => "Tame";
@@ -272,7 +283,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Create job if target found
-            Job job = JobMaker.MakeJob(JobDefOf.Tame, targetAnimal, null, foodSource);
+            Job job = JobMaker.MakeJob(WorkJobDef, targetAnimal, null, foodSource);
             job.count = foodCount;
             Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to tame {targetAnimal.LabelShort}");
             return job;

@@ -14,9 +14,15 @@ namespace emitbreaker.PawnControl
         #region Overrides
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
         /// The JobDef to use for milking animals
         /// </summary>
-        protected override JobDef JobDef => JobDefOf.Milk;
+        protected override JobDef WorkJobDef => JobDefOf.Milk;
 
         /// <summary>
         /// Gets the milkable component from the animal

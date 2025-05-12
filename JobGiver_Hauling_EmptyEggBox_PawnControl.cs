@@ -17,6 +17,17 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.EmptyThingContainer;
+
+        /// <summary>
         /// Human-readable name for debug logging
         /// </summary>
         protected override string DebugName => "EmptyEggBox";
@@ -105,7 +116,7 @@ namespace emitbreaker.PawnControl
                                 return null;
 
                             // Create the job
-                            Job job = JobMaker.MakeJob(JobDefOf.EmptyThingContainer, targetThing, comp.ContainedThing, foundCell);
+                            Job job = JobMaker.MakeJob(WorkJobDef, targetThing, comp.ContainedThing, foundCell);
                             job.count = comp.ContainedThing.stackCount;
 
                             Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to empty egg box containing {comp.ContainedThing.Label} ({comp.ContainedThing.stackCount})");
@@ -139,7 +150,7 @@ namespace emitbreaker.PawnControl
                             continue;
 
                         // Create the job
-                        Job job = JobMaker.MakeJob(JobDefOf.EmptyThingContainer, target, comp.ContainedThing, foundCell);
+                        Job job = JobMaker.MakeJob(WorkJobDef, target, comp.ContainedThing, foundCell);
                         job.count = comp.ContainedThing.stackCount;
 
                         Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to empty egg box containing {comp.ContainedThing.Label} ({comp.ContainedThing.stackCount})");

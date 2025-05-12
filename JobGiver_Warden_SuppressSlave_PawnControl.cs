@@ -14,6 +14,11 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.SlaveSuppress;
+
+        /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
         protected override string DebugName => "SuppressSlave";
@@ -214,7 +219,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         private Job CreateSuppressionJob(Pawn warden, Pawn slave)
         {
-            Job job = JobMaker.MakeJob(JobDefOf.SlaveSuppress, slave);
+            Job job = JobMaker.MakeJob(WorkJobDef, slave);
 
             Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to suppress slave {slave.LabelShort}");
 

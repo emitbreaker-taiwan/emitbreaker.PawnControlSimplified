@@ -15,6 +15,17 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.ReleaseAnimalToWild;
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
         protected override string DebugName => "ReleaseAnimalsToWild";
@@ -131,7 +142,7 @@ namespace emitbreaker.PawnControl
             // Create job if target found
             if (targetAnimal != null)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.ReleaseAnimalToWild, targetAnimal);
+                Job job = JobMaker.MakeJob(WorkJobDef, targetAnimal);
                 job.count = 1;
                 Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to release {targetAnimal.LabelShort} to the wild");
                 return job;

@@ -16,6 +16,16 @@ namespace emitbreaker.PawnControl
     {
         #region Overrides
 
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.RemoveRoof;
         protected override string WorkTag => "Construction";
         protected override int CacheUpdateInterval => 250; // Update every ~4 seconds
         protected override string DebugName => "roof removal assignment";
@@ -72,7 +82,7 @@ namespace emitbreaker.PawnControl
                         if (bestCell.IsValid)
                         {
                             // Create the job
-                            Job job = JobMaker.MakeJob(JobDefOf.RemoveRoof);
+                            Job job = JobMaker.MakeJob(WorkJobDef);
                             job.targetA = bestCell;
                             job.targetB = bestCell;
                             Utility_DebugManager.LogNormal($"{p.LabelShort} created job to remove roof at {bestCell}");
@@ -109,7 +119,7 @@ namespace emitbreaker.PawnControl
             if (bestCell.IsValid)
             {
                 // Create the job
-                Job job = JobMaker.MakeJob(JobDefOf.RemoveRoof);
+                Job job = JobMaker.MakeJob(WorkJobDef);
                 job.targetA = bestCell;
                 job.targetB = bestCell;
                 Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to remove roof at {bestCell}");

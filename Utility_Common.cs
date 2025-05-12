@@ -31,6 +31,13 @@ namespace emitbreaker.PawnControl
             return true;
         }
 
+        public static bool PawnIsNotPlayerFaction(Pawn pawn)
+        {
+            if (pawn.Faction != Faction.OfPlayer && !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return true;
+            return false;
+        }
+
         public static bool RaceDefChecker(ThingDef def)
         {
             if (def == null || def.race == null)

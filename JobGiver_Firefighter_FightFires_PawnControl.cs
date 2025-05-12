@@ -16,6 +16,17 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.BeatFire;
+
+        /// <summary>
         /// Use the Firefighter work tag
         /// </summary>
         protected override string WorkTag => "Firefighter";
@@ -296,7 +307,7 @@ namespace emitbreaker.PawnControl
             // Step 4: Create job if we found a target
             if (targetFire != null)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.BeatFire, targetFire);
+                Job job = JobMaker.MakeJob(WorkJobDef, targetFire);
                 Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job for fighting fire at {targetFire.Position}");
                 return job;
             }

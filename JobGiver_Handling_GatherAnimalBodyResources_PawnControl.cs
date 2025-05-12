@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// The JobDef to use when creating jobs
         /// </summary>
-        protected abstract JobDef JobDef { get; }
+        protected override JobDef WorkJobDef { get; }
 
         /// <summary>
         /// Gets the appropriate CompHasGatherableBodyResource component from the animal
@@ -138,7 +138,7 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Create job if target found
-            Job job = JobMaker.MakeJob(JobDef, targetAnimal);
+            Job job = JobMaker.MakeJob(WorkJobDef, targetAnimal);
             Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to gather resources from {targetAnimal.LabelShort}");
             return job;
         }

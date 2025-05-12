@@ -36,6 +36,11 @@ namespace emitbreaker.PawnControl
         protected override float[] DistanceThresholds => new float[] { 100f, 400f, 1600f };
 
         /// <summary>
+        /// Cremation strictly requires player faction
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
+
+        /// <summary>
         /// Fixed bill giver definitions for crematoriums
         /// </summary>
         protected override List<ThingDef> FixedBillGiverDefs
@@ -62,60 +67,72 @@ namespace emitbreaker.PawnControl
             }
         }
 
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+
         #endregion
 
-        #region Core flow
+        #region Core Flow
 
+        /// <summary>
+        /// Sets the base priority for this job giver
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
-            // Chatting with prisoners for recruitment or resistance reduction is important
             return 5.5f;
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
+        /// <summary>
+        /// Override to strictly limit cremation to player pawns
+        /// </summary>
+        protected override bool IsValidFactionForBillWork(Pawn pawn)
         {
-            // IMPORTANT: Only player pawns and slaves owned by player should operate crematoriums
-            if (pawn.Faction != Faction.OfPlayer &&
-                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
-                return null;
-
-            // Use the base implementation which handles all bill processing
-            return base.TryGiveJob(pawn);
+            // For cremation, strictly require player faction or player's slaves
+            return pawn != null && (pawn.Faction == Faction.OfPlayer ||
+                  (pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer));
         }
 
+        /// <summary>
+        /// Cremation requires specific capabilities that non-humanlike pawns might not have
+        /// </summary>
+        protected override bool HasRequiredCapabilities(Pawn pawn)
+        {
+            // For cremation, require manipulation ability
+            if (!pawn.RaceProps.Humanlike)
+            {
+                // Check if the pawn has manipulation capability
+                return pawn.RaceProps.ToolUser;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Processes cached targets for the pawn.
+        /// </summary>
+        /// <param name="pawn">The pawn performing the job.</param>
+        /// <param name="targets">The list of cached targets.</param>
+        /// <param name="forced">Whether the job is forced.</param>
+        /// <returns>A job for the pawn, or null if no job is found.</returns>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
+            // Example implementation: Iterate through targets and find a valid job.
             foreach (var target in targets)
             {
                 if (IsValidBillGiver(target, pawn, forced))
                 {
-                    Job job = TryGiveJob(pawn);
-                    if (job != null)
-                    {
-                        return job;
-                    }
+                    return StartOrResumeBillJob(pawn, (IBillGiver)target, forced);
                 }
             }
+
+            // Return null if no valid job is found.
             return null;
         }
 
         #endregion
 
-        #region Target selection
-
-        /// <summary>
-        /// Checks if a bill giver is valid for cremation
-        /// </summary>
-        protected override bool IsValidBillGiver(Thing thing, Pawn pawn, bool forced = false)
-        {
-            // Make sure only player pawns and slaves owned by player operate crematoriums
-            if (pawn.Faction != Faction.OfPlayer &&
-                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
-                return false;
-
-            // Use the parent class's validation logic
-            return base.IsValidBillGiver(thing, pawn, forced);
-        }
+        #region Target Selection
 
         /// <summary>
         /// Gets all crematoriums with bills on the map

@@ -28,6 +28,11 @@ namespace emitbreaker.PawnControl
 
         #region Override Configuration
 
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Doctor;
+
         // Configuration to be overridden by subclasses
         protected virtual bool FeedHumanlikesOnly => true;
         protected virtual bool FeedAnimalsOnly => false;
@@ -35,6 +40,11 @@ namespace emitbreaker.PawnControl
         protected override string WorkTag => "Doctor";
         protected virtual float JobPriority => 8.0f; // High priority - people shouldn't starve
         protected virtual string JobDescription => "feed patient";
+
+        /// <summary>
+        /// Whether non-player pawns can feed patients (always within their own faction)
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Override cache interval for feeding jobs
@@ -65,6 +75,38 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
+        /// Common implementation for ShouldSkip that enforces faction requirements
+        /// </summary>
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            if (base.ShouldSkip(pawn))
+                return true;
+
+            // Allow player pawns and any other faction if AllowNonPlayerPawns is true
+            if (!IsValidFactionForFeedingPatients(pawn))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Determines if a pawn's faction is allowed to feed patients
+        /// </summary>
+        protected virtual bool IsValidFactionForFeedingPatients(Pawn pawn)
+        {
+            // Always allow player pawns and their slaves
+            if (pawn.Faction == Faction.OfPlayer ||
+                (pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+                return true;
+
+            // For non-player pawns, check if the setting allows them
+            if (RequiresPlayerFaction && pawn.Faction != null)
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
         /// Main job creation method, uses the CreateFeedJob helper
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
@@ -84,9 +126,8 @@ namespace emitbreaker.PawnControl
         /// <returns>A job to feed a patient, or null if no valid job could be created</returns>
         protected Job CreateFeedJob<T>(Pawn pawn) where T : JobGiver_Common_FeedPatient_PawnControl
         {
-            // IMPORTANT: Only player pawns and slaves owned by player should feed patients
-            if (pawn.Faction != Faction.OfPlayer &&
-                !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
+            // Early validation check before job creation
+            if (!IsValidFactionForFeedingPatients(pawn))
                 return null;
 
             return Utility_JobGiverManager.StandardTryGiveJob<T>(
@@ -102,10 +143,19 @@ namespace emitbreaker.PawnControl
                     if (!_hungryPawnCache.ContainsKey(mapId) || _hungryPawnCache[mapId].Count == 0)
                         return null;
 
+                    // Create a local list of valid patients for this pawn
+                    // Filter based on faction relationship
+                    List<Pawn> validPatients = _hungryPawnCache[mapId]
+                        .Where(patient => IsPatientValidForPawn(patient, p))
+                        .ToList();
+
+                    if (validPatients.Count == 0)
+                        return null;
+
                     // Use JobGiverManager for distance bucketing
                     var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                         p,
-                        _hungryPawnCache[mapId],
+                        validPatients,
                         (patient) => (patient.Position - p.Position).LengthHorizontalSquared,
                         DISTANCE_THRESHOLDS
                     );
@@ -177,6 +227,40 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
+        /// Determines if a patient is valid for a specific feeder pawn based on faction relationships
+        /// </summary>
+        protected virtual bool IsPatientValidForPawn(Pawn patient, Pawn feeder)
+        {
+            // Player pawns can feed their own colonists, slaves, prisoners, and animals
+            if (feeder.Faction == Faction.OfPlayer ||
+               (feeder.IsSlave && feeder.HostFaction == Faction.OfPlayer))
+            {
+                // For player feeders, we check if the patient is:
+                // 1. A colonist (same faction)
+                // 2. A prisoner of the player
+                // 3. An animal owned by the player
+                // 4. A slave owned by the player
+                return patient.Faction == Faction.OfPlayer ||
+                       (patient.guest != null && patient.HostFaction == Faction.OfPlayer) ||
+                       (patient.IsPrisoner && patient.HostFaction == Faction.OfPlayer) ||
+                       (patient.RaceProps.Animal && patient.Faction == Faction.OfPlayer) ||
+                       (patient.IsSlave && patient.HostFaction == Faction.OfPlayer);
+            }
+
+            // For non-player pawns, they can only feed patients of their own faction
+            // This includes their own faction's animals
+            if (feeder.Faction != null)
+            {
+                return patient.Faction == feeder.Faction ||
+                       (patient.guest != null && patient.HostFaction == feeder.Faction) ||
+                       (patient.RaceProps.Animal && patient.Faction == feeder.Faction);
+            }
+
+            // No valid relationship found
+            return false;
+        }
+
+        /// <summary>
         /// Updates the cache of hungry pawns that need to be fed
         /// </summary>
         protected virtual void UpdateHungryPawnCache(Map map)
@@ -220,12 +304,38 @@ namespace emitbreaker.PawnControl
                     if (!FeedPrisonersOnly && potentialPatient.IsPrisoner)
                         continue;
 
+                    // Check if this pawn is a valid patient
+                    // - Must be humanlike (if FeedHumanlikesOnly)
+                    // - Must be animal (if FeedAnimalsOnly)
+                    // - Must be part of a faction or a prisoner
+                    if (!IsValidPatientType(potentialPatient))
+                        continue;
+
                     // Add to the cache
                     _hungryPawnCache[mapId].Add(potentialPatient);
                 }
 
                 _lastCacheUpdateTick = currentTick;
             }
+        }
+
+        /// <summary>
+        /// Checks if a pawn is a valid patient type (humanlike/animal/prisoner)
+        /// </summary>
+        protected virtual bool IsValidPatientType(Pawn pawn)
+        {
+            // Must have a faction or be a prisoner
+            if (pawn.Faction == null && !pawn.IsPrisoner)
+                return false;
+
+            // Check species requirements
+            if (FeedHumanlikesOnly && !pawn.RaceProps.Humanlike)
+                return false;
+
+            if (FeedAnimalsOnly && !pawn.RaceProps.Animal)
+                return false;
+
+            return true;
         }
 
         /// <summary>
@@ -241,7 +351,7 @@ namespace emitbreaker.PawnControl
 
             // Apply species filters
             if (FeedHumanlikesOnly && !pawn.RaceProps.Humanlike) return true;
-            if (FeedAnimalsOnly && !pawn.IsNonMutantAnimal) return true;
+            if (FeedAnimalsOnly && !pawn.RaceProps.Animal) return true;
 
             // Skip ourselves - can't feed yourself
             if (pawn == Current.Game.CurrentMap?.mapPawns?.FreeColonistsSpawned.FirstOrDefault(p => p.CurJob?.def.defName == "FeedPatient"))

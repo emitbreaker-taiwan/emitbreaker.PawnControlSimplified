@@ -15,6 +15,22 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The designation type this job giver handles
+        /// </summary>
+        protected override DesignationDef TargetDesignation => DesignationDefOf.Strip;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Strip;
+
+        /// <summary>
         /// Human-readable name for debug logging 
         /// </summary>
         protected override string DebugName => "Strip";
@@ -58,10 +74,20 @@ namespace emitbreaker.PawnControl
             return 5.7f;
         }
 
+        public override bool ShouldSkip(Pawn pawn)
+        {
+            base.ShouldSkip(pawn);
+
+            if (Utility_Common.PawnIsNotPlayerFaction(pawn))
+                return true;
+
+            return false;
+        }
+
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Quick early exit if there are no strip designations
-            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.Strip))
+            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation))
             {
                 return null;
             }
@@ -97,7 +123,7 @@ namespace emitbreaker.PawnControl
             // We're using our custom strippable cache instead of the standard Thing targets
             if (map?.designationManager != null)
             {
-                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Strip))
+                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(TargetDesignation))
                 {
                     if (designation.target.HasThing)
                     {
@@ -133,7 +159,7 @@ namespace emitbreaker.PawnControl
             // Create job if target found
             if (targetThing != null)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.Strip, targetThing);
+                Job job = JobMaker.MakeJob(WorkJobDef, targetThing);
 
                 if (Prefs.DevMode)
                 {
@@ -183,7 +209,7 @@ namespace emitbreaker.PawnControl
                 _stripReachabilityCache[mapId] = new Dictionary<Thing, bool>();
 
             // Find all things designated for stripping
-            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Strip))
+            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(TargetDesignation))
             {
                 if (designation.target.HasThing)
                 {
@@ -226,7 +252,7 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Skip if no longer designated for stripping
-            if (thing.Map.designationManager.DesignationOn(thing, DesignationDefOf.Strip) == null)
+            if (thing.Map.designationManager.DesignationOn(thing, TargetDesignation) == null)
                 return false;
 
             // Skip if cannot be stripped by colony
@@ -253,7 +279,7 @@ namespace emitbreaker.PawnControl
 
         public override string ToString()
         {
-            return "JobGiver_Strip_PawnControl";
+            return "JobGiver_Hauling_Strip_PawnControl";
         }
 
         #endregion

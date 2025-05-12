@@ -155,7 +155,10 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden)
         {
-            if (prisoner?.guest == null)
+            if (prisoner?.guest == null || warden?.Faction == null)
+                return false;
+
+            if (warden.Faction != prisoner.HostFaction)
                 return false;
 
             PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;

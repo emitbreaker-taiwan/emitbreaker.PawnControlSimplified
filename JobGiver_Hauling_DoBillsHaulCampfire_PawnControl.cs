@@ -1,4 +1,5 @@
 using RimWorld;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -35,6 +36,11 @@ namespace emitbreaker.PawnControl
         protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
 
         /// <summary>
+        /// Campfire cooking requires player faction
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
+
+        /// <summary>
         /// Fixed bill giver definitions for campfires
         /// </summary>
         protected override List<ThingDef> FixedBillGiverDefs
@@ -61,44 +67,78 @@ namespace emitbreaker.PawnControl
             }
         }
 
+        /// <summary>
+        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// </summary>
+        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+
         #endregion
 
-        #region Core flow
+        #region Core Flow
 
+        /// <summary>
+        /// Sets the base priority for this job giver
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
-            // Chatting with prisoners for recruitment or resistance reduction is important
             return 5.4f;
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
+        /// <summary>
+        /// Override to limit campfire work to player pawns
+        /// </summary>
+        protected override bool IsValidFactionForBillWork(Pawn pawn)
         {
-            // Use the common DoBill job logic from the base class
-            return base.TryGiveJob(pawn);
+            // For campfire work, only player pawns or slaves should do it
+            return pawn != null && (pawn.Faction == Faction.OfPlayer ||
+                  (pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer));
         }
 
+        /// <summary>
+        /// Campfire cooking requires specific capabilities that non-humanlike pawns might not have
+        /// </summary>
+        protected override bool HasRequiredCapabilities(Pawn pawn)
+        {
+            // For campfire cooking, require manipulation ability
+            if (!pawn.RaceProps.Humanlike)
+            {
+                // Check for extension that might override capability checks
+                NonHumanlikePawnControlExtension modExtension =
+                    pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
+
+                if (modExtension != null && modExtension.ignoreCapability)
+                    return true;
+
+                // Default to requiring tool user capability
+                return pawn.RaceProps.ToolUser;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Processes cached targets for campfire-related jobs.
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Example implementation: Iterate through cached targets and try to create a job for the pawn
-            foreach (var target in targets)
+            if (targets == null || targets.Count == 0)
+                return null;
+
+            foreach (Thing target in targets)
             {
-                if (IsValidBillGiver(target, pawn, forced))
+                if (IsValidBillGiver(target, pawn, forced) && HasWorkForPawn(target, pawn, forced))
                 {
-                    var job = StartOrResumeBillJob(pawn, (IBillGiver)target, forced);
+                    Job job = StartOrResumeBillJob(pawn, (IBillGiver)target, forced);
                     if (job != null)
-                    {
                         return job;
-                    }
                 }
             }
 
-            // Return null if no valid job could be created
             return null;
         }
 
         #endregion
 
-        #region Target selection
+        #region Target Selection
 
         /// <summary>
         /// Gets the campfires with bills that need doing
@@ -124,15 +164,6 @@ namespace emitbreaker.PawnControl
                     }
                 }
             }
-        }
-
-        #endregion
-
-        #region Utility
-
-        public override string ToString()
-        {
-            return "JobGiver_Hauling_DoBillsHaulCampfire_PawnControl";
         }
 
         #endregion

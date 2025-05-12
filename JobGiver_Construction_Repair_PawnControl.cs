@@ -13,13 +13,24 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Construction_Repair_PawnControl : JobGiver_Scan_PawnControl
     {
+        #region Overrides
+
         // Distance thresholds for bucketing
         private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
 
         // Translation strings
         private static string NotInHomeAreaTrans;
 
-        #region Overrides
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Repair;
 
         /// <summary>
         /// Use Construction work tag
@@ -165,7 +176,7 @@ namespace emitbreaker.PawnControl
                     // Create job if target found
                     if (bestBuilding != null)
                     {
-                        Job job = JobMaker.MakeJob(JobDefOf.Repair, bestBuilding);
+                        Job job = JobMaker.MakeJob(WorkJobDef, bestBuilding);
 
                         if (Prefs.DevMode)
                         {
@@ -195,7 +206,7 @@ namespace emitbreaker.PawnControl
                 {
                     if (pawn.CanReserveAndReach(building, PathEndMode.Touch, Danger.Deadly, 1, -1, null, forced))
                     {
-                        return JobMaker.MakeJob(JobDefOf.Repair, building);
+                        return JobMaker.MakeJob(WorkJobDef, building);
                     }
                 }
             }

@@ -126,6 +126,12 @@ namespace emitbreaker.PawnControl
             return result;
         }
 
+        public static bool WorkTypeEnabled(ThingDef def, string workTypeName)
+        {
+            var workTypeDef = Utility_WorkTypeManager.Named(workTypeName);
+            return WorkTypeEnabled(def, workTypeDef);
+        }
+
         public static bool WorkTypeSettingEnabled(Pawn pawn, WorkTypeDef workTypeDef)
         {
             if (pawn == null || workTypeDef == null) return false;
@@ -133,28 +139,34 @@ namespace emitbreaker.PawnControl
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null) return false; // No mod extension found
 
-            Utility_TagManager.ClearCacheForRace(pawn.def);
-
             // Race‐tags check unchanged…
             if (!WorkTypeEnabled(pawn.def, workTypeDef)) return false;
 
             // If the Pawn_WorkSettings hasn’t *ever* been enabled, do it now
             if (pawn.workSettings == null)
             {
+                Utility_DebugManager.LogWarning($"[{pawn.LabelShort}] has no work setting.");
                 pawn.workSettings = new Pawn_WorkSettings(pawn);
             }
             if (!pawn.workSettings.EverWork)
             {
-                pawn.workSettings.EnableAndInitialize();
+                pawn.workSettings.EnableAndInitializeIfNotAlreadyInitialized();
             }
 
             // Now this will reflect the checkbox/slider in the UI
             bool active = pawn.workSettings.WorkIsActive(workTypeDef);
+            int priority = pawn.workSettings.GetPriority(workTypeDef);
+            
+            if (priority > 0)
+            {
+                active = true; // Disabled in UI, but we want to override it
+            }
+
             if (!active && Prefs.DevMode)
                 Utility_DebugManager.LogWarning($"[{pawn.LabelShort}] {workTypeDef.defName} is disabled in UI");
+
             return active;
         }
-
 
         public static bool WorkTypeSettingEnabled(Pawn pawn, string workTypeName)
         {
@@ -344,7 +356,7 @@ namespace emitbreaker.PawnControl
         {
             if (def == null) return;
 
-            Utility_DebugManager.LogNormal($"Clearing cache entries for race: {def.defName}");
+            //Utility_DebugManager.LogNormal($"Clearing cache entries for race: {def.defName}");
 
             // Clear race's tag cache
             Utility_CacheManager._tagCache.Remove(def);

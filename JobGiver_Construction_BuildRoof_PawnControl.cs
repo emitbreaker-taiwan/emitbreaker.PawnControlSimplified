@@ -11,16 +11,29 @@ namespace emitbreaker.PawnControl
     /// JobGiver that allows non-humanlike pawns to build roofs in designated areas.
     /// Uses the Construction work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Construction_BuildRoof_PawnControl : JobGiver_Scan_PawnControl
+    public class JobGiver_Construction_BuildRoof_PawnControl : JobGiver_Construction_PawnControl
     {
-        #region Overrides
+        #region Configuration
 
-        protected override string WorkTag => "Construction";
         protected override int CacheUpdateInterval => 250; // Update every ~4 seconds
         protected override string DebugName => "roof building assignment";
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => true;
+
+        // Only player faction can build roofs
+        protected override bool RequiresPlayerFaction => true;
+
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.BuildRoof;
+
+        // Distance thresholds for bucketing - slightly larger for roof building
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
 
         protected override bool ShouldExecuteNow(int mapId)
         {
@@ -31,90 +44,49 @@ namespace emitbreaker.PawnControl
 
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            // This job works with IntVec3 cells rather than Things, so we need to handle it differently
-            // We'll return an empty list and handle the actual target collection in TryGiveJob
+            // This job works with IntVec3 cells rather than Things
             return Enumerable.Empty<Thing>();
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
+        /// <summary>
+        /// Whether this job uses thing targets or cell-based targets
+        /// </summary>
+        protected override bool RequiresThingTargets()
         {
-            // Use the StandardTryGiveJob pattern directly
-            return Utility_JobGiverManager.StandardTryGiveJob<Thing>(
-                pawn,
-                WorkTag,  // Use the WorkTag property from the base class
-                (p, forced) => {
-                    // Get targets from the cache
-                    List<Thing> targets = GetTargets(p.Map).ToList();
-                    if (targets.Count == 0)
-                    {
-                        // Direct approach for roof building since targets are cells, not things
-                        List<IntVec3> cells = GetRoofBuildCells(p.Map);
-                        if (cells.Count == 0) return null;
-
-                        // Find the best cell for roof building
-                        IntVec3 bestCell = IntVec3.Invalid;
-                        float bestDistSq = float.MaxValue;
-
-                        foreach (IntVec3 cell in cells)
-                        {
-                            if (!ValidateRoofBuildCell(cell, p, forced))
-                                continue;
-
-                            float distSq = (cell - p.Position).LengthHorizontalSquared;
-                            if (distSq < bestDistSq)
-                            {
-                                bestDistSq = distSq;
-                                bestCell = cell;
-                            }
-                        }
-
-                        if (bestCell.IsValid)
-                        {
-                            // Create the job
-                            Job job = JobMaker.MakeJob(JobDefOf.BuildRoof);
-                            job.targetA = bestCell;
-                            job.targetB = bestCell;
-                            return job;
-                        }
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
+            return false; // Uses cell-based targets instead
         }
 
         /// <summary>
-        /// Creates a job for the pawn using the cached targets
+        /// Checks if the map meets requirements for roof building
         /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        protected override bool AreMapRequirementsMet(Pawn pawn)
         {
-            // Since roof building targets are cells rather than things, 
-            // we need to get the cells directly and find a valid target
+            // Need valid map with build roof area
+            return pawn?.Map != null &&
+                   pawn.Map.areaManager.BuildRoof != null &&
+                   pawn.Map.areaManager.BuildRoof.TrueCount > 0;
+        }
+
+        /// <summary>
+        /// Creates a roof building job for the pawn
+        /// </summary>
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
+        {
+            // Get cells that need roofs built
             List<IntVec3> cells = GetRoofBuildCells(pawn.Map);
             if (cells.Count == 0)
                 return null;
 
-            // Use our existing system to find the best cell for roof building
-            IntVec3 bestCell = IntVec3.Invalid;
-            float bestDistSq = float.MaxValue;
+            // Use distance bucketing for cell selection
+            List<IntVec3>[] buckets = CreateDistanceBuckets(pawn, cells);
 
-            foreach (IntVec3 cell in cells)
-            {
-                if (!ValidateRoofBuildCell(cell, pawn, forced))
-                    continue;
-
-                float distSq = (cell - pawn.Position).LengthHorizontalSquared;
-                if (distSq < bestDistSq)
-                {
-                    bestDistSq = distSq;
-                    bestCell = cell;
-                }
-            }
+            // Find best cell to build roof
+            IntVec3 bestCell = FindBestCell(buckets, pawn, (cell, p) => ValidateRoofBuildCell(cell, p, forced));
 
             // Create job for the best cell if found
             if (bestCell.IsValid)
             {
-                Job job = JobMaker.MakeJob(JobDefOf.BuildRoof);
+                Job job = JobMaker.MakeJob(WorkJobDef);
                 job.targetA = bestCell;
                 job.targetB = bestCell;
                 return job;
@@ -125,7 +97,7 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Cell-selection helpers
+        #region Roof-specific helpers
 
         /// <summary>
         /// Gets cells marked for roof building that need roofs
@@ -156,13 +128,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Limit cell count for performance
-            int maxCacheSize = 500;
-            if (cells.Count > maxCacheSize)
-            {
-                cells = cells.Take(maxCacheSize).ToList();
-            }
-
-            return cells;
+            return LimitListSize(cells, 500);
         }
 
         /// <summary>
@@ -170,7 +136,11 @@ namespace emitbreaker.PawnControl
         /// </summary>
         private bool ValidateRoofBuildCell(IntVec3 cell, Pawn pawn, bool forced)
         {
-            // Filter out invalid cells
+            // First perform base validation from parent class
+            if (!ValidateConstructionCell(cell, pawn, forced))
+                return false;
+
+            // Special validation for roof building
             if (!pawn.Map.areaManager.BuildRoof[cell] || cell.Roofed(pawn.Map))
                 return false;
 
@@ -185,15 +155,13 @@ namespace emitbreaker.PawnControl
                     return false;  // Can't handle the blocker
             }
 
-            // Skip if forbidden or unreachable
-            if (cell.IsForbidden(pawn) ||
-                !pawn.CanReserve(cell) ||
-                !pawn.CanReach(cell, PathEndMode.Touch, pawn.NormalMaxDanger()))
-                return false;
-
             // Check for roof stability
             if (!RoofCollapseUtility.WithinRangeOfRoofHolder(cell, pawn.Map) ||
                 !RoofCollapseUtility.ConnectedToRoofHolder(cell, pawn.Map, assumeRoofAtRoot: true))
+                return false;
+
+            // Check if another pawn is already working on this cell
+            if (IsCellReservedByAnother(pawn, cell, WorkJobDef))
                 return false;
 
             return true;
@@ -205,7 +173,7 @@ namespace emitbreaker.PawnControl
 
         public override string ToString()
         {
-            return "JobGiver_BuildRoof_PawnControl";
+            return "JobGiver_Construction_BuildRoof_PawnControl";
         }
 
         #endregion
