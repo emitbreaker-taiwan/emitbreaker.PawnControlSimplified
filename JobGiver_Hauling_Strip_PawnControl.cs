@@ -47,25 +47,6 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Cache Management
-
-        // Strip-specific cache
-        private static readonly Dictionary<int, List<Thing>> _strippableThingsCache = new Dictionary<int, List<Thing>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _stripReachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastStripCacheUpdateTick = -999;
-
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetStripCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_strippableThingsCache, _stripReachabilityCache);
-            _lastStripCacheUpdateTick = -999;
-            ResetHaulingCache(); // Call base class reset too
-        }
-
-        #endregion
-
         #region Core flow
 
         protected override float GetBasePriority(string workTag)
@@ -84,59 +65,23 @@ namespace emitbreaker.PawnControl
             return false;
         }
 
+        /// <summary>
+        /// Quick check for strip designations before proceeding with job creation
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Quick early exit if there are no strip designations
-            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation))
+            if (pawn?.Map == null || !pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation))
             {
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_Strip_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Update the cache if needed
-                    if (now > _lastStripCacheUpdateTick + CacheUpdateInterval ||
-                        !_strippableThingsCache.ContainsKey(mapId))
-                    {
-                        UpdateStrippableThingsCache(p.Map);
-                    }
-
-                    // Process cached targets
-                    return TryCreateStripJob(p);
-                },
-                debugJobDesc: DebugName);
+            return base.TryGiveJob(pawn);
         }
 
-        protected override IEnumerable<Thing> GetTargets(Map map)
-        {
-            // We're using our custom strippable cache instead of the standard Thing targets
-            if (map?.designationManager != null)
-            {
-                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(TargetDesignation))
-                {
-                    if (designation.target.HasThing)
-                    {
-                        Thing thing = designation.target.Thing;
-                        if (thing != null && StrippableUtility.CanBeStrippedByColony(thing))
-                        {
-                            yield return thing;
-                        }
-                    }
-                }
-            }
-        }
-
+        /// <summary>
+        /// Process cached targets to find a valid stripping job
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
             if (targets == null || targets.Count == 0)
@@ -149,12 +94,12 @@ namespace emitbreaker.PawnControl
                 (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
                 DistanceThresholds);
 
-            // Find the best target to strip
+            // Find the best target to strip using the centralized cache system
             Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (thing, p) => IsValidStripTarget(thing, p),
-                _stripReachabilityCache);
+                null); // Let the parent class handle reachability caching
 
             // Create job if target found
             if (targetThing != null)
@@ -173,40 +118,17 @@ namespace emitbreaker.PawnControl
             return null;
         }
 
-        /// <summary>
-        /// Determines if the job giver should execute based on cache status
-        /// </summary>
-        protected override bool ShouldExecuteNow(int mapId)
-        {
-            return Find.TickManager.TicksGame > _lastStripCacheUpdateTick + CacheUpdateInterval ||
-                  !_strippableThingsCache.ContainsKey(mapId);
-        }
-
         #endregion
 
-        #region Target processing
+        #region Target selection
 
         /// <summary>
-        /// Updates the cache of things designated for stripping
+        /// Gets all things designated for stripping on the map
         /// </summary>
-        private void UpdateStrippableThingsCache(Map map)
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            // Clear outdated cache
-            if (_strippableThingsCache.ContainsKey(mapId))
-                _strippableThingsCache[mapId].Clear();
-            else
-                _strippableThingsCache[mapId] = new List<Thing>();
-
-            // Clear reachability cache too
-            if (_stripReachabilityCache.ContainsKey(mapId))
-                _stripReachabilityCache[mapId].Clear();
-            else
-                _stripReachabilityCache[mapId] = new Dictionary<Thing, bool>();
+            if (map?.designationManager == null)
+                yield break;
 
             // Find all things designated for stripping
             foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(TargetDesignation))
@@ -216,26 +138,10 @@ namespace emitbreaker.PawnControl
                     Thing thing = designation.target.Thing;
                     if (thing != null && StrippableUtility.CanBeStrippedByColony(thing))
                     {
-                        _strippableThingsCache[mapId].Add(thing);
+                        yield return thing;
                     }
                 }
             }
-
-            _lastStripCacheUpdateTick = currentTick;
-        }
-
-        /// <summary>
-        /// Create a job for stripping a target using manager-driven bucket processing
-        /// </summary>
-        private Job TryCreateStripJob(Pawn pawn)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_strippableThingsCache.ContainsKey(mapId) || _strippableThingsCache[mapId].Count == 0)
-                return null;
-
-            return ProcessCachedTargets(pawn, _strippableThingsCache[mapId], false);
         }
 
         /// <summary>
@@ -271,6 +177,22 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return true;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Call the parent class's Reset method to use the centralized cache system
+            base.Reset();
+
+            // Log the reset for debugging
+            Utility_DebugManager.LogNormal($"Reset {GetType().Name} cache");
         }
 
         #endregion

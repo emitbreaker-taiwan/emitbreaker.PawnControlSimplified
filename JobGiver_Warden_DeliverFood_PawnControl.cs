@@ -33,12 +33,18 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
+        /// <summary>
+        /// Gets base priority for the job giver
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             // Delivering food to prisoners is important but lower priority than direct feeding
             return 5.8f;
         }
 
+        /// <summary>
+        /// Creates a job for the warden to deliver food to prisoners
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_DeliverFood_PawnControl>(
@@ -48,15 +54,15 @@ namespace emitbreaker.PawnControl
                     // Process cached targets to create job
                     if (p?.Map == null) return null;
 
-                    int mapId = p.Map.uniqueID;
-                    List<Thing> targets;
-                    if (_prisonerCache.TryGetValue(mapId, out var prisonerList) && prisonerList != null)
+                    // Get prisoners from centralized cache system
+                    var prisoners = GetOrCreatePrisonerCache(p.Map);
+
+                    // Convert to Thing list for processing
+                    List<Thing> targets = new List<Thing>();
+                    foreach (Pawn prisoner in prisoners)
                     {
-                        targets = new List<Thing>(prisonerList.Cast<Thing>());
-                    }
-                    else
-                    {
-                        targets = new List<Thing>();
+                        if (prisoner != null && !prisoner.Dead && prisoner.Spawned)
+                            targets.Add(prisoner);
                     }
 
                     return ProcessCachedTargets(p, targets, forced);
@@ -64,29 +70,36 @@ namespace emitbreaker.PawnControl
                 debugJobDesc: "deliver food to prisoner");
         }
 
+        /// <summary>
+        /// Checks whether this job giver should be skipped for a pawn
+        /// </summary>
         public override bool ShouldSkip(Pawn pawn)
         {
             if (pawn == null || pawn.Dead || pawn.InMentalState)
                 return true;
+
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
                 return true;
+
             // Skip if pawn is not a warden
             if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
                 return true;
+
             return false;
         }
 
         #endregion
 
-        #region Target processing
+        #region Prisoner Selection
 
         /// <summary>
-        /// Get all prisoners eligible for food delivery
+        /// Get prisoners that match the criteria for food delivery
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override IEnumerable<Pawn> GetPrisonersMatchingCriteria(Map map)
         {
-            if (map == null) yield break;
+            if (map == null)
+                yield break;
 
             // Get all prisoner pawns on the map who need food delivered
             foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
@@ -112,45 +125,14 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Process the cached targets to create jobs
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn warden, List<Thing> targets, bool forced)
-        {
-            if (warden?.Map == null || targets.Count == 0)
-                return null;
-
-            int mapId = warden.Map.uniqueID;
-
-            // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets<Pawn>(
-                warden,
-                targets.ConvertAll(t => t as Pawn),
-                (prisoner) => (prisoner.Position - warden.Position).LengthHorizontalSquared,
-                DistanceThresholds
-            );
-
-            // Find the first valid prisoner to deliver food to
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
-                buckets,
-                warden,
-                (prisoner, p) => IsValidPrisonerTarget(prisoner, p),
-                _prisonerReachabilityCache.TryGetValue(mapId, out var cache) ?
-                    new Dictionary<int, Dictionary<Pawn, bool>> { { mapId, cache } } :
-                    new Dictionary<int, Dictionary<Pawn, bool>>()
-            );
-
-            if (targetPrisoner == null)
-                return null;
-
-            // Create food delivery job
-            return CreateDeliverFoodJob(warden, targetPrisoner);
-        }
-
-        /// <summary>
         /// Validates if food can be delivered to this prisoner
         /// </summary>
         protected override bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden)
         {
+            // First check base class validation
+            if (!base.IsValidPrisonerTarget(prisoner, warden))
+                return false;
+
             // Skip if no longer a valid prisoner for food delivery
             if (prisoner?.guest == null || !prisoner.IsPrisoner ||
                 !prisoner.guest.CanBeBroughtFood ||
@@ -173,12 +155,15 @@ namespace emitbreaker.PawnControl
             if (foodSource.GetRoom() == prisoner.GetRoom())
                 return false;
 
-            // Check basic reachability
-            if (!prisoner.Spawned || prisoner.IsForbidden(warden) ||
-                !warden.CanReserve(prisoner, 1, -1, null, false))
-                return false;
-
             return true;
+        }
+
+        /// <summary>
+        /// Create a job for the given prisoner
+        /// </summary>
+        protected override Job CreateJobForPrisoner(Pawn warden, Pawn prisoner, bool forced)
+        {
+            return CreateDeliverFoodJob(warden, prisoner);
         }
 
         /// <summary>
@@ -191,8 +176,11 @@ namespace emitbreaker.PawnControl
             if (map == null || map.mapPawns.PrisonersOfColonySpawnedCount == 0)
                 return false;
 
-            return !_lastWardenCacheUpdate.TryGetValue(mapId, out int lastUpdate) ||
-                   Find.TickManager.TicksGame > lastUpdate + CacheUpdateInterval;
+            // Check if cache needs updating
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            return Find.TickManager.TicksGame > lastUpdateTick + CacheUpdateInterval;
         }
 
         #endregion
@@ -220,7 +208,10 @@ namespace emitbreaker.PawnControl
                 job.count = FoodUtility.WillIngestStackCountOf(prisoner, foodDef, nutrition);
                 job.targetC = RCellFinder.SpotToChewStandingNear(prisoner, foodSource);
 
-                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to deliver food to prisoner {prisoner.LabelShort}");
+                if (Prefs.DevMode)
+                {
+                    Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to deliver food to prisoner {prisoner.LabelShort}");
+                }
 
                 return job;
             }
@@ -296,6 +287,10 @@ namespace emitbreaker.PawnControl
 
             return 0.0f;
         }
+
+        #endregion
+
+        #region Debug
 
         /// <summary>
         /// For debugging purposes

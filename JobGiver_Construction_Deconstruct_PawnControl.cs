@@ -10,56 +10,92 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Construction_Deconstruct_PawnControl : JobGiver_Common_RemoveBuilding_PawnControl
     {
-        #region Overrides
+        #region Configuration
 
+        /// <summary>
+        /// The designation this job giver targets
+        /// </summary>
         protected override DesignationDef TargetDesignation => DesignationDefOf.Deconstruct;
 
+        /// <summary>
+        /// The job to create
+        /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.Deconstruct;
 
-        // Override debug name for better logging
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
         protected override string DebugName => "Deconstruct";
 
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
 
+        /// <summary>
+        /// Cache update interval for deconstruct jobs
+        /// </summary>
+        protected override int CacheUpdateInterval => 160; // ~2.7 seconds
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_Deconstruct_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
+
+        /// <summary>
+        /// Define priority level for deconstruction work
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             // Higher priority than extract tree but lower than most urgent tasks
             return 5.9f;
         }
 
+        #endregion
+
+        #region Target Selection
+
         /// <summary>
-        /// Override TryGiveJob to use the common helper method with the specific type
+        /// Job-specific cache update method that implements specialized target collection
         /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
-            // Use the type-specific CreateRemovalJob to ensure proper job creation
-            return CreateRemovalJob<JobGiver_Construction_Deconstruct_PawnControl>(pawn);
+            // Use the base implementation that gets removal targets
+            return base.UpdateJobSpecificCache(map);
         }
 
         /// <summary>
-        /// Implements the abstract method from JobGiver_Scan_PawnControl to process cached targets
+        /// Gets all deconstructible targets from the map
         /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        protected override IEnumerable<Thing> GetRemovalTargets(Map map)
         {
-            if (pawn == null || targets == null || targets.Count == 0)
-                return null;
-
-            // Extra faction validation to ensure only allowed pawns can perform this job
-            if (!IsPawnValidFaction(pawn))
-                return null;
-
-            // Use the parent class's ExecuteJobGiverInternal method for consistent behavior
-            return ExecuteJobGiverInternal(pawn, LimitListSize(targets));
+            // Use the base implementation to get all targets with the Deconstruct designation
+            return base.GetRemovalTargets(map);
         }
 
-        // Override ValidateTarget to add deconstruct-specific validation
-        protected override bool ValidateTarget(Thing thing, Pawn pawn)
+        #endregion
+
+        #region Thing-Based Helpers
+
+        /// <summary>
+        /// Basic validation for construction target things
+        /// Override to add deconstruct-specific validation
+        /// </summary>
+        protected override bool ValidateConstructionTarget(Thing thing, Pawn pawn, bool forced = false)
         {
             // First perform base validation
-            if (!base.ValidateTarget(thing, pawn))
+            if (!base.ValidateConstructionTarget(thing, pawn, forced))
                 return false;
 
             // Then check deconstruct-specific requirements
@@ -71,6 +107,32 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return true;
+        }
+
+        #endregion
+
+        #region Job Creation
+
+        /// <summary>
+        /// Creates a construction job for deconstructing buildings
+        /// </summary>
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
+        {
+            // Use the base implementation that creates jobs for designated targets
+            return base.CreateConstructionJob(pawn, forced);
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use the centralized cache reset from parent
+            base.Reset();
         }
 
         #endregion

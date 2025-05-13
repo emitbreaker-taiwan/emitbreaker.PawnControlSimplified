@@ -26,10 +26,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.BeatFire;
 
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Firefighter;
+
         /// <summary>
         /// Use the Firefighter work tag
         /// </summary>
-        protected override string WorkTag => "Firefighter";
+        public override string WorkTag => "Firefighter";
 
         /// <summary>
         /// Human-readable name for debug logging 
@@ -51,30 +53,23 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Distance thresholds for bucketing - smaller for fires (10, 20, 25 tiles)
         /// </summary>
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 100f, 400f, 625f };
+        protected virtual float[] DistanceThresholds => new float[] { 100f, 400f, 625f };
 
         #endregion
 
-        #region Caching
+        #region Constructor
 
         /// <summary>
-        /// Specialized cache for Fire objects rather than generic Things
+        /// Constructor that initializes the cache system
         /// </summary>
-        private static readonly Dictionary<int, List<Fire>> _fireCache = new Dictionary<int, List<Fire>>();
-
-        /// <summary>
-        /// Cache for reachability checks
-        /// </summary>
-        private static readonly Dictionary<int, Dictionary<Fire, bool>> _fireReachabilityCache = new Dictionary<int, Dictionary<Fire, bool>>();
-
-        /// <summary>
-        /// Track when the fire cache was last updated
-        /// </summary>
-        private static readonly Dictionary<int, int> _lastFireCacheUpdate = new Dictionary<int, int>();
+        public JobGiver_Firefighter_FightFires_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
 
         #endregion
 
-        #region Core flow
+        #region Core Flow
 
         /// <summary>
         /// Execute more frequently for fires - check every tick
@@ -86,59 +81,8 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Override the job creation to handle the specialized fire case
+        /// Override to set the appropriate priority for firefighting jobs
         /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            // Standard JobGiver pattern but with skipEmergencyCheck = true for fires
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Firefighter_FightFires_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-
-                    // Update the fire cache
-                    UpdateFireCache(p.Map);
-
-                    // Early exit if no fires to handle
-                    if (!_fireCache.TryGetValue(mapId, out var fires) || fires.Count == 0)
-                        return null;
-
-                    // Create firefighting job
-                    return TryCreateFirefightingJob(p);
-                },
-                debugJobDesc: DebugName,
-                skipEmergencyCheck: true, // Fires ARE the emergency, don't skip for them
-                jobGiverType: GetType()
-            );
-        }
-
-        /// <summary>
-        /// Processes cached targets to create a job for the pawn
-        /// Implementation of the required abstract method from JobGiver_Scan_PawnControl
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            if (pawn?.Map == null || targets == null || targets.Count == 0)
-                return null;
-
-            int mapId = pawn.Map.uniqueID;
-
-            // Update the fire cache - ensure we're working with the latest data
-            UpdateFireCache(pawn.Map);
-
-            // Ensure we have fires to handle
-            if (!_fireCache.TryGetValue(mapId, out var fires) || fires.Count == 0)
-                return null;
-
-            // Delegate to our specialized fire handling method
-            return TryCreateFirefightingJob(pawn);
-        }
-
         protected override float GetBasePriority(string workTag)
         {
             return 9f;
@@ -146,7 +90,7 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Target selection
+        #region Target Selection
 
         /// <summary>
         /// Get all fires on the map
@@ -170,118 +114,76 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        #endregion
-
-        #region Fire-specific methods
-
         /// <summary>
-        /// Update the fire cache periodically for improved performance
+        /// Job-specific cache update method that implements specialized target collection logic
         /// </summary>
-        private void UpdateFireCache(Map map)
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
-            if (map == null) return;
+            var targets = GetTargets(map).ToList();
 
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            // Get the current last update time, or default if not set
-            if (!_lastFireCacheUpdate.TryGetValue(mapId, out int lastUpdateTick))
+            // Limit cache size for memory efficiency
+            if (targets.Count > MAX_CACHE_ENTRIES)
             {
-                lastUpdateTick = -999;
+                return targets.Take(MAX_CACHE_ENTRIES);
             }
 
-            if (currentTick > lastUpdateTick + CacheUpdateInterval ||
-                !_fireCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_fireCache.ContainsKey(mapId))
-                    _fireCache[mapId].Clear();
-                else
-                    _fireCache[mapId] = new List<Fire>();
-
-                // Clear reachability cache too
-                if (_fireReachabilityCache.ContainsKey(mapId))
-                    _fireReachabilityCache[mapId].Clear();
-                else
-                    _fireReachabilityCache[mapId] = new Dictionary<Fire, bool>();
-
-                // Find all fires on map
-                var fires = map.listerThings.ThingsOfDef(ThingDefOf.Fire);
-                foreach (Thing thing in fires)
-                {
-                    if (thing is Fire fire)
-                    {
-                        // Only add home area fires unless on a pawn
-                        if (fire.parent is Pawn || map.areaManager.Home[fire.Position])
-                        {
-                            _fireCache[mapId].Add(fire);
-                        }
-                    }
-                }
-
-                // Limit cache size for memory efficiency
-                if (_fireCache[mapId].Count > MAX_CACHE_ENTRIES)
-                {
-                    _fireCache[mapId].RemoveRange(MAX_CACHE_ENTRIES, _fireCache[mapId].Count - MAX_CACHE_ENTRIES);
-                }
-
-                // Store the updated tick
-                _lastFireCacheUpdate[mapId] = currentTick;
-            }
+            return targets;
         }
 
+        #endregion
+
+        #region Job Creation
+
         /// <summary>
-        /// Create a firefighting job using manager-driven bucket processing
+        /// Processes cached targets to find a valid job.
         /// </summary>
-        private Job TryCreateFirefightingJob(Pawn pawn)
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            if (pawn?.Map == null) return null;
+            if (pawn?.Map == null || targets == null || targets.Count == 0)
+                return null;
 
             int mapId = pawn.Map.uniqueID;
-            if (!_fireCache.ContainsKey(mapId) || _fireCache[mapId].Count == 0)
-                return null;
 
             // Step 1: Pre-filter valid fires (this is special handling specific to fires)
             List<Fire> validFires = new List<Fire>();
-            foreach (Fire fire in _fireCache[mapId])
+            foreach (Thing thing in targets)
             {
-                // Skip invalid fires
-                if (fire == null || fire.Destroyed || !fire.Spawned)
-                    continue;
-
-                // Special handling for fires on pawns
-                if (fire.parent is Pawn parentPawn)
+                if (thing is Fire fire && !fire.Destroyed && fire.Spawned)
                 {
-                    // Skip if the burning pawn is the firefighter
-                    if (parentPawn == pawn)
+                    // Special handling for fires on pawns
+                    if (fire.parent is Pawn parentPawn)
+                    {
+                        // Skip if the burning pawn is the firefighter
+                        if (parentPawn == pawn)
+                            continue;
+
+                        // Skip if the burning pawn is an enemy
+                        if ((parentPawn.Faction == null || parentPawn.Faction != pawn.Faction) &&
+                            (parentPawn.HostFaction == null || (parentPawn.HostFaction != pawn.Faction && parentPawn.HostFaction != pawn.HostFaction)))
+                            continue;
+
+                        // Skip distant burning pawns outside home area
+                        if (!pawn.Map.areaManager.Home[fire.Position] &&
+                            IntVec3Utility.ManhattanDistanceFlat(pawn.Position, parentPawn.Position) > NEARBY_PAWN_RADIUS)
+                            continue;
+
+                        // Skip unreachable pawn fires
+                        if (!pawn.CanReach(parentPawn, PathEndMode.Touch, Danger.Deadly))
+                            continue;
+                    }
+                    else
+                    {
+                        // Skip non-pawn fires outside home area
+                        if (!pawn.Map.areaManager.Home[fire.Position])
+                            continue;
+                    }
+
+                    // Skip fires being handled by others
+                    if (FireIsBeingHandled(fire, pawn))
                         continue;
 
-                    // Skip if the burning pawn is an enemy
-                    if ((parentPawn.Faction == null || parentPawn.Faction != pawn.Faction) &&
-                        (parentPawn.HostFaction == null || (parentPawn.HostFaction != pawn.Faction && parentPawn.HostFaction != pawn.HostFaction)))
-                        continue;
-
-                    // Skip distant burning pawns outside home area
-                    if (!pawn.Map.areaManager.Home[fire.Position] &&
-                        IntVec3Utility.ManhattanDistanceFlat(pawn.Position, parentPawn.Position) > NEARBY_PAWN_RADIUS)
-                        continue;
-
-                    // Skip unreachable pawn fires
-                    if (!pawn.CanReach(parentPawn, PathEndMode.Touch, Danger.Deadly))
-                        continue;
+                    validFires.Add(fire);
                 }
-                else
-                {
-                    // Skip non-pawn fires outside home area
-                    if (!pawn.Map.areaManager.Home[fire.Position])
-                        continue;
-                }
-
-                // Skip fires being handled by others
-                if (FireIsBeingHandled(fire, pawn))
-                    continue;
-
-                validFires.Add(fire);
             }
 
             // No valid fires found
@@ -293,22 +195,27 @@ namespace emitbreaker.PawnControl
                 pawn,
                 validFires,
                 (fire) => (fire.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
+                DistanceThresholds
             );
 
-            // Step 3: Find the best fire using the manager
-            Fire targetFire = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+            // Step 3: Find the best fire using the manager and centralized cache system
+            Fire targetFire = (Fire)Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (fire, p) => !fire.IsForbidden(p) && p.CanReserveAndReach(fire, PathEndMode.Touch, p.NormalMaxDanger()),
-                _fireReachabilityCache
+                null // Pass null to use the centralized caching system
             );
 
             // Step 4: Create job if we found a target
             if (targetFire != null)
             {
                 Job job = JobMaker.MakeJob(WorkJobDef, targetFire);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job for fighting fire at {targetFire.Position}");
+
+                if (Prefs.DevMode)
+                {
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job for fighting fire at {targetFire.Position}");
+                }
+
                 return job;
             }
 
@@ -330,16 +237,24 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Cache management
+        #region Reset
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Reset the cache - implements IResettableCache
         /// </summary>
-        public static void ResetFightFiresCache()
+        public override void Reset()
         {
-            _fireCache.Clear();
-            _fireReachabilityCache.Clear();
-            _lastFireCacheUpdate.Clear();
+            // Use centralized cache reset from parent
+            base.Reset();
+        }
+
+        #endregion
+
+        #region Utility
+
+        public override string ToString()
+        {
+            return $"JobGiver_Firefighter_FightFires_PawnControl({DebugName})";
         }
 
         #endregion

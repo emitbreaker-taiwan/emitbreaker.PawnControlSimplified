@@ -24,6 +24,36 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.SmoothWall;
 
+        /// <summary>
+        /// Cache update interval - walls don't change as often
+        /// </summary>
+        protected override int CacheUpdateInterval => 220; // ~3.7 seconds
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_SmoothWall_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method for wall smoothing cells
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Wall smoothing doesn't use Thing targets, so delegate to base implementation
+            return base.UpdateJobSpecificCache(map);
+        }
+
         #endregion
 
         #region Validation
@@ -52,23 +82,62 @@ namespace emitbreaker.PawnControl
         #region Job Creation
 
         /// <summary>
+        /// Creates a job for smoothing walls using the proper cell target
+        /// </summary>
+        protected override Job CreateFloorConstructionJob(Pawn pawn, bool forced)
+        {
+            // Get cells marked for wall smoothing
+            List<IntVec3> cells = GetDesignatedCells(pawn.Map);
+            if (cells.Count == 0)
+                return null;
+
+            // Create buckets and find best cell
+            var buckets = CreateDistanceBuckets(pawn, cells);
+            if (buckets == null)
+                return null;
+
+            // Find the best cell to smooth wall
+            IntVec3 targetCell = FindBestCell(buckets, pawn, (cell, p) => ValidateFloorCell(cell, p, forced));
+
+            if (!targetCell.IsValid)
+                return null;
+
+            // Create the job with the specific target cell
+            Job job = JobMaker.MakeJob(WorkJobDef, targetCell);
+
+            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to smooth wall at {targetCell}");
+            return job;
+        }
+
+        /// <summary>
         /// Creates a construction job for smoothing walls.
         /// </summary>
         protected override Job CreateConstructionJob(Pawn pawn, bool forced)
         {
-            // Find the best cell for smoothing
-            IntVec3 cell = FindBestCell(
-                CreateDistanceBuckets(pawn, _designatedCellsCache[pawn.Map.uniqueID][TargetDesignation]),
-                pawn,
-                (c, p) => ValidateFloorCell(c, p, forced)
-            );
+            // Delegate to the specialized floor/wall construction method
+            return CreateFloorConstructionJob(pawn, forced);
+        }
 
-            if (cell.IsValid)
-            {
-                return JobMaker.MakeJob(WorkJobDef, cell);
-            }
+        #endregion
 
-            return null;
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset from parent
+            base.Reset();
+        }
+
+        #endregion
+
+        #region Utility
+
+        public override string ToString()
+        {
+            return "JobGiver_Construction_SmoothWall_PawnControl";
         }
 
         #endregion

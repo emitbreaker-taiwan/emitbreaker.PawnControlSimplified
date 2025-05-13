@@ -53,12 +53,24 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Cleaning_CleanFilth_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
         #region Target Selection
 
         /// <summary>
-        /// Get all filth in the home area as targets
+        /// Job-specific cache update method that implements specialized filth collection logic
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
             if (map?.listerFilthInHomeArea == null)
                 return Enumerable.Empty<Thing>();
@@ -66,6 +78,15 @@ namespace emitbreaker.PawnControl
             return map.listerFilthInHomeArea.FilthInHomeArea
                 .Where(f => f != null && !f.Destroyed && f is Filth filth && filth.TicksSinceThickened >= MIN_TICKS_SINCE_THICKENED)
                 .Take(1000);
+        }
+
+        /// <summary>
+        /// Get all filth in the home area as targets
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // This is now primarily used by the cache update system
+            return UpdateJobSpecificCache(map);
         }
 
         /// <summary>
@@ -98,12 +119,28 @@ namespace emitbreaker.PawnControl
             if (pawn?.Map == null)
                 return null;
 
-            // Get targets from cache or directly
-            List<Thing> filthTargets = _cachedTargets.TryGetValue(pawn.Map.uniqueID, out var targets) && targets.Count > 0
-                ? targets
-                : GetTargets(pawn.Map).ToList();
+            int mapId = pawn.Map.uniqueID;
 
-            if (filthTargets.Count == 0)
+            // Get targets from the centralized cache
+            List<Thing> filthTargets = GetCachedTargets(mapId);
+
+            // If cache is empty, try direct acquisition
+            if (filthTargets == null || filthTargets.Count == 0)
+            {
+                // Update the cache if needed
+                if (ShouldUpdateCache(mapId))
+                {
+                    UpdateCache(mapId, pawn.Map);
+                    filthTargets = GetCachedTargets(mapId);
+                }
+                else
+                {
+                    // Direct acquisition as fallback
+                    filthTargets = GetTargets(pawn.Map).ToList();
+                }
+            }
+
+            if (filthTargets == null || filthTargets.Count == 0)
                 return null;
 
             // Use JobGiverManager for distance bucketing
@@ -240,6 +277,19 @@ namespace emitbreaker.PawnControl
             }
 
             return false;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset
+            base.Reset();
         }
 
         #endregion

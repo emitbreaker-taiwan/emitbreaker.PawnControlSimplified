@@ -23,7 +23,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// WorkTag used for eligibility checks
         /// </summary>
-        protected override string WorkTag => "Hauling";
+        public override string WorkTag => "Hauling";
 
         /// <summary>
         /// Update cache every 5 seconds - campfire bills don't change often
@@ -70,7 +70,19 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Hauling_DoBillsHaulCampfire_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache
+        }
 
         #endregion
 
@@ -87,7 +99,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Override to limit campfire work to player pawns
         /// </summary>
-        protected override bool IsValidFactionForBillWork(Pawn pawn)
+        protected override bool IsValidFactionForCrafting(Pawn pawn)
         {
             // For campfire work, only player pawns or slaves should do it
             return pawn != null && (pawn.Faction == Faction.OfPlayer ||
@@ -120,20 +132,67 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            if (targets == null || targets.Count == 0)
+            if (pawn == null || targets == null || targets.Count == 0)
                 return null;
 
-            foreach (Thing target in targets)
+            // Filter bill givers to those that are valid for this pawn
+            var validBillGivers = targets
+                .Where(thing => IsValidBillGiver(thing, pawn, forced))
+                .ToList();
+
+            if (validBillGivers.Count == 0)
+                return null;
+
+            // Find the best bill giver job
+            return FindBestBillGiverJob(pawn, validBillGivers, forced);
+        }
+
+        /// <summary>
+        /// Checks if a bill giver has valid work for a specific pawn
+        /// </summary>
+        protected override bool HasWorkForPawn(Thing thing, Pawn pawn, bool forced = false)
+        {
+            if (!(thing is IBillGiver billGiver))
+                return false;
+
+            // Remove bills that can't be completed
+            billGiver.BillStack.RemoveIncompletableBills();
+
+            // Check if there's a valid job to do
+            return StartOrResumeBillJob(pawn, billGiver, forced) != null;
+        }
+
+        /// <summary>
+        /// Checks if a bill giver is valid for a specific pawn
+        /// </summary>
+        protected override bool IsValidBillGiver(Thing thing, Pawn pawn, bool forced = false)
+        {
+            // Basic validity checks from parent class
+            if (!(thing is IBillGiver billGiver) ||
+                !ThingIsUsableBillGiver(thing) ||
+                !billGiver.BillStack.AnyShouldDoNow ||
+                !billGiver.UsableForBillsAfterFueling() ||
+                !pawn.CanReserve(thing, 1, -1, null, forced) ||
+                thing.IsBurning() ||
+                thing.IsForbidden(pawn))
             {
-                if (IsValidBillGiver(target, pawn, forced) && HasWorkForPawn(target, pawn, forced))
-                {
-                    Job job = StartOrResumeBillJob(pawn, (IBillGiver)target, forced);
-                    if (job != null)
-                        return job;
-                }
+                return false;
             }
 
-            return null;
+            // Check interaction cell
+            if (thing.def.hasInteractionCell && !pawn.CanReserveSittableOrSpot_NewTemp(thing.InteractionCell, thing, forced))
+            {
+                return false;
+            }
+
+            // Campfire-specific checks for fuel
+            CompRefuelable refuelable = thing.TryGetComp<CompRefuelable>();
+            if (refuelable != null && !refuelable.HasFuel)
+            {
+                return RefuelWorkGiverUtility.CanRefuel(pawn, thing, forced);
+            }
+
+            return true;
         }
 
         #endregion
@@ -164,6 +223,28 @@ namespace emitbreaker.PawnControl
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Job-specific cache update method that implements the parent class method
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Use the GetBillGivers method to populate the cache
+            return GetBillGivers(map);
+        }
+
+        #endregion
+
+        #region Cache Management
+
+        /// <summary>
+        /// Reset the cache - overrides the Reset method from the parent class
+        /// </summary>
+        public override void Reset()
+        {
+            // Call the base class Reset method to use the centralized cache system
+            base.Reset();
         }
 
         #endregion

@@ -1,4 +1,8 @@
-﻿using System.Collections.Generic;
+﻿using RimWorld;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
 using Verse;
 using Verse.AI;
 
@@ -9,14 +13,14 @@ namespace emitbreaker.PawnControl
     /// This abstract class defines the shared interface and functionality
     /// while allowing derived classes to implement their own caching systems.
     /// </summary>
-    public abstract class JobGiver_PawnControl : ThinkNode_JobGiver
+    public abstract class JobGiver_PawnControl : ThinkNode_JobGiver, IResettableCache
     {
         #region Configuration
 
         /// <summary>
         /// Tag used for eligibility checks in the wrapper
         /// </summary>
-        protected abstract string WorkTag { get; }
+        public abstract string WorkTag { get; }
 
         /// <summary>
         /// Human-readable name for debug logging
@@ -48,7 +52,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected abstract PawnEnumTags RequiredTag { get; }
+        public abstract PawnEnumTags RequiredTag { get; }
 
         /// <summary>
         /// Checks if a non-humanlike pawn has the required capabilities for this job giver
@@ -64,6 +68,146 @@ namespace emitbreaker.PawnControl
         /// The job to create when a valid target is found
         /// </summary>
         protected abstract JobDef WorkJobDef { get; }
+
+        #endregion
+
+        #region Cache System
+
+        /// <summary>
+        /// Instance cache for this job giver - one per map
+        /// </summary>
+        private readonly Dictionary<int, List<Thing>> _targetCache = new Dictionary<int, List<Thing>>();
+
+        /// <summary>
+        /// Map-based tracking of last update times for this job giver
+        /// </summary>
+        private readonly Dictionary<int, int> _lastCacheUpdateTicks = new Dictionary<int, int>();
+
+        /// <summary>
+        /// Optional reachability cache to avoid duplicate pathfinding calculations
+        /// </summary>
+        private readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
+
+        /// <summary>
+        /// Initialize the job giver cache. Should be called in constructor of derived classes.
+        /// </summary>
+        protected void InitializeCache<T>() where T : Thing
+        {
+            // Register this job giver type with the cache manager
+            Utility_JobGiverCacheManager<T>.RegisterJobGiver(this.GetType());
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Initialized cache for {GetType().Name}");
+            }
+        }
+
+        /// <summary>
+        /// Check if the cache needs to be updated for a specific map
+        /// </summary>
+        protected bool ShouldUpdateCache(int mapId)
+        {
+            return Utility_JobGiverCacheManager<Thing>.NeedsUpdate(
+                this.GetType(),
+                mapId,
+                CacheUpdateInterval
+            );
+        }
+
+        /// <summary>
+        /// Update the job giver's cache for a specific map using the job-specific update method
+        /// </summary>
+        protected void UpdateCache(int mapId, Map map)
+        {
+            if (map == null) return;
+
+            try
+            {
+                // Use the job-specific method to update the cache targets
+                IEnumerable<Thing> targets = UpdateJobSpecificCache(map);
+
+                // Update the cache
+                Utility_JobGiverCacheManager<Thing>.UpdateCache(
+                    this.GetType(),
+                    mapId,
+                    targets
+                );
+
+                if (Prefs.DevMode)
+                {
+                    int count = targets.Count();
+                    Utility_DebugManager.LogNormal($"{GetType().Name} cache updated for map {mapId}: {count} items");
+                }
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error updating cache for {GetType().Name}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Get targets from this job giver's cache for a specific map
+        /// </summary>
+        protected List<Thing> GetCachedTargets(int mapId)
+        {
+            return Utility_JobGiverCacheManager<Thing>.GetTargets(this.GetType(), mapId);
+        }
+
+        /// <summary>
+        /// Try to get the cached reachability result for a target
+        /// </summary>
+        protected bool TryGetReachabilityResult(int mapId, Thing target, out bool result)
+        {
+            return Utility_JobGiverCacheManager<Thing>.TryGetReachabilityResult(
+                this.GetType(),
+                mapId,
+                target,
+                out result
+            );
+        }
+
+        /// <summary>
+        /// Cache a reachability result for a target
+        /// </summary>
+        protected void CacheReachabilityResult(int mapId, Thing target, bool result)
+        {
+            Utility_JobGiverCacheManager<Thing>.CacheReachabilityResult(
+                this.GetType(),
+                mapId,
+                target,
+                result
+            );
+        }
+
+        /// <summary>
+        /// Job-specific cache update method that derived classes should override to implement
+        /// specialized target collection logic. Similar to UpdateSowableCellsCache in the example.
+        /// </summary>
+        protected virtual IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Default implementation calls GetTargets for backward compatibility
+            return GetTargets(map);
+        }
+
+        /// <summary>
+        /// Gets targets for this job giver - for backward compatibility
+        /// Derived classes should prefer overriding UpdateJobSpecificCache instead
+        /// </summary>
+        protected abstract IEnumerable<Thing> GetTargets(Map map);
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public virtual void Reset()
+        {
+            // Reset just this job giver's cache
+            Utility_JobGiverCacheManager<Thing>.ResetJobGiverCache(this.GetType());
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Cache reset for {GetType().Name}");
+            }
+        }
 
         #endregion
 
@@ -91,13 +235,34 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Creates a job for the given pawn. This is where derived classes should implement
-        /// their specific job creation logic.
+        /// Template method for creating a job that handles cache update logic
         /// </summary>
-        /// <param name="pawn">The pawn to create a job for</param>
-        /// <param name="forced">Whether the job was forced</param>
-        /// <returns>A job if one could be created, null otherwise</returns>
-        protected abstract Job CreateJobFor(Pawn pawn, bool forced);
+        protected virtual Job CreateJobFor(Pawn pawn, bool forced)
+        {
+            if (pawn?.Map == null)
+                return null;
+
+            int mapId = pawn.Map.uniqueID;
+
+            // Update cache if needed
+            if (ShouldUpdateCache(mapId))
+            {
+                UpdateCache(mapId, pawn.Map);
+            }
+
+            // Get targets from cache
+            var targets = GetCachedTargets(mapId);
+            if (targets == null || targets.Count == 0)
+                return null;
+
+            // Process targets to create job
+            return ProcessCachedTargets(pawn, targets, forced);
+        }
+
+        /// <summary>
+        /// Processes cached targets to find a valid job. Called by derived classes.
+        /// </summary>
+        protected abstract Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced);
 
         /// <summary>
         /// Determines if the job giver should execute on this tick.
@@ -109,7 +274,7 @@ namespace emitbreaker.PawnControl
             float pri = GetBasePriority(WorkTag);
 
             // Avoid div-zero or sub-1 intervals:
-            int interval = System.Math.Max(1, (int)System.Math.Round(60f / pri));
+            int interval = Math.Max(1, (int)Math.Round(60f / pri));
             return Find.TickManager.TicksGame % interval == 0;
         }
 
@@ -137,7 +302,7 @@ namespace emitbreaker.PawnControl
             if (!Utility_JobGiverManager.IsEligibleForSpecializedJobGiver(pawn, WorkTag))
                 return true;
 
-            // 5) Skip if pawn has no reuired capabilities
+            // 5) Skip if pawn has no required capabilities
             if (!HasRequiredCapabilities(pawn))
                 return true;
 
@@ -198,6 +363,24 @@ namespace emitbreaker.PawnControl
         #endregion
 
         #region Debug support
+
+        /// <summary>
+        /// Diagnostic method to check cache status
+        /// </summary>
+        protected void DiagnoseCache(int mapId)
+        {
+            if (!Prefs.DevMode) return;
+
+            var targets = GetCachedTargets(mapId);
+
+            Utility_DebugManager.LogNormal(
+                $"Cache diagnosis for {GetType().Name} on map {mapId}:\n" +
+                $"- Targets count: {targets?.Count ?? 0}\n" +
+                $"- Last update: {(_lastCacheUpdateTicks.TryGetValue(mapId, out int tick) ? tick : -1)}\n" +
+                $"- Current tick: {Find.TickManager.TicksGame}\n" +
+                $"- Update interval: {CacheUpdateInterval}"
+            );
+        }
 
         public override string ToString()
         {

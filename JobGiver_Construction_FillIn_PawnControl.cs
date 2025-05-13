@@ -14,9 +14,14 @@ namespace emitbreaker.PawnControl
         #region Configuration
 
         /// <summary>
+        /// Override WorkTag to specify "BasicWorker" work type instead of Construction
+        /// </summary>
+        public override string WorkTag => "Construction";
+
+        /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
 
         /// <summary>
         /// Use FillIn designation
@@ -28,19 +33,31 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.FillIn;
 
-        #endregion
-
-        #region Overrides
-
-        /// <summary>
-        /// Override WorkTag to specify "BasicWorker" work type instead of Construction
-        /// </summary>
-        protected override string WorkTag => "BasicWorker";
-
         /// <summary>
         /// Override debug name for better logging
         /// </summary>
         protected override string DebugName => "FillIn";
+
+        /// <summary>
+        /// Cache update interval - less often since these targets don't change frequently
+        /// </summary>
+        protected override int CacheUpdateInterval => 200; // ~3.3 seconds
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_FillIn_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
 
         /// <summary>
         /// Fill In is a medium priority task
@@ -50,37 +67,60 @@ namespace emitbreaker.PawnControl
             return 6.2f;  // Similar priority to other BasicWorker tasks
         }
 
+        #endregion
+
+        #region Target Selection
+
         /// <summary>
-        /// Explicitly override TryGiveJob to use the common helper with the correct type
+        /// Job-specific cache update method for fill-in targets
         /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
-            return CreateRemovalJob<JobGiver_Construction_FillIn_PawnControl>(pawn);
+            // Use the base implementation to get all targets with the FillIn designation
+            return base.UpdateJobSpecificCache(map);
         }
 
         /// <summary>
-        /// Implements the abstract method from JobGiver_Scan_PawnControl to process cached targets
+        /// Gets all pit burrows with the FillIn designation
         /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        protected override IEnumerable<Thing> GetRemovalTargets(Map map)
         {
-            if (pawn == null || targets == null || targets.Count == 0)
-                return null;
-
-            // Extra faction validation to ensure only allowed pawns can perform this job
-            if (!IsPawnValidFaction(pawn))
-                return null;
-
-            // Use the parent class's ExecuteJobGiverInternal method for consistent behavior
-            return ExecuteJobGiverInternal(pawn, LimitListSize(targets));
+            // Use the base implementation but with additional filtering for PitBurrow type
+            foreach (Thing thing in base.GetRemovalTargets(map))
+            {
+                if (thing is PitBurrow)
+                {
+                    yield return thing;
+                }
+            }
         }
 
+        #endregion
+
+        #region Faction Validation
+
         /// <summary>
-        /// Override ValidateTarget to add PitBurrow-specific validation
+        /// Determines if the pawn's faction is allowed to perform this work
+        /// Can be overridden by derived classes to customize faction rules
         /// </summary>
-        protected override bool ValidateTarget(Thing thing, Pawn pawn)
+        protected override bool IsValidFactionForConstruction(Pawn pawn)
         {
-            // First perform base validation
-            if (!base.ValidateTarget(thing, pawn))
+            // BasicWorker tasks have different faction requirements than construction
+            return Utility_JobGiverManager.IsValidFactionInteraction(null, pawn, RequiresPlayerFaction);
+        }
+
+        #endregion
+
+        #region Thing-Based Helpers
+
+        /// <summary>
+        /// Basic validation for construction target things
+        /// Override to add PitBurrow-specific validation
+        /// </summary>
+        protected override bool ValidateConstructionTarget(Thing thing, Pawn pawn, bool forced = false)
+        {
+            // Use base validation from JobGiver_Common_RemoveBuilding_PawnControl
+            if (!base.ValidateConstructionTarget(thing, pawn, forced))
                 return false;
 
             // Additional validation for PitBurrow
@@ -93,6 +133,32 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return true;
+        }
+
+        #endregion
+
+        #region Job Creation
+
+        /// <summary>
+        /// Creates a construction job for filling in pit burrows
+        /// </summary>
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
+        {
+            // Use the base implementation that creates jobs for designated targets
+            return base.CreateConstructionJob(pawn, forced);
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset from parent
+            base.Reset();
         }
 
         #endregion

@@ -18,7 +18,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// All construction job givers use this work tag
         /// </summary>
-        protected override string WorkTag => "Construction";
+        public override string WorkTag => "Construction";
+
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "Construction";
 
         /// <summary>
         /// Standard distance thresholds for bucketing
@@ -31,6 +36,11 @@ namespace emitbreaker.PawnControl
         protected override bool RequiresDesignator => true;
 
         /// <summary>
+        /// Whether this job giver requires map zone or area
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
         /// Whether this job giver requires player faction specifically (for jobs like deconstruct)
         /// </summary>
         protected override bool RequiresPlayerFaction => false;
@@ -38,7 +48,24 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
+
+        /// <summary>
+        /// Update cache every 4 seconds for construction tasks
+        /// </summary>
+        protected override int CacheUpdateInterval => 240;
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
 
         #endregion
 
@@ -68,7 +95,7 @@ namespace emitbreaker.PawnControl
             // Check if player faction is specifically required
             if (RequiresPlayerFaction)
             {
-                return pawn.Faction == Faction.OfPlayer || 
+                return pawn.Faction == Faction.OfPlayer ||
                        (pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer);
             }
 
@@ -78,31 +105,82 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Job Creation
+        #region Core Flow
 
         /// <summary>
         /// Standard implementation of TryGiveJob that ensures proper faction validation
+        /// and checks map requirements before proceeding with job creation
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Use the standardized job creation pattern
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Construction_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Extra faction validation in case this is called directly
-                    if (!IsValidFactionForConstruction(p) || !HasRequiredCapabilities(p))
-                        return null;
+            // Skip if already filtered out by base class
+            if (ShouldSkip(pawn))
+                return null;
 
-                    // Check if map requirements are met
-                    if (!AreMapRequirementsMet(p))
-                        return null;
+            // Skip if map requirements not met
+            if (!AreMapRequirementsMet(pawn))
+                return null;
 
-                    // Call the specialized job creation method
-                    return CreateConstructionJob(p, forced);
-                },
-                debugJobDesc: DebugName);
+            // Use the standardized job creation pattern with centralized cache
+            return base.TryGiveJob(pawn);
         }
+
+        /// <summary>
+        /// Template method for creating a job that handles cache update logic
+        /// </summary>
+        protected override Job CreateJobFor(Pawn pawn, bool forced)
+        {
+            if (pawn?.Map == null)
+                return null;
+
+            int mapId = pawn.Map.uniqueID;
+
+            if (!ShouldExecuteNow(mapId))
+                return null;
+
+            // Update cache if needed using the centralized cache system
+            if (ShouldUpdateCache(mapId))
+            {
+                UpdateCache(mapId, pawn.Map);
+            }
+
+            // Get targets from the cache
+            var targets = GetCachedTargets(mapId);
+
+            // Skip if no targets and they're required
+            if ((targets == null || targets.Count == 0) && RequiresThingTargets())
+                return null;
+
+            // Call the specialized construction job creation method
+            return CreateConstructionJob(pawn, forced);
+        }
+
+        /// <summary>
+        /// Checks if the map meets requirements for this construction job
+        /// </summary>
+        protected virtual bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // Default implementation - derived classes should override this
+            return pawn?.Map != null;
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method that implements specialized target collection logic
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Default implementation - derived classes should override this
+            return GetTargets(map);
+        }
+
+        /// <summary>
+        /// Gets all potential targets on the given map - derived classes must implement
+        /// </summary>
+        protected abstract override IEnumerable<Thing> GetTargets(Map map);
 
         /// <summary>
         /// Creates a job for the pawn using the cached targets
@@ -122,20 +200,6 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Checks if the map meets requirements for this construction job
-        /// </summary>
-        protected virtual bool AreMapRequirementsMet(Pawn pawn)
-        {
-            // Default implementation - derived classes should override this
-            return pawn?.Map != null;
-        }
-
-        /// <summary>
-        /// Implement to create the specific construction job
-        /// </summary>
-        protected abstract Job CreateConstructionJob(Pawn pawn, bool forced);
-
-        /// <summary>
         /// Whether this job giver requires Thing targets or uses cell-based targets
         /// </summary>
         protected virtual bool RequiresThingTargets()
@@ -146,10 +210,19 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
+        #region Job Creation
+
+        /// <summary>
+        /// Implement to create the specific construction job
+        /// </summary>
+        protected abstract Job CreateConstructionJob(Pawn pawn, bool forced);
+
+        #endregion
+
         #region Cell-Based Helpers
 
         /// <summary>
-        /// Creates distance buckets for IntVec3 cells
+        /// Creates distance buckets for IntVec3 cells using the centralized bucket system
         /// </summary>
         protected List<IntVec3>[] CreateDistanceBuckets(Pawn pawn, IEnumerable<IntVec3> cells)
         {
@@ -316,10 +389,23 @@ namespace emitbreaker.PawnControl
             }
             return false;
         }
-        
+
         public override string ToString()
         {
             return $"JobGiver_Common_Construction_PawnControl({DebugName})";
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset
+            base.Reset();
         }
 
         #endregion

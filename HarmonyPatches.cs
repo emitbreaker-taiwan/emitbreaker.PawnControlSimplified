@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using Unity.Jobs;
@@ -897,6 +898,8 @@ namespace emitbreaker.PawnControl
 
             #endregion
 
+            #region Safe-Guard for new game
+
             [HarmonyPatch(typeof(Game), "InitNewGame")]
             public static class Patch_Game_InitNewGame_CleanupModExtensions
             {
@@ -907,103 +910,357 @@ namespace emitbreaker.PawnControl
                 }
             }
 
+            #endregion
+
+            #region Job Management
+
             /// <summary>
-            /// Allows non-humanlike pawns to have work priorities by modifying the GetPriority method
-            /// to consider modded pawns with our extensions when checking for priority conversion.
+            /// Sets up a job for cutting plants when a blocking thing is detected
             /// </summary>
-            [HarmonyPatch(typeof(Pawn_WorkSettings), "GetPriority")]
-            public static class Patch_Pawn_WorkSettings_GetPriority
+            [HarmonyPatch(typeof(GenConstruct), nameof(GenConstruct.HandleBlockingThingJob))]
+            public static class Patch_GenConstruct_HandleBlockingThingJob_PlantCutOverride
             {
-                public static bool Prefix(Pawn_WorkSettings __instance, WorkTypeDef w, ref int __result)
+                [HarmonyPostfix]
+                public static void Postfix(ref Job __result, Thing constructible, Pawn worker, bool forced = false)
                 {
-                    // Make sure the field info is cached
-                    if (_pawnField == null)
+                    // ✅ Skip if vanilla already assigned a job
+                    if (__result != null || constructible == null || worker == null)
+                        return;
+
+                    // ✅ Only apply to modded non-humanlike pawns
+                    if (worker.RaceProps.Humanlike || !Utility_TagManager.WorkEnabled(worker.def, "CutPlant"))
+                        return;
+
+                    // ✅ Scan for blocking thing and check plant
+                    Thing blocker = GenConstruct.FirstBlockingThing(constructible, worker);
+                    if (blocker == null || blocker.def.category != ThingCategory.Plant)
+                        return;
+
+                    // ✅ Respect reachability
+                    if (!worker.CanReserveAndReach(blocker, PathEndMode.ClosestTouch, worker.NormalMaxDanger(), 1, -1, null, forced))
+                        return;
+
+                    // ✅ Allow cutting plant as override
+                    __result = JobMaker.MakeJob(JobDefOf.CutPlant, blocker);
+                    Utility_DebugManager.LogNormal($"Forced CutPlant job for {worker.LabelShort} on {blocker.Label}");
+                }
+            }
+
+            /// <summary>
+            /// Handles hauling jobs for modded non-humanlike pawns
+            /// </summary>
+            [HarmonyPatch(typeof(Toils_Haul), "JumpToCarryToNextContainerIfPossible")]
+            public static class Patch_Toils_Haul_JumpToCarryToNextContainerIfPossible
+            {
+                [HarmonyPrefix]
+                public static bool Prefix(ref Toil __result, Toil carryToContainerToil, TargetIndex primaryTargetInd)
+                {
+                    __result = Utility_JobManager.GeneratePatchedToil(carryToContainerToil, primaryTargetInd);
+                    return false; // Skip vanilla
+                }
+            }
+
+            [HarmonyPatch(typeof(GenConstruct), nameof(GenConstruct.CanConstruct), new Type[]
+            { typeof(Thing), typeof(Pawn), typeof(bool), typeof(bool), typeof(JobDef) })]
+            public static class Patch_GenConstruct_CanConstruct
+            {
+                [HarmonyPrefix]
+                public static bool Prefix(
+                    Thing t,
+                    Pawn p,
+                    bool checkSkills,
+                    bool forced,
+                    JobDef jobForReservation,
+                    ref bool __result)
+                {
+                    if (p.RaceProps.Humanlike || Utility_CacheManager.GetModExtension(p.def) == null)
+                        return true; // ✅ Let vanilla run if humanlike or no mod extension
+
+                    // ⛔ Skip workSettings requirement check, as modded animals may not have any
+                    if (GenConstruct.FirstBlockingThing(t, p) != null)
                     {
-                        _pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
-                        _prioritiesField = AccessTools.Field(typeof(Pawn_WorkSettings), "priorities");
-                    }
-
-                    // Get the pawn from the private field
-                    var pawn = _pawnField.GetValue(__instance) as Pawn;
-                    if (pawn == null) return true; // Let vanilla handle it
-
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                    if (modExtension == null) return true; // Let vanilla handle it
-
-                    // Get priorities directly from the field
-                    var priorities = _prioritiesField.GetValue(__instance) as DefMap<WorkTypeDef, int>;
-                    if (priorities == null)
-                    {
-                        Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
-
-                        priorities = _prioritiesField.GetValue(__instance) as DefMap<WorkTypeDef, int>;
-
-                        if (priorities == null) return true; // Let vanilla handle it
-                    }
-
-                    // Get the raw priority value
-                    int rawPriority = priorities[w];
-
-                    // For our modded pawns, bypass the Humanlike check
-                    if (!pawn.RaceProps.Humanlike && rawPriority > 0)
-                    {
-                        // If work priorities are disabled in game settings, force to 3
-                        if (!Find.PlaySettings.useWorkPriorities)
-                        {
-                            __result = 3;
-                        }
-                        else
-                        {
-                            // Otherwise use the actual priority value
-                            __result = rawPriority;
-                        }
-
-                        // Skip the original method
+                        __result = false;
                         return false;
                     }
 
-                    return true; // Let vanilla handle normal pawns
-                }
-
-                // Cache these for better performance
-                private static System.Reflection.FieldInfo _pawnField;
-                private static System.Reflection.FieldInfo _prioritiesField;
-            }
-
-            /// <summary>
-            /// Patch to ensure work priority values are properly returned even when
-            /// the pawn doesn't have the Humanlike flag set.
-            /// </summary>
-            [HarmonyPatch(typeof(Pawn_WorkSettings), "WorkIsActive")]
-            public static class Patch_Pawn_WorkSettings_WorkIsActive
-            {
-                public static bool Prefix(Pawn_WorkSettings __instance, WorkTypeDef w, ref bool __result)
-                {
-                    if (_pawnField == null)
+                    // Reservation logic
+                    if (jobForReservation != null)
                     {
-                        _pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+                        if (!p.Spawned || !p.Map.reservationManager.OnlyReservationsForJobDef(t, jobForReservation) ||
+                            !p.CanReach(t, PathEndMode.Touch, forced ? Danger.Deadly : p.NormalMaxDanger()))
+                        {
+                            __result = false;
+                            return false;
+                        }
+                    }
+                    else if (!p.CanReserveAndReach(t, PathEndMode.Touch, forced ? Danger.Deadly : p.NormalMaxDanger(), 1, -1, null, forced))
+                    {
+                        __result = false;
+                        return false;
                     }
 
-                    var pawn = _pawnField.GetValue(__instance) as Pawn;
-                    if (pawn == null) return true; // Let vanilla handle it
-
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                    if (modExtension == null) return true; // Let vanilla handle it
-
-                    // For our modded pawns only, we'll get the priority and check if > 0
-                    // This bypasses any Humanlike check in GetPriority
-                    if (!pawn.RaceProps.Humanlike && Utility_TagManager.WorkTypeEnabled(pawn.def, w))
+                    // Burning check
+                    if (t.IsBurning())
                     {
-                        int priority = __instance.GetPriority(w);
-                        __result = priority > 0;
+                        __result = false;
+                        return false;
+                    }
+
+                    // Skip skill checks for animals unless explicitly supported
+                    if (checkSkills && !p.RaceProps.Humanlike)
+                    {
+                        // Skip silently: animals often have no skills
+                    }
+
+                    // Ideology: skip check for animals (avoiding JobFailReason spam)
+                    if (!p.RaceProps.Humanlike)
+                    {
+                        // Example: building religious altar might block colonists, but not modded pawns
+                    }
+
+                    // Blueprint-specific checks (turret, attachment, etc.)
+                    if ((t.def.IsBlueprint || t.def.IsFrame) && t.def.entityDefToBuild is ThingDef thingDef)
+                    {
+                        if (thingDef.building != null && thingDef.building.isAttachment)
+                        {
+                            Thing wallAttachedTo = GenConstruct.GetWallAttachedTo(t);
+                            if (wallAttachedTo == null || wallAttachedTo.def.IsBlueprint || wallAttachedTo.def.IsFrame)
+                            {
+                                __result = false;
+                                return false;
+                            }
+                        }
+
+                        // History event checks (skip for animals)
+                        // Not needed: animals aren't tracked for tales
+                    }
+
+                    __result = true;
+                    return false; // ✅ Skip vanilla fully, after full checks
+                }
+            }
+
+            [HarmonyPatch(typeof(Frame), nameof(Frame.CompleteConstruction))]
+            public static class Patch_Frame_CompleteConstruction
+            {
+                [HarmonyPrefix]
+                public static bool Prefix(Frame __instance, Pawn worker)
+                {
+                    if (__instance == null || worker == null) return true; // Let vanilla handle null cases
+
+                    if (worker.RaceProps.Humanlike) return true; // Let vanilla handle humanlike pawns
+
+                    var modExtension = Utility_CacheManager.GetModExtension(worker.def);
+                    if (modExtension == null) return true; // Not our modded pawn
+
+                    if (!Utility_TagManager.HasTagSet(worker.def)) return true; // Not using our tag system
+
+                    try
+                    {
+                        // Construction completion logic for modded pawns
+                        Thing frame = __instance.holdingOwner?.Take(__instance);
+                        if (frame == null) return true; // Safety check
+
+                        __instance.resourceContainer.ClearAndDestroyContents();
+                        Map map = worker.Map;
+                        __instance.Destroy(DestroyMode.Vanish);
+
+                        // Play sound for large buildings
+                        if (__instance.def.entityDefToBuild is ThingDef thingDef &&
+                            thingDef.category == ThingCategory.Building &&
+                            __instance.def.GetStatValueAbstract(StatDefOf.WorkToBuild) > 150f)
+                        {
+                            SoundDefOf.Building_Complete.PlayOneShot(new TargetInfo(frame.Position, map));
+                        }
+
+                        // Create the constructed thing or terrain
+                        if (__instance.def.entityDefToBuild is ThingDef entityDef)
+                        {
+                            // Create and spawn the thing
+                            Thing thing = ThingMaker.MakeThing(entityDef, frame.Stuff);
+                            thing.SetFactionDirect(frame.Faction);
+
+                            // Handle quality and art
+                            CompQuality compQuality = thing.TryGetComp<CompQuality>();
+                            if (compQuality != null)
+                            {
+                                // Use a modest quality level for animal builders
+                                QualityCategory quality = QualityCategory.Normal;
+                                compQuality.SetQuality(quality, ArtGenerationContext.Colony);
+                            }
+
+                            CompArt compArt = thing.TryGetComp<CompArt>();
+                            if (compArt != null)
+                            {
+                                compArt.InitializeArt(ArtGenerationContext.Colony);
+                                compArt.JustCreatedBy(worker);
+                            }
+
+                            // Set hit points based on frame health
+                            thing.HitPoints = Mathf.CeilToInt((float)__instance.HitPoints / frame.MaxHitPoints * thing.MaxHitPoints);
+
+                            // Spawn the constructed thing
+                            GenSpawn.Spawn(thing, frame.Position, map, frame.Rotation, WipeMode.Vanish);
+                        }
+                        else
+                        {
+                            // For terrain construction
+                            map.terrainGrid.SetTerrain(frame.Position, (TerrainDef)__instance.def.entityDefToBuild);
+                            FilthMaker.RemoveAllFilth(frame.Position, map);
+                        }
+
+                        // Record construction
+                        worker.records.Increment(RecordDefOf.ThingsConstructed);
+
                         return false; // Skip original method
                     }
-
-                    return true; // Let vanilla handle normal pawns
+                    catch (Exception ex)
+                    {
+                        Utility_DebugManager.LogError($"Error in Patch_Frame_CompleteConstruction: {ex}");
+                        return true; // Fall back to vanilla on error
+                    }
                 }
-
-                private static System.Reflection.FieldInfo _pawnField;
             }
+
+            #endregion
+
+            [HarmonyPatch(typeof(Pawn_WorkSettings), nameof(Pawn_WorkSettings.SetPriority))]
+            public static class Patch_PawnWorkSettings_SetPriority_TrackNonHumanlike
+            {
+                // grab the private Pawn field out of Pawn_WorkSettings
+                private static readonly FieldInfo PawnField =
+                    AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+
+                // Postfix runs *after* the work‐priority actually changes
+                // CHANGE: Rename 'workType' to 'w' to match the original method signature
+                static void Postfix(Pawn_WorkSettings __instance, WorkTypeDef w, int priority)
+                {
+                    if (__instance == null) return;
+
+                    if (w == null) return; // no work type, nothing to do
+
+                    // pull the pawn back out
+                    var pawn = PawnField.GetValue(__instance) as Pawn;
+                    if (pawn == null) return;
+
+                    // only care about non-humanlike
+                    if (pawn.RaceProps.Humanlike) return;
+
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension == null) return; // not our modded pawn
+
+                    if (!Utility_TagManager.HasTagSet(pawn.def)) return; // not using our tag system
+
+                    // DEBUG: log exactly what changed
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} (non-humanlike) set '{w.defName}' → {priority}");
+
+                    // now do whatever you need to do whenever an animal's work settings change:
+                    // • clear your cached work-enabled/disabled bits
+                    Utility_TagManager.ClearCacheForRace(pawn.def);
+                    // • re-initialize or re-unlock their workSettings so the new priority "sticks"
+                    __instance.EnableAndInitializeIfNotAlreadyInitialized();
+
+                    // • you could also raise your own custom event, notify your tick-manager, etc.
+                }
+            }
+
+            ///// <summary>
+            ///// Allows non-humanlike pawns to have work priorities by modifying the GetPriority method
+            ///// to consider modded pawns with our extensions when checking for priority conversion.
+            ///// </summary>
+            //[HarmonyPatch(typeof(Pawn_WorkSettings), "GetPriority")]
+            //public static class Patch_Pawn_WorkSettings_GetPriority
+            //{
+            //    public static bool Prefix(Pawn_WorkSettings __instance, WorkTypeDef w, ref int __result)
+            //    {
+            //        // Make sure the field info is cached
+            //        if (_pawnField == null)
+            //        {
+            //            _pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+            //            _prioritiesField = AccessTools.Field(typeof(Pawn_WorkSettings), "priorities");
+            //        }
+
+            //        // Get the pawn from the private field
+            //        var pawn = _pawnField.GetValue(__instance) as Pawn;
+            //        if (pawn == null) return true; // Let vanilla handle it
+
+            //        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            //        if (modExtension == null) return true; // Let vanilla handle it
+
+            //        // Get priorities directly from the field
+            //        var priorities = _prioritiesField.GetValue(__instance) as DefMap<WorkTypeDef, int>;
+            //        if (priorities == null)
+            //        {
+            //            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
+
+            //            priorities = _prioritiesField.GetValue(__instance) as DefMap<WorkTypeDef, int>;
+
+            //            if (priorities == null) return true; // Let vanilla handle it
+            //        }
+
+            //        // Get the raw priority value
+            //        int rawPriority = priorities[w];
+
+            //        // For our modded pawns, bypass the Humanlike check
+            //        if (!pawn.RaceProps.Humanlike && rawPriority > 0)
+            //        {
+            //            // If work priorities are disabled in game settings, force to 3
+            //            if (!Find.PlaySettings.useWorkPriorities)
+            //            {
+            //                __result = 3;
+            //            }
+            //            else
+            //            {
+            //                // Otherwise use the actual priority value
+            //                __result = rawPriority;
+            //            }
+
+            //            // Skip the original method
+            //            return false;
+            //        }
+
+            //        return true; // Let vanilla handle normal pawns
+            //    }
+
+            //    // Cache these for better performance
+            //    private static System.Reflection.FieldInfo _pawnField;
+            //    private static System.Reflection.FieldInfo _prioritiesField;
+            //}
+
+            ///// <summary>
+            ///// Patch to ensure work priority values are properly returned even when
+            ///// the pawn doesn't have the Humanlike flag set.
+            ///// </summary>
+            //[HarmonyPatch(typeof(Pawn_WorkSettings), "WorkIsActive")]
+            //public static class Patch_Pawn_WorkSettings_WorkIsActive
+            //{
+            //    public static bool Prefix(Pawn_WorkSettings __instance, WorkTypeDef w, ref bool __result)
+            //    {
+            //        if (_pawnField == null)
+            //        {
+            //            _pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
+            //        }
+
+            //        var pawn = _pawnField.GetValue(__instance) as Pawn;
+            //        if (pawn == null) return true; // Let vanilla handle it
+
+            //        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            //        if (modExtension == null) return true; // Let vanilla handle it
+
+            //        // For our modded pawns only, we'll get the priority and check if > 0
+            //        // This bypasses any Humanlike check in GetPriority
+            //        if (!pawn.RaceProps.Humanlike && Utility_TagManager.WorkTypeEnabled(pawn.def, w))
+            //        {
+            //            int priority = __instance.GetPriority(w);
+            //            __result = priority > 0;
+            //            return false; // Skip original method
+            //        }
+
+            //        return true; // Let vanilla handle normal pawns
+            //    }
+
+            //    private static System.Reflection.FieldInfo _pawnField;
+            //}
 
             //[HarmonyPatch(typeof(ThinkNode_PrioritySorter), nameof(ThinkNode_PrioritySorter.TryIssueJobPackage))]
             //public static class Patch_PrioritySorter_PreFilter
@@ -1235,6 +1492,425 @@ namespace emitbreaker.PawnControl
                         // Add better error handling
                         Utility_DebugManager.LogError($"Error in Patch_FloatMenuMakerMap_TryMakeFloatMenu_ForAnimalEquipWeapon: {ex}");
                     }
+                }
+            }
+        }
+
+        public static class Patch_Iteration4_DoBills
+        {
+            [HarmonyPatch(typeof(Bill), nameof(Bill.PawnAllowedToStartAnew))]
+            public static class Patch_Bill_PawnAllowedToStartAnew
+            {
+                [HarmonyPrefix]
+                public static bool Prefix(Pawn p, ref bool __result)
+                {
+                    if (p == null) return true; // Let vanilla handle null pawn
+
+                    // For non-humanlike modded pawns, allow them to start bills
+                    if (p.RaceProps.Humanlike) return true; // Let vanilla handle humanlike pawns
+
+                    var modExtension = Utility_CacheManager.GetModExtension(p.def);
+                    if (modExtension == null) return true; // No mod extension, skip
+
+                    if (!Utility_TagManager.HasTagSet(p.def)) return true; // No tag set, skip
+
+                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowAllWork.ToString()))
+                        __result = true;
+                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Hauling.ToString()))
+                        __result = true;
+                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Crafting.ToString()))
+                        __result = true;
+                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Smithing.ToString()))
+                        __result = true;
+                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Tailoring.ToString()))
+                        __result = true;
+                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Art.ToString()))
+                        __result = true;
+                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Cooking.ToString()))
+                        __result = true;
+                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Doctor.ToString()))
+                        __result = true;
+
+                    return false; // Skip original method
+                }
+            }
+        }
+
+        public static class Patch_Iteration5_FoodSelection
+        {
+            ///// <summary>
+            ///// Enhances food selection for modded non-humanlike pawns to use appropriate food sources
+            ///// </summary>
+            //[HarmonyPatch(typeof(FoodUtility), nameof(FoodUtility.TryFindBestFoodSourceFor))]
+            //public static class Patch_FoodUtility_TryFindBestFoodSourceFor
+            //{
+            //    [HarmonyPrefix]
+            //    public static bool Prefix(
+            //        Pawn getter,
+            //        Pawn eater,
+            //        bool desperate,
+            //        ref bool __result,
+            //        out Thing foodSource,
+            //        out ThingDef foodDef,
+            //        bool canRefillDispenser = true,
+            //        bool canUseInventory = true,
+            //        bool allowForbidden = false,
+            //        bool allowCorpse = true,
+            //        bool allowSociallyImproper = false,
+            //        bool allowHarvest = false)
+            //    {
+            //        foodSource = null;
+            //        foodDef = null;
+
+            //        // Skip for humanlike pawns or null getter/eater
+            //        if (getter == null || eater == null || getter.RaceProps.Humanlike)
+            //            return true;  // Use vanilla logic
+
+            //        // Only handle our modded non-humanlike pawns
+            //        var modExtension = Utility_CacheManager.GetModExtension(getter.def);
+            //        if (modExtension == null)
+            //            return true;  // Use vanilla logic
+
+            //        try
+            //        {
+            //            // Check inventory first if allowed
+            //            Thing inventoryFood = null;
+            //            if (canUseInventory && getter.inventory?.innerContainer != null)
+            //            {
+            //                // Search for edible food in inventory
+            //                foreach (Thing item in getter.inventory.innerContainer)
+            //                {
+            //                    if (item?.def?.IsIngestible == true &&
+            //                        FoodUtility.WillEat(eater, item))
+            //                    {
+            //                        inventoryFood = item;
+            //                        break;
+            //                    }
+            //                }
+            //            }
+
+            //            // Try to find food on map if needed
+            //            ThingDef mapFoodDef = null;
+            //            Thing mapFood = FoodUtility.BestFoodSourceOnMap(
+            //                getter, eater, desperate, out mapFoodDef, // Changed 'ref' to 'out'
+            //                FoodPreferability.MealLavish, // Allow up to lavish meals
+            //                getter == eater,  // Whether getter is the eater
+            //                !eater.IsTeetotaler(),  // Allow drugs if not teetotaler
+            //                allowCorpse,
+            //                true,  // Allow dispenser
+            //                canRefillDispenser,
+            //                allowForbidden,
+            //                allowSociallyImproper,
+            //                allowHarvest,
+            //                false,  // No camp food
+            //                false,  // No inventory food (handled separately)
+            //                false); // No moved campfire food
+
+            //            // Compare inventory and map food if both exist
+            //            if (inventoryFood != null && mapFood != null)
+            //            {
+            //                float inventoryScore = FoodUtility.FoodOptimality(eater, inventoryFood, inventoryFood.def, 0f);
+            //                float mapScore = FoodUtility.FoodOptimality(eater, mapFood, mapFoodDef,
+            //                    (getter.Position - mapFood.Position).LengthHorizontalSquared);
+
+            //                // Prefer inventory food unless map food is significantly better
+            //                if (mapScore > inventoryScore + 30f)
+            //                {
+            //                    foodSource = mapFood;
+            //                    foodDef = mapFoodDef;
+            //                    __result = true;
+            //                    return false;
+            //                }
+            //                else
+            //                {
+            //                    foodSource = inventoryFood;
+            //                    foodDef = inventoryFood.def;
+            //                    __result = true;
+            //                    return false;
+            //                }
+            //            }
+            //            else if (inventoryFood != null)
+            //            {
+            //                // Only inventory food
+            //                foodSource = inventoryFood;
+            //                foodDef = inventoryFood.def;
+            //                __result = true;
+            //                return false;
+            //            }
+            //            else if (mapFood != null)
+            //            {
+            //                // Only map food
+            //                foodSource = mapFood;
+            //                foodDef = mapFoodDef;
+            //                __result = true;
+            //                return false;
+            //            }
+
+            //            // No food found
+            //            foodSource = null;
+            //            foodDef = null;
+            //            __result = false;
+            //            return false;
+            //        }
+            //        catch (Exception ex)
+            //        {
+            //            Utility_DebugManager.LogError($"Error in food selection patch: {ex.Message}");
+            //            return true; // Fall back to vanilla on error
+            //        }
+            //    }
+            //}
+
+            ///// <summary>
+            ///// Adds custom food preference for modded pawns to allow proper food selection
+            ///// </summary>
+            //[HarmonyPatch(typeof(FoodUtility), nameof(FoodUtility.WillEat))]
+            //public static class Patch_FoodUtility_WillEat
+            //{
+            //    [HarmonyPrefix]
+            //    public static bool Prefix(Pawn p, Thing food, ref bool __result)
+            //    {
+            //        // Skip for null or humanlike pawns
+            //        if (p == null || food == null || p.RaceProps.Humanlike)
+            //            return true;
+
+            //        // Only handle our modded non-humanlike pawns
+            //        var modExtension = Utility_CacheManager.GetModExtension(p.def);
+            //        if (modExtension == null)
+            //            return true;
+
+            //        try
+            //        {
+            //            // Basic ingestibility check
+            //            if (food.def?.ingestible == null)
+            //            {
+            //                __result = false;
+            //                return false;
+            //            }
+
+            //            // Allow raw food with custom preferences based on tags
+            //            if (food.def.ingestible != null &&
+            //                (food.def.ingestible.foodType & (FoodTypeFlags.Meat | FoodTypeFlags.VegetableOrFruit | FoodTypeFlags.Plant)) != 0)
+            //            {
+            //                // Raw food preference based on tags
+            //                if (Utility_TagManager.HasTag(p.def, "AllowFood_Raw") ||
+            //                    Utility_TagManager.HasTag(p.def, "AllowAllFood"))
+            //                {
+            //                    // Check food category preference based on tags
+            //                    if (food.def.ingestible.foodType == FoodTypeFlags.Meat)
+            //                    {
+            //                        if (Utility_TagManager.HasTag(p.def, "Diet_Carnivore") ||
+            //                            Utility_TagManager.HasTag(p.def, "Diet_Omnivore"))
+            //                        {
+            //                            __result = true;
+            //                            return false;
+            //                        }
+            //                    }
+            //                    else if (food.def.ingestible.foodType == FoodTypeFlags.VegetableOrFruit)
+            //                    {
+            //                        if (Utility_TagManager.HasTag(p.def, "Diet_Herbivore") ||
+            //                            Utility_TagManager.HasTag(p.def, "Diet_Omnivore"))
+            //                        {
+            //                            __result = true;
+            //                            return false;
+            //                        }
+            //                    }
+            //                    else
+            //                    {
+            //                        // For other food types, allow if omnivore
+            //                        if (Utility_TagManager.HasTag(p.def, "Diet_Omnivore"))
+            //                        {
+            //                            __result = true;
+            //                            return false;
+            //                        }
+            //                    }
+            //                }
+            //            }
+
+            //            // Allow meals based on tags
+            //            if (food.def.IsIngestible && food.def.ingestible.foodType.HasFlag(FoodTypeFlags.Meal))
+            //            {
+            //                if (Utility_TagManager.HasTag(p.def, "AllowFood_Meals") ||
+            //                    Utility_TagManager.HasTag(p.def, "AllowAllFood"))
+            //                {
+            //                    __result = true;
+            //                    return false;
+            //                }
+            //            }
+
+            //            // Block toxic or dangerously drugged food 
+            //            if (food.def.IsIngestible && food.def.ingestible.drugCategory != DrugCategory.None)
+            //            {
+            //                // Only allow drugs with specific tag
+            //                if (!Utility_TagManager.HasTag(p.def, "AllowFood_Drugs"))
+            //                {
+            //                    __result = false;
+            //                    return false;
+            //                }
+            //            }
+
+            //            // Default to vanilla for any other cases
+            //            return true;
+            //        }
+            //        catch (Exception ex)
+            //        {
+            //            Utility_DebugManager.LogError($"Error in WillEat patch: {ex.Message}");
+            //            return true;
+            //        }
+            //    }
+            //}
+
+            ///// <summary>
+            ///// Enhances food optimization for modded pawns
+            ///// </summary>
+            //[HarmonyPatch(typeof(FoodUtility), nameof(FoodUtility.FoodOptimality))]
+            //public static class Patch_FoodUtility_FoodOptimality
+            //{
+            //    [HarmonyPostfix]
+            //    public static void Postfix(Pawn eater, Thing foodSource, ThingDef foodDef, float dist, ref float __result)
+            //    {
+            //        if (eater == null || foodSource == null || foodDef == null)
+            //            return;
+
+            //        // Only handle our modded non-humanlike pawns
+            //        if (eater.RaceProps.Humanlike)
+            //            return;
+
+            //        var modExtension = Utility_CacheManager.GetModExtension(eater.def);
+            //        if (modExtension == null)
+            //            return;
+
+            //        try
+            //        {
+            //            // Apply custom food preference adjustments based on tags
+
+            //            // Prefer raw meat for carnivores
+            //            if (Utility_TagManager.HasTag(eater.def, "Diet_Carnivore") &&
+            //                foodDef.ingestible != null && foodDef.ingestible.foodType.HasFlag(FoodTypeFlags.Meat))
+            //            {
+            //                __result += 20f;
+            //            }
+
+            //            // Prefer raw plants for herbivores
+            //            if (Utility_TagManager.HasTag(eater.def, "Diet_Herbivore") &&
+            //                foodDef.ingestible != null && foodDef.ingestible.foodType == FoodTypeFlags.VegetableOrFruit)
+            //            {
+            //                __result += 20f;
+            //            }
+
+            //            // Prefer meals for omnivores
+            //            if (Utility_TagManager.HasTag(eater.def, "Diet_Omnivore") &&
+            //                foodDef.IsIngestible && foodDef.ingestible.foodType.HasFlag(FoodTypeFlags.Meal))
+            //            {
+            //                __result += 10f;
+            //            }
+
+            //            // Penalize non-preferred food types
+            //            if (Utility_TagManager.HasTag(eater.def, "Diet_Carnivore") &&
+            //                foodDef.ingestible.foodType == FoodTypeFlags.VegetableOrFruit)
+            //            {
+            //                __result -= 40f;
+            //            }
+
+            //            if (Utility_TagManager.HasTag(eater.def, "Diet_Herbivore") &&
+            //                foodDef.ingestible.foodType == FoodTypeFlags.Meat)
+            //            {
+            //                __result -= 40f;
+            //            }
+
+            //            // Log if in debug mode
+            //            if (modExtension.debugMode && Prefs.DevMode)
+            //            {
+            //                Utility_DebugManager.LogNormal($"Food optimality for {eater.LabelShort}: {foodSource.Label} = {__result}");
+            //            }
+            //        }
+            //        catch (Exception ex)
+            //        {
+            //            Utility_DebugManager.LogError($"Error in FoodOptimality patch: {ex.Message}");
+            //        }
+            //    }
+            //}
+
+            ///// <summary>
+            ///// Allows modded pawns to eat without traits affecting their food preferences
+            ///// </summary>
+            //[HarmonyPatch(typeof(FoodUtility), nameof(FoodUtility.ThoughtsFromIngesting))]
+            //public static class Patch_FoodUtility_ThoughtsFromIngesting
+            //{
+            //    [HarmonyPrefix]
+            //    public static bool Prefix(Pawn ingester, Thing foodSource, ThingDef foodDef, ref List<FoodUtility.ThoughtFromIngesting> __result)
+            //    {
+            //        if (ingester == null || foodSource == null || foodDef == null)
+            //            return true;
+
+            //        // Only handle our modded non-humanlike pawns
+            //        if (ingester.RaceProps.Humanlike)
+            //            return true;
+
+            //        var modExtension = Utility_CacheManager.GetModExtension(ingester.def);
+            //        if (modExtension == null)
+            //            return true;
+
+            //        // Animals don't get thoughts from food
+            //        __result = new List<FoodUtility.ThoughtFromIngesting>();
+            //        return false;
+            //    }
+            //}
+        }
+
+        public static class Patch_MapCacheHandling
+        {
+            // Patch for when a new map is created
+            [HarmonyPatch(typeof(Map), nameof(Map.FinalizeInit))]
+            public static class Map_FinalizeInit_Patch
+            {
+                public static void Postfix(Map __instance)
+                {
+                    if (__instance != null)
+                    {
+                        // Clear any existing cache for this map ID just to be safe
+                        Utility_MapCacheManager.ClearMapCache(__instance.uniqueID);
+                    }
+                }
+            }
+
+            // Patch for when a map is removed
+            [HarmonyPatch(typeof(Game), nameof(Game.DeinitAndRemoveMap))]
+            public static class Game_DeinitAndRemoveMap_Patch
+            {
+                public static void Prefix(Map map)
+                {
+                    if (map != null)
+                    {
+                        // Clear cache when a map is being removed
+                        Utility_MapCacheManager.ClearMapCache(map.uniqueID);
+                    }
+                }
+            }
+        }
+
+        public static class Patch_SafePurge
+        {
+            [HarmonyPatch(typeof(ITab_Pawn_Gear), "ShouldShowInventory")]
+            public static class Patch_ITab_Pawn_Gear_ShouldShowInventory
+            {
+                [HarmonyPrefix]
+                public static bool Prefix(Pawn p, ref bool __result)
+                {
+                    // If pawn is null, let original method handle it
+                    if (p == null)
+                        return true;
+
+                    // Check if this is a pawn that previously had trackers injected
+                    // This assumes you have some way to check if the pawn had trackers injected
+                    // You can use a static dictionary to track this if needed
+                    if (Utility_DrafterManager.WasTrackerInjected(p))
+                    {
+                        // Simply return false to hide inventory without accessing trackers
+                        __result = false;
+                        return false; // Skip original method
+                    }
+
+                    return true; // Run original method for other pawns
                 }
             }
         }

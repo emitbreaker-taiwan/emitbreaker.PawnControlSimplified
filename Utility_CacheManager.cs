@@ -20,7 +20,7 @@ namespace emitbreaker.PawnControl
 
         // Caching ForceColonist Pawns
         private static readonly Dictionary<Map, List<Pawn>> _colonistLikePawnCache = new Dictionary<Map, List<Pawn>>();
-        private static readonly Dictionary<Map, int> _frameIndexCache = new Dictionary<Map, int>();
+        public static readonly Dictionary<Map, int> _frameIndexCache = new Dictionary<Map, int>();
 
         private static readonly Dictionary<string, DutyDef> _dutyCache = new Dictionary<string, DutyDef>();
         // Cache to store the tag-check result per ThingDef
@@ -297,20 +297,6 @@ namespace emitbreaker.PawnControl
                 reachabilityCache[mapId] = new Dictionary<T, bool>();
 
             return reachabilityCache[mapId];
-        }
-
-        /// <summary>
-        /// Resets a job giver cache system
-        /// </summary>
-        public static void ResetJobGiverCache<T>(
-            Dictionary<int, List<T>> mainCache,
-            Dictionary<int, Dictionary<T, bool>> reachabilityCache)
-        {
-            if (mainCache != null)
-                mainCache.Clear();
-
-            if (reachabilityCache != null)
-                reachabilityCache.Clear();
         }
 
         /// <summary>

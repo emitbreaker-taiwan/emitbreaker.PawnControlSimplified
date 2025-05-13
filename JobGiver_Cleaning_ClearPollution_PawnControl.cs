@@ -46,14 +46,46 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Cleaning_ClearPollution_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core flow
+
+        /// <summary>
+        /// Biotech check - only execute if Biotech is active
+        /// </summary>
+        protected override bool ShouldExecuteNow(int mapId)
+        {
+            // First check base conditions
+            if (!base.ShouldExecuteNow(mapId))
+                return false;
+
+            // Then check Biotech requirement
+            return ModLister.CheckBiotech("Clear pollution");
+        }
+
+        #endregion
+
         #region Target Selection
 
         /// <summary>
-        /// Pollution clearing doesn't use Thing targets
+        /// Job-specific cache update method for tracking pollution cells
+        /// Centralizes the pollution cell tracking logic
         /// </summary>
-        protected override bool RequiresThingTargets()
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
-            return false;
+            // Pollution clearing doesn't use Thing targets, so we return an empty collection
+            // We handle cell caching separately through our own methods
+            return Enumerable.Empty<Thing>();
         }
 
         /// <summary>
@@ -63,6 +95,14 @@ namespace emitbreaker.PawnControl
         {
             // Pollution clearing doesn't have "Thing" targets
             return Enumerable.Empty<Thing>();
+        }
+
+        /// <summary>
+        /// Pollution clearing doesn't use Thing targets
+        /// </summary>
+        protected override bool RequiresThingTargets()
+        {
+            return false;
         }
 
         /// <summary>
@@ -76,14 +116,6 @@ namespace emitbreaker.PawnControl
                    pawn.Map.areaManager.PollutionClear.TrueCount > 0;
         }
 
-        /// <summary>
-        /// Biotech check
-        /// </summary>
-        protected override bool ShouldExecuteNow(int mapId)
-        {
-            return ModLister.CheckBiotech("Clear pollution");
-        }
-
         #endregion
 
         #region Job Creation
@@ -93,7 +125,8 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job CreateCleaningJob(Pawn pawn, bool forced)
         {
-            if (pawn?.Map == null) return null;
+            if (pawn?.Map == null)
+                return null;
 
             // Get cells from the pollution clear area that have pollution
             List<IntVec3> pollutedCells = GetPollutedCells(pawn.Map);
@@ -177,6 +210,19 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return true;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset
+            base.Reset();
         }
 
         #endregion

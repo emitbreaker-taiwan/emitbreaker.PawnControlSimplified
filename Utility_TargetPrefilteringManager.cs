@@ -830,11 +830,114 @@ namespace emitbreaker.PawnControl
                 .OrderBy(t => (t.Position - refPos).LengthHorizontalSquared)
                 .FirstOrDefault();
         }
-        
+
         #endregion
-        
+
         #region Memory/Cache Management
-        
+
+        // Add this new method to the Utility_TargetPrefilteringManager class in the Memory/Cache Management region
+        /// <summary>
+        /// Cleans up invalid targets for a specific map
+        /// This removes references to despawned or destroyed things from the cache
+        /// </summary>
+        public static void CleanupInvalidTargetsForMap(Map map)
+        {
+            if (map == null)
+                return;
+
+            int mapId = map.uniqueID;
+            bool cleanedEntries = false;
+
+            // Clean spatial indices
+            if (_spatialIndices.TryGetValue(mapId, out var spatialIndices))
+            {
+                foreach (var pair in spatialIndices)
+                {
+                    // Nothing to do - spatial indices are rebuilt periodically already
+                    // Just reset the update tick so it rebuilds on next access
+                    if (_spatialIndexUpdateTicks.TryGetValue(mapId, out var updateTicks))
+                    {
+                        foreach (var typePair in updateTicks)
+                        {
+                            updateTicks[typePair.Key] = 0; // Force update on next access
+                        }
+                        cleanedEntries = true;
+                    }
+                }
+            }
+
+            // Clean thing type caches
+            if (_thingsByTypeCaches.TryGetValue(mapId, out var typeCache))
+            {
+                foreach (var typePair in typeCache.ToList())
+                {
+                    var thingsToKeep = typePair.Value
+                        .Where(t => t != null && !t.Destroyed && t.Spawned)
+                        .ToList();
+
+                    if (thingsToKeep.Count < typePair.Value.Count)
+                    {
+                        typeCache[typePair.Key] = thingsToKeep;
+                        cleanedEntries = true;
+                    }
+                }
+
+                if (_thingsByTypeUpdateTicks.ContainsKey(mapId))
+                {
+                    _thingsByTypeUpdateTicks[mapId] = 0; // Force update on next access
+                }
+            }
+
+            // Clean zone groups
+            if (_zoneGroupCache.TryGetValue(mapId, out var zoneCache))
+            {
+                foreach (var zonePair in zoneCache.ToList())
+                {
+                    var thingsToKeep = zonePair.Value
+                        .Where(t => t != null && !t.Destroyed && t.Spawned)
+                        .ToList();
+
+                    if (thingsToKeep.Count < zonePair.Value.Count)
+                    {
+                        zoneCache[zonePair.Key] = thingsToKeep;
+                        cleanedEntries = true;
+                    }
+                }
+
+                if (_zoneUpdateTicks.ContainsKey(mapId))
+                {
+                    _zoneUpdateTicks[mapId] = 0; // Force update on next access
+                }
+            }
+
+            // Clean room groups
+            if (_roomGroupCache.TryGetValue(mapId, out var roomCache))
+            {
+                foreach (var roomPair in roomCache.ToList())
+                {
+                    var thingsToKeep = roomPair.Value
+                        .Where(t => t != null && !t.Destroyed && t.Spawned)
+                        .ToList();
+
+                    if (thingsToKeep.Count < roomPair.Value.Count)
+                    {
+                        roomCache[roomPair.Key] = thingsToKeep;
+                        cleanedEntries = true;
+                    }
+                }
+
+                if (_roomUpdateTicks.ContainsKey(mapId))
+                {
+                    _roomUpdateTicks[mapId] = 0; // Force update on next access
+                }
+            }
+
+            if (cleanedEntries && Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Cleaned up invalid cache entries for map {mapId}");
+            }
+        }
+
         /// <summary>
         /// Cleans up data for a specific map
         /// </summary>

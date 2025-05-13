@@ -1,5 +1,6 @@
 ﻿using RimWorld;
 using RimWorld.Planet;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -30,6 +31,11 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f };
 
+        /// <summary>
+        /// Cache key suffix for this specific job giver
+        /// </summary>
+        private const string TAKETOBED_CACHE_SUFFIX = "_TakeToBed";
+
         #endregion
 
         #region Core flow
@@ -40,29 +46,27 @@ namespace emitbreaker.PawnControl
             return 6.0f;
         }
 
+        /// <summary>
+        /// Standard job creation using the framework
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_TakeToBed_PawnControl>(
                 pawn,
                 WorkTag,
-                (p, forced) => {
-                    // Process cached targets to create job
-                    if (p?.Map == null) return null;
-
-                    int mapId = p.Map.uniqueID;
-                    List<Thing> targets;
-                    if (_prisonerCache.TryGetValue(mapId, out var prisonerList) && prisonerList != null)
-                    {
-                        targets = new List<Thing>(prisonerList.Cast<Thing>());
-                    }
-                    else
-                    {
-                        targets = new List<Thing>();
-                    }
-
-                    return ProcessCachedTargets(p, targets, forced);
-                },
+                (p, forced) => CreateJobFor(p, forced),
                 debugJobDesc: "take prisoner to bed");
+        }
+
+        /// <summary>
+        /// Creates a job for the given pawn according to targets found
+        /// </summary>
+        protected override Job CreateJobFor(Pawn pawn, bool forced)
+        {
+            if (pawn?.Map == null) return null;
+
+            // Process cached targets to create job
+            return base.CreateJobFor(pawn, forced);
         }
 
         #endregion
@@ -72,7 +76,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Get all prisoners that need to be taken to beds
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override IEnumerable<Pawn> GetPrisonersMatchingCriteria(Map map)
         {
             if (map == null) yield break;
 
@@ -106,57 +110,39 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Process the cached targets to create jobs
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn warden, List<Thing> targets, bool forced)
-        {
-            if (warden?.Map == null || targets.Count == 0)
-                return null;
-
-            int mapId = warden.Map.uniqueID;
-
-            // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets<Pawn>(
-                warden,
-                targets.ConvertAll(t => t as Pawn),
-                (prisoner) => (prisoner.Position - warden.Position).LengthHorizontalSquared,
-                DistanceThresholds
-            );
-
-            // Find the first valid prisoner to take to bed
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
-                buckets,
-                warden,
-                (prisoner, p) => IsValidPrisonerTarget(prisoner, p),
-                _prisonerReachabilityCache.TryGetValue(mapId, out var cache) ?
-                    new Dictionary<int, Dictionary<Pawn, bool>> { { mapId, cache } } :
-                    new Dictionary<int, Dictionary<Pawn, bool>>()
-            );
-
-            if (targetPrisoner == null)
-                return null;
-
-            // Create take to bed job
-            return CreateTakeToBedJob(warden, targetPrisoner);
-        }
-
-        /// <summary>
-        /// Validates if a warden can take a specific prisoner to bed
+        /// Validates if a prisoner target is valid for this warden job
         /// </summary>
         protected override bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden)
         {
             // Skip if not actually a valid prisoner
-            if (prisoner?.guest == null || !prisoner.IsPrisoner ||
-                prisoner.InAggroMentalState || prisoner.IsFormingCaravan())
+            if (!base.IsValidPrisonerTarget(prisoner, warden))
                 return false;
 
-            // Check basic reachability
-            if (!prisoner.Spawned || prisoner.IsForbidden(warden) ||
-                !warden.CanReserveAndReach(prisoner, PathEndMode.OnCell, warden.NormalMaxDanger()))
+            if (prisoner.InAggroMentalState || prisoner.IsFormingCaravan())
                 return false;
 
             // Try to create a job for this prisoner
             return TryMakeJob(warden, prisoner, false) != null;
+        }
+
+        /// <summary>
+        /// Process the cached targets to create jobs
+        /// </summary>
+        protected override Job CreateJobForPrisoner(Pawn warden, Pawn prisoner, bool forced)
+        {
+            if (warden == null || prisoner == null)
+                return null;
+
+            // Create take to bed job
+            Job job = TryMakeJob(warden, prisoner, forced);
+
+            if (job != null && Prefs.DevMode)
+            {
+                string jobType = job.def == JobDefOf.TakeWoundedPrisonerToBed ? "medical bed" : "assigned bed";
+                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to take prisoner {prisoner.LabelShort} to {jobType}");
+            }
+
+            return job;
         }
 
         /// <summary>
@@ -183,29 +169,14 @@ namespace emitbreaker.PawnControl
             if (!hasPrisonersNeedingBeds)
                 return false;
 
-            return !_lastWardenCacheUpdate.TryGetValue(mapId, out int lastUpdate) ||
-                   Find.TickManager.TicksGame > lastUpdate + CacheUpdateInterval;
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX;
+            int lastUpdate = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+            return lastUpdate == -1 || Find.TickManager.TicksGame > lastUpdate + CacheUpdateInterval;
         }
 
         #endregion
 
         #region Job creation
-
-        /// <summary>
-        /// Creates a job to take a prisoner to bed
-        /// </summary>
-        private Job CreateTakeToBedJob(Pawn warden, Pawn prisoner)
-        {
-            Job job = TryMakeJob(warden, prisoner, false);
-
-            if (job != null)
-            {
-                string jobType = job.def == JobDefOf.TakeWoundedPrisonerToBed ? "medical bed" : "assigned bed";
-                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to take prisoner {prisoner.LabelShort} to {jobType}");
-            }
-
-            return job;
-        }
 
         /// <summary>
         /// Try to create a job to take a prisoner to bed, mirroring the original WorkGiver logic
@@ -265,6 +236,37 @@ namespace emitbreaker.PawnControl
             downedToBedJob.count = 1;
 
             return downedToBedJob;
+        }
+
+        #endregion
+
+        #region Cache Management
+
+        /// <summary>
+        /// Reset this job giver's cache
+        /// </summary>
+        public static void ResetTakeToBedCache()
+        {
+            // Clear all TakeToBed-related caches from all maps
+            foreach (Map map in Find.Maps)
+            {
+                int mapId = map.uniqueID;
+
+                // Clear specific cache key
+                string cacheKey = typeof(JobGiver_Warden_TakeToBed_PawnControl).Name + TAKETOBED_CACHE_SUFFIX;
+                var mapCache = Utility_MapCacheManager.GetOrCreateMapCache<string, object>(mapId);
+
+                if (mapCache.ContainsKey(cacheKey))
+                {
+                    mapCache.Remove(cacheKey);
+                    Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+                }
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal("Reset TakeToBed prisoner cache");
+            }
         }
 
         #endregion

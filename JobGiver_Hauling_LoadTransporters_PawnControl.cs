@@ -36,85 +36,19 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f }; // 10, 20, 30 tiles
 
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// For transporters, this is null as we use a special job creation method
+        /// </summary>
+        protected override JobDef WorkJobDef => null;
+
         #endregion
 
         #region Core flow
 
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_LoadTransporters_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Use the shared cache updating logic from base class
-                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastHaulingCacheUpdate[mapId] = now;
-                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    // Get transporters from shared cache
-                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
-                        return null;
-
-                    // Filter only things with CompTransporter component
-                    var transporterThings = haulables.Where(t => t.TryGetComp<CompTransporter>() != null).ToList();
-                    if (transporterThings.Count == 0)
-                        return null;
-
-                    // Extract CompTransporters from their parent things
-                    var transporters = transporterThings
-                        .Select(t => t.TryGetComp<CompTransporter>())
-                        .Where(comp => comp != null)
-                        .ToList();
-
-                    // Use the bucketing system to find the closest valid transporter
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        transporterThings,
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Find the best transporter to load
-                    Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, worker) => IsValidTransporterTarget(thing, worker),
-                        _reachabilityCache);
-
-                    // Create job if target found
-                    if (targetThing != null)
-                    {
-                        CompTransporter transporter = targetThing.TryGetComp<CompTransporter>();
-                        if (transporter != null)
-                        {
-                            Job job = LoadTransportersJobUtility.JobOnTransporter(p, transporter);
-
-                            if (job != null)
-                            {
-                                Utility_DebugManager.LogNormal($"{p.LabelShort} created job to load transporter {targetThing.LabelCap}");
-                            }
-
-                            return job;
-                        }
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
-        }
-
+        /// <summary>
+        /// Process cached targets to find a valid job for loading transporters
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
             if (targets == null || targets.Count == 0)
@@ -125,12 +59,6 @@ namespace emitbreaker.PawnControl
             if (transporterThings.Count == 0)
                 return null;
 
-            // Extract CompTransporters from their parent things
-            var transporters = transporterThings
-                .Select(t => t.TryGetComp<CompTransporter>())
-                .Where(comp => comp != null)
-                .ToList();
-
             // Use the bucketing system to find the closest valid transporter
             var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
@@ -138,12 +66,12 @@ namespace emitbreaker.PawnControl
                 (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
                 DistanceThresholds);
 
-            // Find the best transporter to load
+            // Find the best transporter to load using the centralized cache system
             Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (thing, worker) => IsValidTransporterTarget(thing, worker),
-                _reachabilityCache);
+                null); // Let the parent class handle reachability caching
 
             // Create job if target found
             if (targetThing != null)

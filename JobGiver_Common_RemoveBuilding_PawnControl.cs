@@ -10,18 +10,15 @@ namespace emitbreaker.PawnControl
     /// Abstract base class for all building removal JobGivers in PawnControl.
     /// This allows non-humanlike pawns to remove buildings with appropriate designation.
     /// </summary>
-    public abstract class JobGiver_Common_RemoveBuilding_PawnControl : JobGiver_Scan_PawnControl
+    public abstract class JobGiver_Common_RemoveBuilding_PawnControl : JobGiver_Construction_PawnControl
     {
         #region Configuration
 
-        // Define distance thresholds for bucketing
-        protected static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
-
         // Must be implemented by subclasses to specify which designation to target
-        protected override DesignationDef TargetDesignation => null; // Must be overridden in subclasses
+        protected abstract override DesignationDef TargetDesignation { get; }
 
         // Must be implemented by subclasses to specify which job to use for removal
-        protected override JobDef WorkJobDef => null; // Must be overridden in subclasses
+        protected abstract override JobDef WorkJobDef { get; }
 
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
@@ -41,27 +38,102 @@ namespace emitbreaker.PawnControl
         protected override bool RequiresPlayerFaction => true;
 
         /// <summary>
-        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// Override cache interval - slightly longer than default since designations don't change as frequently
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Construction;
+        protected override int CacheUpdateInterval => 180; // 3 seconds
+
+        /// <summary>
+        /// Override debug name for better logging
+        /// </summary>
+        protected override string DebugName => $"RemoveBuilding({TargetDesignation?.defName ?? "null"})";
 
         #endregion
 
-        #region Overrides
+        #region Constructor
 
-        // Override WorkTag to specify "Construction" work type
-        protected override string WorkTag => "Construction";
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Common_RemoveBuilding_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
 
-        // Override cache interval - slightly longer than default since designations don't change as frequently
-        protected override int CacheUpdateInterval => 180; // 3 seconds
+        #endregion
 
-        // Override debug name for better logging
-        protected override string DebugName => $"RemoveBuilding({TargetDesignation?.defName ?? "null"})";
+        #region Faction Validation
 
-        // Override GetTargets to provide buildings that need removal
+        /// <summary>
+        /// Determines if the pawn's faction is allowed to perform construction work
+        /// Override the base method to implement custom faction validation for removal jobs
+        /// </summary>
+        protected override bool IsValidFactionForConstruction(Pawn pawn)
+        {
+            // Since designations can only be issued by player, only player pawns, 
+            // player's mechanoids or player's slaves should perform them
+            return Utility_JobGiverManager.IsValidFactionInteraction(null, pawn, RequiresPlayerFaction);
+        }
+
+        /// <summary>
+        /// Legacy method for backward compatibility - now redirecting to the new method name
+        /// </summary>
+        [System.Obsolete("Use IsValidFactionForConstruction instead")]
+        protected virtual bool IsValidFactionForRemoval(Pawn pawn)
+        {
+            return IsValidFactionForConstruction(pawn);
+        }
+
+        /// <summary>
+        /// Legacy method for backward compatibility - now redirecting to the new method name
+        /// </summary>
+        [System.Obsolete("Use IsValidFactionForConstruction instead")]
+        protected virtual bool IsPawnValidFaction(Pawn pawn)
+        {
+            return IsValidFactionForConstruction(pawn);
+        }
+
+        #endregion
+
+        #region Core Flow
+
+        /// <summary>
+        /// Checks if the map meets requirements for this removal job
+        /// </summary>
+        protected override bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // Check if map has the required designations
+            return pawn?.Map != null &&
+                   TargetDesignation != null &&
+                   pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation);
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method that implements specialized removal target collection
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            return GetRemovalTargets(map);
+        }
+
+        /// <summary>
+        /// Get targets from the map based on designations
+        /// </summary>
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            if (map == null)
+            // Default implementation now calls the specialized method
+            return GetRemovalTargets(map);
+        }
+
+        /// <summary>
+        /// Gets all designated buildings that need removal
+        /// </summary>
+        protected virtual IEnumerable<Thing> GetRemovalTargets(Map map)
+        {
+            if (map == null || TargetDesignation == null)
                 return Enumerable.Empty<Thing>();
 
             // Find all designated things for removal
@@ -83,59 +155,79 @@ namespace emitbreaker.PawnControl
             return targets;
         }
 
+        #endregion
+
+        #region Job Creation
+
         /// <summary>
-        /// Common implementation for ShouldSkip that enforces faction requirements
+        /// Creates a construction job for the pawn
         /// </summary>
-        public override bool ShouldSkip(Pawn pawn)
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
         {
-            if (base.ShouldSkip(pawn))
-                return true;
+            if (pawn?.Map == null)
+                return null;
 
-            // Check faction validation - building removal requires player/slave/mechanoid pawns
-            if (!IsPawnValidFaction(pawn))
-                return true;
+            int mapId = pawn.Map.uniqueID;
 
-            return false;
-        }
+            // Get targets from the cache
+            List<Thing> targets = GetCachedTargets(mapId);
 
-        // Override TryGiveJob to directly implement job creation logic
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return CreateRemovalJob<JobGiver_Common_RemoveBuilding_PawnControl>(pawn);
+            // If cache is empty or not yet populated
+            if (targets == null || targets.Count == 0)
+            {
+                // Try to update cache if needed
+                if (ShouldUpdateCache(mapId))
+                {
+                    UpdateCache(mapId, pawn.Map);
+                    targets = GetCachedTargets(mapId);
+                }
+
+                // If still empty, get targets directly
+                if (targets == null || targets.Count == 0)
+                {
+                    targets = GetRemovalTargets(pawn.Map).ToList();
+                }
+            }
+
+            if (targets.Count == 0)
+                return null;
+
+            // Use JobGiverManager for distance bucketing
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                targets,
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds
+            );
+
+            // Find the best target to remove using the ValidateTarget method
+            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (thing, validator) => ValidateConstructionTarget(thing, validator, forced),
+                null
+            );
+
+            // Create job if target found
+            if (bestTarget != null)
+            {
+                Job job = JobMaker.MakeJob(WorkJobDef, bestTarget);
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to {WorkJobDef.defName} {bestTarget.LabelCap}");
+                return job;
+            }
+
+            return null;
         }
 
         #endregion
 
-        #region Faction Validation
+        #region Thing-Based Helpers
 
         /// <summary>
-        /// Consolidated faction validation check - only player pawns, mechanoids, or slaves can perform
-        /// designation-based jobs.
+        /// Basic validation for construction target things
+        /// Override the base implementation to add specialized validation for removal targets
         /// </summary>
-        /// <param name="pawn">The pawn to check</param>
-        /// <returns>True if the pawn is allowed to perform the job</returns>
-        protected virtual bool IsPawnValidFaction(Pawn pawn)
-        {
-            // Since designations can only be issued by player, only player pawns, 
-            // player's mechanoids or player's slaves should perform them
-            return Utility_JobGiverManager.IsValidFactionInteraction(null, pawn, RequiresPlayerFaction);
-        }
-
-        /// <summary>
-        /// Legacy method for backward compatibility
-        /// </summary>
-        [System.Obsolete("Use IsPawnValidFaction instead")]
-        protected virtual bool IsValidFactionForRemoval(Pawn pawn)
-        {
-            return IsPawnValidFaction(pawn);
-        }
-
-        #endregion
-
-        #region Validation helpers
-
-        // Add a helper method for target validation
-        protected virtual bool ValidateTarget(Thing thing, Pawn pawn)
+        protected override bool ValidateConstructionTarget(Thing thing, Pawn pawn, bool forced = false)
         {
             // IMPORTANT: Check faction interaction validity first
             if (!Utility_JobGiverManager.IsValidFactionInteraction(thing, pawn, RequiresPlayerFaction))
@@ -156,120 +248,11 @@ namespace emitbreaker.PawnControl
 
             // Skip if forbidden or unreachable
             if (thing.IsForbidden(pawn) ||
-                !pawn.CanReserve(thing, 1, -1) ||
+                !pawn.CanReserve(thing, 1, -1, null, forced) ||
                 !pawn.CanReach(thing, PathEndMode.Touch, Danger.Some))
                 return false;
 
             return true;
-        }
-
-        #endregion
-
-        #region Common Helpers
-
-        /// <summary>
-        /// Generic helper method to create a building removal job that can be used by all subclasses
-        /// </summary>
-        /// <typeparam name="T">The specific target type to use with JobGiverManager</typeparam>
-        /// <param name="pawn">The pawn that will perform the removal job</param>
-        /// <returns>A job to remove a designated building, or null if no valid job could be created</returns>
-        protected Job CreateRemovalJob<T>(Pawn pawn) where T : JobGiver_Common_RemoveBuilding_PawnControl
-        {
-            // Use the StandardTryGiveJob pattern with inline job creation logic
-            return Utility_JobGiverManager.StandardTryGiveJob<T>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Extra faction validation in case this is called directly
-                    if (!IsPawnValidFaction(p))
-                        return null;
-
-                    if (p?.Map == null)
-                        return null;
-
-                    // Get all targets from the GetTargets method
-                    List<Thing> targets = GetTargets(p.Map).ToList();
-                    if (targets.Count == 0)
-                        return null;
-
-                    // Use JobGiverManager for distance bucketing
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        targets,
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DISTANCE_THRESHOLDS
-                    );
-
-                    // Find the best target to remove using the ValidateTarget method
-                    Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, validator) => ValidateTarget(thing, validator) && p.CanReserve(thing, 1, -1, null, forced),
-                        null  // No need for reachability cache as we check in ValidateTarget
-                    );
-
-                    // Create job if target found
-                    if (bestTarget != null)
-                    {
-                        Job job = JobMaker.MakeJob(WorkJobDef, bestTarget);
-                        Utility_DebugManager.LogNormal($"{p.LabelShort} created job to {WorkJobDef.defName} {bestTarget.LabelCap}");
-                        return job;
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
-        }
-
-        /// <summary>
-        /// Helper method that executes the core job creation logic separately from StandardTryGiveJob.
-        /// Used by subclasses that need to customize the job after it's created.
-        /// </summary>
-        protected Job ExecuteJobGiverInternal(Pawn pawn, List<Thing> targets)
-        {
-            if (pawn?.Map == null || targets.Count == 0)
-                return null;
-
-            // Extra faction validation in case this is called directly
-            if (!IsPawnValidFaction(pawn))
-                return null;
-
-            // Use JobGiverManager for distance bucketing
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                targets,
-                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
-                DISTANCE_THRESHOLDS
-            );
-
-            // Find the best target to remove using the ValidateTarget method
-            Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                ValidateTarget,
-                null
-            );
-
-            // Create job if target found
-            if (bestTarget != null)
-            {
-                Job job = JobMaker.MakeJob(WorkJobDef, bestTarget);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to {WorkJobDef.defName} {bestTarget.LabelCap}");
-                return job;
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Sanitizes a list by limiting its size to avoid performance issues
-        /// </summary>
-        protected List<T> LimitListSize<T>(List<T> list, int maxSize = 1000)
-        {
-            if (list == null || list.Count <= maxSize)
-                return list;
-
-            return list.Take(maxSize).ToList();
         }
 
         #endregion
@@ -279,6 +262,19 @@ namespace emitbreaker.PawnControl
         public override string ToString()
         {
             return $"JobGiver_RemoveBuilding_PawnControl({TargetDesignation?.defName ?? "null"})";
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset
+            base.Reset();
         }
 
         #endregion

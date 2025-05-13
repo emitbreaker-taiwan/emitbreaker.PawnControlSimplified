@@ -18,7 +18,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// All cleaning job givers use this work tag
         /// </summary>
-        protected override string WorkTag => "Cleaning";
+        public override string WorkTag => "Cleaning";
+
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "Cleaning";
 
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
@@ -34,7 +39,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Cleaning;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Cleaning;
 
         /// <summary>
         /// Standard distance thresholds for bucketing
@@ -45,6 +50,23 @@ namespace emitbreaker.PawnControl
         /// Maximum number of items to process per job
         /// </summary>
         protected virtual int MaxItemsPerJob => 15;
+
+        /// <summary>
+        /// Cache update interval - update cleaning targets frequently
+        /// </summary>
+        protected override int CacheUpdateInterval => 180; // Every 3 seconds
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Cleaning_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
 
         #endregion
 
@@ -77,30 +99,24 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Job Creation
+        #region Core flow
 
         /// <summary>
         /// Standard implementation of TryGiveJob that ensures proper faction validation
+        /// and checks map requirements before proceeding with job creation
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Use the standardized job creation pattern
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Cleaning_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Extra faction validation in case this is called directly
-                    if (!IsValidFactionForCleaning(p))
-                        return null;
+            // Skip if already filtered out by parent class
+            if (ShouldSkip(pawn))
+                return null;
 
-                    // Check if map requirements are met
-                    if (!AreMapRequirementsMet(p))
-                        return null;
+            // Skip if map requirements not met
+            if (!AreMapRequirementsMet(pawn))
+                return null;
 
-                    // Call the specialized job creation method
-                    return CreateCleaningJob(p, forced);
-                },
-                debugJobDesc: DebugName);
+            // Proceed with normal job creation
+            return base.TryGiveJob(pawn);
         }
 
         /// <summary>
@@ -108,7 +124,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Skip if pawn invalid
+            // Skip if pawn invalid or faction not valid
             if (pawn == null || !IsValidFactionForCleaning(pawn))
                 return null;
 
@@ -116,12 +132,38 @@ namespace emitbreaker.PawnControl
             if ((targets == null || targets.Count == 0) && RequiresThingTargets())
                 return null;
 
-            // Call the specialized job creation method
+            // Create job using the specialized cleaning job creation method
             return CreateCleaningJob(pawn, forced);
         }
 
         /// <summary>
-        /// Checks if the map meets requirements for this cleaning job
+        /// Template method for creating a job that handles cache update logic
+        /// </summary>
+        protected override Job CreateJobFor(Pawn pawn, bool forced)
+        {
+            if (pawn?.Map == null)
+                return null;
+
+            int mapId = pawn.Map.uniqueID;
+
+            if (!ShouldExecuteNow(mapId))
+                return null;
+
+            // Update cache if needed using the centralized cache system
+            if (ShouldUpdateCache(mapId))
+            {
+                UpdateCache(mapId, pawn.Map);
+            }
+
+            // Get targets from the cache
+            var targets = GetCachedTargets(mapId);
+
+            // Call the specialized cleaning job creation method
+            return CreateCleaningJob(pawn, forced);
+        }
+
+        /// <summary>
+        /// Checks if the map meets requirements for this job giver
         /// </summary>
         protected virtual bool AreMapRequirementsMet(Pawn pawn)
         {
@@ -129,10 +171,23 @@ namespace emitbreaker.PawnControl
             return pawn?.Map != null;
         }
 
+        #endregion
+
+        #region Target selection
+
         /// <summary>
-        /// Implement to create the specific cleaning job
+        /// Job-specific cache update method that derived classes should implement
         /// </summary>
-        protected abstract Job CreateCleaningJob(Pawn pawn, bool forced);
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Use the base implementation by default
+            return GetTargets(map);
+        }
+
+        /// <summary>
+        /// Gets all potential targets on the given map - derived classes must implement
+        /// </summary>
+        protected abstract override IEnumerable<Thing> GetTargets(Map map);
 
         /// <summary>
         /// Whether this job giver requires Thing targets or uses cell-based targets
@@ -145,20 +200,31 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
+        #region Job creation
+
+        /// <summary>
+        /// Implement to create the specific cleaning job
+        /// </summary>
+        protected abstract Job CreateCleaningJob(Pawn pawn, bool forced);
+
+        #endregion
+
         #region Bucket Helpers
 
         /// <summary>
-        /// Creates distance buckets for IntVec3 cells
+        /// Creates distance buckets for IntVec3 cells using the centralized bucket system
         /// </summary>
         protected List<IntVec3>[] CreateDistanceBuckets(Pawn pawn, IEnumerable<IntVec3> cells)
         {
             if (pawn == null || cells == null)
                 return null;
 
+            // Initialize buckets based on distance thresholds
             List<IntVec3>[] buckets = new List<IntVec3>[DistanceThresholds.Length + 1];
             for (int i = 0; i < buckets.Length; i++)
                 buckets[i] = new List<IntVec3>();
 
+            // Distribute cells into buckets based on distance
             foreach (IntVec3 cell in cells)
             {
                 float distanceSq = (cell - pawn.Position).LengthHorizontalSquared;
@@ -247,6 +313,19 @@ namespace emitbreaker.PawnControl
                 }
             }
             return false;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use the centralized cache reset
+            base.Reset();
         }
 
         #endregion

@@ -62,87 +62,41 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_FillFermentingBarrel_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Use the shared cache updating logic from base class
-                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastHaulingCacheUpdate[mapId] = now;
-                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    // Get barrels from shared cache
-                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
-                        return null;
-
-                    // Filter only fermenting barrels
-                    var barrels = haulables.OfType<Building_FermentingBarrel>().ToList();
-                    if (barrels.Count == 0)
-                        return null;
-
-                    // Use the bucketing system to find the closest valid barrel
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        barrels.Cast<Thing>().ToList(),
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Find the best barrel to fill
-                    Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, worker) => IsValidBarrelTarget(thing, worker),
-                        _reachabilityCache);
-
-                    // Create job if target found
-                    if (targetThing != null && targetThing is Building_FermentingBarrel barrel)
-                    {
-                        // Find wort to fill the barrel with
-                        Thing wort = FindWort(p, barrel);
-
-                        if (wort != null)
-                        {
-                            Job job = JobMaker.MakeJob(WorkJobDef, barrel, wort);
-                            Utility_DebugManager.LogNormal($"{p.LabelShort} created job to fill fermenting barrel with wort");
-                            return job;
-                        }
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
+            return base.TryGiveJob(pawn);
         }
 
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Iterate through the cached targets to find a valid job
-            foreach (var target in targets)
+            // Filter only fermenting barrels
+            var barrels = targets.OfType<Building_FermentingBarrel>().ToList();
+            if (barrels.Count == 0)
+                return null;
+
+            // Use the bucketing system to find the closest valid barrel
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                barrels.Cast<Thing>().ToList(),
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find the best barrel to fill using the centralized-but-keyed-by-giver cache system
+            Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (thing, worker) => IsValidBarrelTarget(thing, worker),
+                reachabilityCache: null);
+
+            // Create job if target found
+            if (targetThing != null && targetThing is Building_FermentingBarrel barrel)
             {
-                if (IsValidBarrelTarget(target, pawn))
+                // Find wort to fill the barrel with
+                Thing wort = FindWort(pawn, barrel);
+
+                if (wort != null)
                 {
-                    Building_FermentingBarrel barrel = target as Building_FermentingBarrel;
-                    if (barrel != null)
-                    {
-                        Thing wort = FindWort(pawn, barrel);
-                        if (wort != null)
-                        {
-                            Job job = JobMaker.MakeJob(WorkJobDef, barrel, wort);
-                            return job;
-                        }
-                    }
+                    Job job = JobMaker.MakeJob(WorkJobDef, barrel, wort);
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to fill fermenting barrel with wort");
+                    return job;
                 }
             }
 
@@ -241,20 +195,12 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Cache management
+        #region Static data initialization
 
         public static void ResetStaticData()
         {
             TemperatureTrans = "BadTemperature".Translate();
             NoWortTrans = "NoWort".Translate();
-        }
-
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static new void ResetCache()
-        {
-            ResetStaticData();
         }
 
         #endregion

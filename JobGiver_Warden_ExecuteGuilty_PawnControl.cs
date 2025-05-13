@@ -30,16 +30,62 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f };
 
+        /// <summary>
+        /// Cache key identifier for this specific job giver
+        /// </summary>
+        private const string CACHE_KEY_SUFFIX = "_ExecuteGuilty";
+
+        #endregion
+
+        #region Initialization
+
+        /// <summary>
+        /// Reset the cache for this job giver
+        /// </summary>
+        public static void ResetExecuteGuiltyCache()
+        {
+            // Clear all execute guilty related caches from all maps
+            foreach (Map map in Find.Maps)
+            {
+                int mapId = map.uniqueID;
+                string cacheKey = typeof(JobGiver_Warden_ExecuteGuilty_PawnControl).Name + PRISONERS_CACHE_SUFFIX + CACHE_KEY_SUFFIX;
+                string reachCacheKey = typeof(JobGiver_Warden_ExecuteGuilty_PawnControl).Name + "_ReachCache" + CACHE_KEY_SUFFIX;
+
+                var colonistCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+                if (colonistCache.ContainsKey(cacheKey))
+                {
+                    colonistCache.Remove(cacheKey);
+                    Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+                }
+
+                // Clear reachability cache
+                var reachabilityCache = Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
+                reachabilityCache.Clear();
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, reachCacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal("Reset all execute guilty caches");
+            }
+        }
+
         #endregion
 
         #region Core flow
 
+        /// <summary>
+        /// Execution has high priority
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             // Execution is important but not an emergency
             return 6.5f;
         }
 
+        /// <summary>
+        /// Try to give a job, using the centralized cache system
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Skip if pawn is incapable of violence
@@ -51,26 +97,45 @@ namespace emitbreaker.PawnControl
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_ExecuteGuilty_PawnControl>(
                 pawn,
                 WorkTag,
-                (p, forced) => {
-                    // Process cached targets to create job
-                    if (p?.Map == null) return null;
-
-                    int mapId = p.Map.uniqueID;
-                    List<Thing> targets;
-                    if (_prisonerCache.TryGetValue(mapId, out var guiltyList) && guiltyList != null)
-                    {
-                        targets = new List<Thing>(guiltyList.Cast<Thing>());
-                    }
-                    else
-                    {
-                        targets = new List<Thing>();
-                    }
-
-                    return ProcessCachedTargets(p, targets, forced);
-                },
+                CreateJobFromCachedTargets,
                 debugJobDesc: "execute guilty colonist");
         }
 
+        /// <summary>
+        /// Create a job using the cached targets
+        /// </summary>
+        private Job CreateJobFromCachedTargets(Pawn pawn, bool forced)
+        {
+            // Process cached targets to create job
+            if (pawn?.Map == null) return null;
+
+            int mapId = pawn.Map.uniqueID;
+
+            // Get guilty colonists from cache using the proper cache key
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX + CACHE_KEY_SUFFIX;
+            var colonistCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+            List<Pawn> guiltyList = colonistCache.TryGetValue(cacheKey, out var cachedList) ? cachedList : null;
+
+            List<Thing> targets;
+            if (guiltyList != null)
+            {
+                targets = new List<Thing>(guiltyList.Cast<Thing>());
+            }
+            else
+            {
+                // If cache miss, update the cache with guilty colonists
+                var freshGuiltyColonists = GetPrisonersMatchingCriteria(pawn.Map).ToList();
+                colonistCache[cacheKey] = freshGuiltyColonists;
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, Find.TickManager.TicksGame);
+                targets = new List<Thing>(freshGuiltyColonists.Cast<Thing>());
+            }
+
+            return ProcessCachedTargets(pawn, targets, forced);
+        }
+
+        /// <summary>
+        /// Determines if this job giver should be skipped for the given pawn
+        /// </summary>
         public override bool ShouldSkip(Pawn pawn)
         {
             // Use base checks first
@@ -96,6 +161,23 @@ namespace emitbreaker.PawnControl
             if (map == null) yield break;
 
             // Get all colonists on the map
+            foreach (Pawn colonist in map.mapPawns.FreeColonistsSpawned)
+            {
+                if (FilterGuiltyColonists(colonist))
+                {
+                    yield return colonist;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get guilty colonists matching specific criteria for this job giver
+        /// </summary>
+        protected override IEnumerable<Pawn> GetPrisonersMatchingCriteria(Map map)
+        {
+            if (map == null) yield break;
+
+            // In this case, we're dealing with guilty colonists, not prisoners
             foreach (Pawn colonist in map.mapPawns.FreeColonistsSpawned)
             {
                 if (FilterGuiltyColonists(colonist))
@@ -135,25 +217,27 @@ namespace emitbreaker.PawnControl
                 DistanceThresholds
             );
 
+            // Get reachability cache for this job giver
+            string reachCacheKey = this.GetType().Name + "_ReachCache" + CACHE_KEY_SUFFIX;
+            var reachabilityCache = Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
+
             // Find the first valid colonist to execute
             Pawn targetColonist = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
                 buckets,
                 warden,
                 (colonist, p) => IsValidGuiltyTarget(colonist, p),
-                _prisonerReachabilityCache.TryGetValue(mapId, out var cache) ?
-                    new Dictionary<int, Dictionary<Pawn, bool>> { { mapId, cache } } :
-                    new Dictionary<int, Dictionary<Pawn, bool>>()
+                new Dictionary<int, Dictionary<Pawn, bool>> { { mapId, reachabilityCache } }
             );
 
             if (targetColonist == null)
                 return null;
 
-            // Create execution job
-            return CreateGuiltyExecutionJob(warden, targetColonist);
+            // Create job for the guilty colonist
+            return CreateJobForPrisoner(warden, targetColonist, forced);
         }
 
         /// <summary>
-        /// Validates if a warden can execute a guilty colonist
+        /// Validates if a warden can execute a specific guilty colonist
         /// </summary>
         protected override bool IsValidPrisonerTarget(Pawn colonist, Pawn warden)
         {
@@ -203,13 +287,25 @@ namespace emitbreaker.PawnControl
             if (!hasGuilty)
                 return false;
 
-            return !_lastWardenCacheUpdate.TryGetValue(mapId, out int lastUpdate) ||
-                   Find.TickManager.TicksGame > lastUpdate + CacheUpdateInterval;
+            // Check cache update interval
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX + CACHE_KEY_SUFFIX;
+            int currentTick = Find.TickManager.TicksGame;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            return currentTick - lastUpdateTick >= CacheUpdateInterval;
         }
 
         #endregion
 
         #region Job creation
+
+        /// <summary>
+        /// Creates a job for the given guilty colonist
+        /// </summary>
+        protected override Job CreateJobForPrisoner(Pawn warden, Pawn colonist, bool forced)
+        {
+            return CreateGuiltyExecutionJob(warden, colonist);
+        }
 
         /// <summary>
         /// Creates the execution job for the warden
@@ -228,7 +324,45 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Utility
+        #region Cache management
+
+        /// <summary>
+        /// Reset the cache for this job giver
+        /// </summary>
+        public override void Reset()
+        {
+            base.Reset();
+
+            // Clear specific caches for this job giver
+            foreach (Map map in Find.Maps)
+            {
+                int mapId = map.uniqueID;
+                string colonistCacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX + CACHE_KEY_SUFFIX;
+                string reachCacheKey = this.GetType().Name + "_ReachCache" + CACHE_KEY_SUFFIX;
+
+                // Clear guilty colonist cache
+                var colonistCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+                if (colonistCache.ContainsKey(colonistCacheKey))
+                {
+                    colonistCache.Remove(colonistCacheKey);
+                    Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, colonistCacheKey, -1);
+                }
+
+                // Clear reachability cache
+                var reachabilityCache = Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
+                reachabilityCache.Clear();
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, reachCacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Reset execute guilty cache for {this.GetType().Name}");
+            }
+        }
+
+        #endregion
+
+        #region Debug support
 
         /// <summary>
         /// For debugging purposes

@@ -11,28 +11,64 @@ namespace emitbreaker.PawnControl
     public abstract class JobGiver_Hauling_PawnControl : JobGiver_Scan_PawnControl
     {
         #region Configuration
-        protected override string WorkTag => "Hauling";
+
+        public override string WorkTag => "Hauling";
+
         protected virtual float[] DistanceThresholds => new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
+
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+
         #endregion
 
-        #region Caching
-        // Domain-specific caches
-        protected static readonly Dictionary<int, List<Thing>> _haulableCache = new Dictionary<int, List<Thing>>();
-        protected static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        protected static readonly Dictionary<int, int> _lastHaulingCacheUpdate = new Dictionary<int, int>();
+        #region Cache System
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Hauling_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system with this job giver's type
+        }
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            base.Reset();
+        }
+
+        #endregion
+
+        #region Core flow
+
+        /// <summary>
+        /// Job-specific cache update method that derived classes should override to implement
+        /// specialized target collection logic.
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // By default, use the standard GetTargets method
+            // Derived classes can override to provide specialized caching
+            return GetTargets(map);
+        }
+
+        #endregion
+
+        #region Hooks for derived classes
+
+        // Required abstract method implementation from JobGiver_Scan_PawnControl
+        protected abstract override IEnumerable<Thing> GetTargets(Map map);
+
+        // Required abstract method implementation from JobGiver_Scan_PawnControl
+        protected abstract override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced);
+
         #endregion
 
         #region Utility
 
         // Specialized hauling methods
         protected virtual bool CanHaulThing(Thing t, Pawn p) { return true;/* Common hauling logic */ }
-
-        // Reset cache helpers
-        public static void ResetHaulingCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_haulableCache, _reachabilityCache);
-            _lastHaulingCacheUpdate.Clear();
-        }
 
         #endregion
     }

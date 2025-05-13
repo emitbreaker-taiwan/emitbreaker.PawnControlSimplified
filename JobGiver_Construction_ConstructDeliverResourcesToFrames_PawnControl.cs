@@ -12,12 +12,12 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl : JobGiver_Common_ConstructDeliverResources_PawnControl<Frame>
     {
-        #region Overrides
+        #region Configuration
 
         /// <summary>
         /// Use Construction work tag
         /// </summary>
-        protected override string WorkTag => "Construction";
+        public override string WorkTag => "Construction";
 
         /// <summary>
         /// Unique name for debug messages
@@ -25,11 +25,66 @@ namespace emitbreaker.PawnControl
         protected override string JobDescription => "delivering resources to frames (construction) assignment";
 
         /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => JobDescription;
+
+        /// <summary>
+        /// Cache update interval - frames need more frequent updates than blueprints
+        /// </summary>
+        protected override int CacheUpdateInterval => 180; // 3 seconds
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
+
+        /// <summary>
         /// Construction workers should prioritize this even higher than haulers
         /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             return 5.8f;
+        }
+
+        /// <summary>
+        /// Check if map meets requirements for frame resource delivery
+        /// </summary>
+        protected override bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // Check if map has any frames that need resources
+            if (pawn?.Map == null)
+                return false;
+
+            // Quick check for construction frames
+            return pawn.Map.listerThings.ThingsInGroup(ThingRequestGroup.Construction).Any(f =>
+                f is Frame frame &&
+                frame.Spawned &&
+                frame.TotalMaterialCost().Count > 0);
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method for frame resource delivery
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Get all frames that need resources
+            return GetConstructionTargets(map).Cast<Thing>();
         }
 
         /// <summary>
@@ -51,14 +106,12 @@ namespace emitbreaker.PawnControl
             }
 
             // Limit cache size for performance
-            int maxCacheSize = 200;
-            if (result.Count > maxCacheSize)
-            {
-                result = result.Take(maxCacheSize).ToList();
-            }
-
-            return result;
+            return LimitListSize(result, 200);
         }
+
+        #endregion
+
+        #region Job Creation
 
         /// <summary>
         /// Processes the cached targets to find valid frames for resource delivery jobs
@@ -91,6 +144,10 @@ namespace emitbreaker.PawnControl
 
             return null;
         }
+
+        #endregion
+
+        #region Resource Delivery Helpers
 
         /// <summary>
         /// Finds nearby construction sites that need the same resources
@@ -151,6 +208,53 @@ namespace emitbreaker.PawnControl
                    !nearbyNeeders.Contains(frame) &&
                    !frame.IsForbidden(pawn) &&
                    pawn.CanReserve(frame);
+        }
+
+        #endregion
+
+        #region Thing-Based Helpers
+
+        /// <summary>
+        /// Basic validation for frame targets
+        /// </summary>
+        protected override bool ValidateConstructionTarget(Thing thing, Pawn pawn, bool forced = false)
+        {
+            // First perform base validation
+            if (!base.ValidateConstructionTarget(thing, pawn, forced))
+                return false;
+
+            // Add frame-specific validation if needed
+            Frame frame = thing as Frame;
+            if (frame == null)
+                return false;
+
+            // Check if frame still needs resources
+            if (frame.TotalMaterialCost().Count == 0)
+                return false;
+
+            return true;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset from parent
+            base.Reset();
+        }
+
+        #endregion
+
+        #region Utility
+
+        public override string ToString()
+        {
+            return "JobGiver_Construction_ConstructDeliverResourcesToFrames_PawnControl";
         }
 
         #endregion

@@ -14,21 +14,31 @@ namespace emitbreaker.PawnControl
     {
         #region Configuration
 
-        protected override float[] DistanceThresholds => new float[] { 225f, 400f, 625f }; // 15, 20, 25 tiles
-        private const int CACHE_UPDATE_INTERVAL = 180; // Update every 3 seconds
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "EmancipateSlave";
+
+        /// <summary>
+        /// Cache update interval in ticks (180 ticks = 3 seconds)
+        /// </summary>
+        protected override int CacheUpdateInterval => 180;
+
+        /// <summary>
+        /// Distance thresholds for bucketing (15, 20, 25 tiles squared)
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 225f, 400f, 625f };
 
         #endregion
 
         #region Static Resources
-        
+
         // Static string caching for better performance
         protected static string NotSupportedWithoutIdeologyTrans;
-        
-        #endregion
 
-        #region Initialization
-        
-        // Reset static strings when language changes
+        /// <summary>
+        /// Reset static strings when language changes
+        /// </summary>
         public static void ResetStaticData()
         {
             NotSupportedWithoutIdeologyTrans = "Requires Ideology DLC";
@@ -36,35 +46,23 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Core Flow
+        #region Core flow
 
-        public override bool ShouldSkip(Pawn pawn)
-        {
-            if (pawn == null || pawn.Dead || pawn.InMentalState)
-                return true;
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
-                return true;
-            // Skip if pawn is not a warden
-            if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
-                return true;
-            // Check if Ideology is active
-            if (!ModLister.CheckIdeology("Slave imprisonment"))
-                return true;
-            // Check if pawn is in a mental state
-            if (pawn.InMentalState)
-                return true;
-            return false;
-        }
-
+        /// <summary>
+        /// Gets base priority for the job giver
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
+            // Slave emancipation is moderately high priority
             return 6.5f;
         }
 
+        /// <summary>
+        /// Creates a job for the warden to emancipate a slave
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Ideology check is already done in ShouldSkip method, but keep it here for safety
+            // Ideology check is required for slave-related features
             if (!ModLister.CheckIdeology("Slave imprisonment"))
             {
                 return null;
@@ -74,34 +72,18 @@ namespace emitbreaker.PawnControl
                 pawn,
                 WorkTag,
                 (p, forced) => {
+                    // Process cached targets to create job
                     if (p?.Map == null) return null;
 
-                    // Update slave cache
-                    int lastUpdateTick = 0;
-                    if (_lastWardenCacheUpdate.ContainsKey(p.Map.uniqueID))
-                    {
-                        lastUpdateTick = _lastWardenCacheUpdate[p.Map.uniqueID];
-                    }
+                    // Get slaves from centralized cache system
+                    var slaves = GetOrCreatePrisonerCache(p.Map);
 
-                    UpdatePrisonerCache(
-                        p.Map,
-                        ref lastUpdateTick,
-                        CACHE_UPDATE_INTERVAL,
-                        _prisonerCache,
-                        _prisonerReachabilityCache,
-                        FilterEmancipationTargets
-                    );
-                    _lastWardenCacheUpdate[p.Map.uniqueID] = lastUpdateTick;
-
-                    // Process cached targets
-                    List<Thing> targets;
-                    if (_prisonerCache.TryGetValue(p.Map.uniqueID, out var slaveList) && slaveList != null)
+                    // Convert to Thing list for processing
+                    List<Thing> targets = new List<Thing>();
+                    foreach (Pawn slave in slaves)
                     {
-                        targets = new List<Thing>(slaveList.Cast<Thing>());
-                    }
-                    else
-                    {
-                        targets = new List<Thing>();
+                        if (slave != null && !slave.Dead && slave.Spawned && slave.IsSlave)
+                            targets.Add(slave);
                     }
 
                     return ProcessCachedTargets(p, targets, forced);
@@ -109,13 +91,65 @@ namespace emitbreaker.PawnControl
                 debugJobDesc: "emancipate slave");
         }
 
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        /// <summary>
+        /// Checks whether this job giver should be skipped for a pawn
+        /// </summary>
+        public override bool ShouldSkip(Pawn pawn)
         {
+            if (pawn == null || pawn.Dead || pawn.InMentalState)
+                return true;
+
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null)
+                return true;
+
+            // Skip if pawn is not a warden
+            if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
+                return true;
+
+            // Check if Ideology is active
+            if (!ModLister.CheckIdeology("Slave imprisonment"))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Determines if the job giver should execute based on cache status
+        /// </summary>
+        protected override bool ShouldExecuteNow(int mapId)
+        {
+            // Skip if Ideology is inactive
+            if (!ModLister.CheckIdeology("Slave imprisonment"))
+                return false;
+
+            // Check if there's any slaves on the map
+            Map map = Find.Maps.Find(m => m.uniqueID == mapId);
+            if (map == null || !map.mapPawns.SlavesOfColonySpawned.Any())
+                return false;
+
+            // Check if cache needs updating
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            return Find.TickManager.TicksGame > lastUpdateTick + CacheUpdateInterval;
+        }
+
+        #endregion
+
+        #region Prisoner Selection
+
+        /// <summary>
+        /// Get slaves that match the criteria for emancipation
+        /// </summary>
+        protected override IEnumerable<Pawn> GetPrisonersMatchingCriteria(Map map)
+        {
+            if (map == null)
+                yield break;
+
             // Only proceed if Ideology is active
             if (!ModLister.CheckIdeology("Slave imprisonment"))
-            {
                 yield break;
-            }
 
             // Return slaves marked for emancipation
             foreach (var slave in map.mapPawns.AllPawnsSpawned)
@@ -127,28 +161,6 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            // Only proceed if Ideology is active
-            if (!ModLister.CheckIdeology("Slave imprisonment"))
-            {
-                return null;
-            }
-            
-            foreach (var target in targets)
-            {
-                if (target is Pawn slave && ValidateCanEmancipate(slave, pawn))
-                {
-                    return CreateEmancipationJob(pawn, slave);
-                }
-            }
-            return null;
-        }
-        
-        #endregion
-
-        #region Target Filtering
-        
         /// <summary>
         /// Filter function to identify slaves marked for emancipation
         /// </summary>
@@ -160,15 +172,19 @@ namespace emitbreaker.PawnControl
 
             // Only include slaves explicitly marked for emancipation
             return slave.guest.slaveInteractionMode == SlaveInteractionModeDefOf.Emancipate &&
-                   !slave.Downed && 
+                   !slave.Downed &&
                    slave.Awake();
         }
 
         /// <summary>
         /// Validates if a warden can emancipate a specific slave
         /// </summary>
-        private bool ValidateCanEmancipate(Pawn slave, Pawn warden)
+        protected override bool IsValidPrisonerTarget(Pawn slave, Pawn warden)
         {
+            // First check base class validation
+            if (!base.IsValidPrisonerTarget(slave, warden))
+                return false;
+
             // Skip if slave status changed
             if (slave?.guest == null ||
                 !slave.IsSlave ||
@@ -184,11 +200,19 @@ namespace emitbreaker.PawnControl
 
             return true;
         }
-        
+
+        /// <summary>
+        /// Create a job for the given slave
+        /// </summary>
+        protected override Job CreateJobForPrisoner(Pawn warden, Pawn slave, bool forced)
+        {
+            return CreateEmancipationJob(warden, slave);
+        }
+
         #endregion
 
-        #region Job Creation
-        
+        #region Job creation
+
         /// <summary>
         /// Creates the emancipation job for the warden
         /// </summary>
@@ -204,11 +228,11 @@ namespace emitbreaker.PawnControl
 
             return job;
         }
-        
+
         #endregion
 
         #region Validation
-        
+
         /// <summary>
         /// Check if the pawn should take care of a slave (ported from WorkGiver_Warden)
         /// </summary>
@@ -222,29 +246,32 @@ namespace emitbreaker.PawnControl
                    pawnSlave.guest != null &&
                    warden.CanReach(pawnSlave, PathEndMode.OnCell, Danger.Some);
         }
-        
+
         #endregion
 
         #region Cache Management
-        
+
         /// <summary>
         /// Reset caches when loading game or changing maps
         /// </summary>
-        public static new void ResetCache()
+        public static void ResetEmancipateSlaveCache()
         {
             ResetWardenCache();
             ResetStaticData();
         }
-        
+
         #endregion
 
-        #region Object Information
-        
+        #region Debug
+
+        /// <summary>
+        /// For debugging purposes
+        /// </summary>
         public override string ToString()
         {
             return "JobGiver_Warden_EmancipateSlave_PawnControl";
         }
-        
+
         #endregion
     }
 }

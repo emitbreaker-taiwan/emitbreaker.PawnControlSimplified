@@ -37,6 +37,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
 
+        /// <summary>
+        /// The job to create when a valid target is found - for refueling,
+        /// this is determined dynamically based on the target's atomicFueling property
+        /// </summary>
+        protected override JobDef WorkJobDef => JobDefOf.Refuel;
+
         #endregion
 
         #region Core flow
@@ -47,90 +53,44 @@ namespace emitbreaker.PawnControl
             return 5.8f;
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_Refuel_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Use the shared cache updating logic from base class
-                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastHaulingCacheUpdate[mapId] = now;
-                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    // Get refuelable buildings from shared cache
-                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
-                        return null;
-
-                    // Use the bucketing system to find the closest valid refuelable building
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        haulables,
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Find the best building to refuel
-                    Thing targetBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, worker) => IsValidRefuelTarget(thing, worker),
-                        _reachabilityCache);
-
-                    // Create job if target found
-                    if (targetBuilding != null)
-                    {
-                        CompRefuelable refuelable = targetBuilding.TryGetComp<CompRefuelable>();
-                        if (refuelable != null)
-                        {
-                            // Determine job type based on atomicFueling flag
-                            JobDef jobDef = refuelable.Props.atomicFueling ?
-                                JobDefOf.RefuelAtomic : JobDefOf.Refuel;
-
-                            Job job = JobMaker.MakeJob(jobDef, targetBuilding);
-                            Utility_DebugManager.LogNormal($"{p.LabelShort} created job to refuel {targetBuilding.LabelCap}");
-                            return job;
-                        }
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
-        }
-
+        /// <summary>
+        /// Process cached targets to find a valid refueling job
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Iterate through the cached targets to find a valid refuelable building
-            foreach (var target in targets)
-            {
-                if (IsValidRefuelTarget(target, pawn))
-                {
-                    CompRefuelable refuelable = target.TryGetComp<CompRefuelable>();
-                    if (refuelable != null)
-                    {
-                        // Determine job type based on atomicFueling flag
-                        JobDef jobDef = refuelable.Props.atomicFueling ? JobDefOf.RefuelAtomic : JobDefOf.Refuel;
+            if (targets == null || targets.Count == 0)
+                return null;
 
-                        Job job = JobMaker.MakeJob(jobDef, target);
-                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel {target.LabelCap}");
-                        return job;
-                    }
+            // Use the bucketing system to find the closest valid refuelable building
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                targets,
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find the best building to refuel using the centralized cache system
+            Thing targetBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (thing, worker) => IsValidRefuelTarget(thing, worker),
+                null); // Let the parent class handle reachability caching
+
+            // Create job if target found
+            if (targetBuilding != null)
+            {
+                CompRefuelable refuelable = targetBuilding.TryGetComp<CompRefuelable>();
+                if (refuelable != null)
+                {
+                    // Determine job type based on atomicFueling flag
+                    JobDef jobDef = refuelable.Props.atomicFueling ?
+                        JobDefOf.RefuelAtomic : JobDefOf.Refuel;
+
+                    Job job = JobMaker.MakeJob(jobDef, targetBuilding);
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel {targetBuilding.LabelCap}");
+                    return job;
                 }
             }
 
-            // Return null if no valid target is found
             return null;
         }
 

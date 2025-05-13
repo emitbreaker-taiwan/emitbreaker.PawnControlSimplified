@@ -10,126 +10,56 @@ namespace emitbreaker.PawnControl
     /// Plant‐cutting JobGiver with minimal overrides:
     /// uses the standard TryGiveJob wrapper, a cache, and nearest‐plant selection.
     /// </summary>
-    public class JobGiver_PlantCutting_PlantsCut_PawnControl : JobGiver_Scan_PawnControl
+    public class JobGiver_PlantCutting_PlantsCut_PawnControl : JobGiver_PlantCutting_PawnControl
     {
-        #region Overrides
+        #region Configuration
 
         /// <summary>
-        /// Whether this job giver requires a designator to operate (zone designation, etc.)
-        /// Most cleaning jobs require designators so default is true
+        /// Human-readable name for debug logging
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        protected override string DebugName => "PlantsCut";
 
-        protected override JobDef WorkJobDef => JobDefOf.CutPlant;
+        #endregion
 
-        protected override string WorkTag => "PlantCutting";
-        protected override int CacheUpdateInterval => 500;
+        #region Core flow
 
-        protected override IEnumerable<Thing> GetTargets(Map map)
-        {
-            return GetPlantsNeedingCutting(map).Cast<Thing>();
-        }
-
+        /// <summary>
+        /// Override TryGiveJob to implement the standard pattern
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Use the StandardTryGiveJob pattern directly
             return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
                 pawn,
-                "PlantCutting",  // Make sure this matches the name in the WorkTypeDef
+                WorkTag,
                 (p, forced) => {
-                    // Get plants that need cutting
+                    // Use the centralized cache system from the parent class
                     List<Thing> targets = GetTargets(p.Map).ToList();
                     if (targets.Count == 0) return null;
 
-                    // Find the best plant to cut (nearest one that passes validation)
-                    Plant best = null;
-                    float bestDistSq = float.MaxValue;
-
-                    foreach (var plant in targets.OfType<Plant>())
-                    {
-                        if (!ValidatePlantTarget(plant, p))
-                            continue;
-
-                        float distSq = (plant.Position - p.Position).LengthHorizontalSquared;
-                        if (distSq < bestDistSq)
-                        {
-                            bestDistSq = distSq;
-                            best = plant;
-                        }
-                    }
-
-                    return best != null
-                        ? JobMaker.MakeJob(WorkJobDef, best)
-                        : null;
+                    // Use the parent's efficient target processing
+                    return ProcessCachedTargets(p, targets, forced);
                 },
                 debugJobDesc: "plant cutting assignment");
-        }
-
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            // Find the best plant to cut (nearest one that passes validation)
-            Plant best = null;
-            float bestDistSq = float.MaxValue;
-
-            foreach (var plant in targets.OfType<Plant>())
-            {
-                if (!ValidatePlantTarget(plant, pawn))
-                    continue;
-
-                float distSq = (plant.Position - pawn.Position).LengthHorizontalSquared;
-                if (distSq < bestDistSq)
-                {
-                    bestDistSq = distSq;
-                    best = plant;
-                }
-            }
-
-            return best != null
-                ? JobMaker.MakeJob(WorkJobDef, best)
-                : null;
         }
 
         #endregion
 
         #region Plant‐selection helpers
 
-        private IEnumerable<Plant> GetPlantsNeedingCutting(Map map)
+        /// <summary>
+        /// Implementation uses the base class's GetPlantsNeedingCutting method
+        /// which already has the correct logic for finding plants to cut
+        /// </summary>
+        protected override IEnumerable<Plant> GetPlantsNeedingCutting(Map map)
         {
-            var plants = new List<Plant>();
-
-            // 1) designated Cut/Harvest
-            foreach (var des in map.designationManager.AllDesignations)
-            {
-                if ((des.def == DesignationDefOf.CutPlant || des.def == DesignationDefOf.HarvestPlant)
-                    && des.target.Thing is Plant p)
-                {
-                    plants.Add(p);
-                }
-            }
-
-            // 2) zone‐based cutting
-            foreach (var zone in map.zoneManager.AllZones.OfType<Zone_Growing>())
-            {
-                if (!zone.allowCut) continue;
-                ThingDef growDef = zone.GetPlantDefToGrow();
-
-                foreach (var cell in zone.Cells)
-                {
-                    var plant = cell.GetPlant(map);
-                    if (plant != null
-                        && !plants.Contains(plant)
-                        && (growDef == null || plant.def != growDef))
-                    {
-                        plants.Add(plant);
-                    }
-                }
-            }
-
-            // 3) cap to 200 entries
-            return plants.Count > 200 ? plants.Take(200) : plants;
+            // Use the parent class implementation which has the same logic
+            return base.GetPlantsNeedingCutting(map);
         }
 
-        private bool ValidatePlantTarget(Plant plant, Pawn pawn)
+        /// <summary>
+        /// Implement the validation logic specifically for cutting plants
+        /// </summary>
+        protected override bool ValidatePlantTarget(Plant plant, Pawn pawn)
         {
             if (plant == null || plant.Destroyed || !plant.Spawned)
                 return false;
@@ -140,25 +70,25 @@ namespace emitbreaker.PawnControl
 
             if (isDesignated)
             {
-                if (pawn.Faction != Faction.OfPlayer)
+                if (RequiresPlayerFaction && pawn.Faction != Faction.OfPlayer)
                     return false;
             }
             else
             {
                 var zone = pawn.Map.zoneManager.ZoneAt(plant.Position) as Zone_Growing;
-                if (zone == null || !zone.allowCut || pawn.Faction != Faction.OfPlayer)
+                if (zone == null || !zone.allowCut || (RequiresPlayerFaction && pawn.Faction != Faction.OfPlayer))
                     return false;
             }
 
             if (plant.IsForbidden(pawn) || !PlantUtility.PawnWillingToCutPlant_Job(plant, pawn))
                 return false;
 
-            return pawn.CanReserve(plant, 1, -1);
+            return pawn.CanReserve((LocalTargetInfo)plant, 1, -1);
         }
 
         #endregion
 
-        #region Utility
+        #region Debug
 
         public override string ToString()
         {

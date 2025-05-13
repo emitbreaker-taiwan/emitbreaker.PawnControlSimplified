@@ -26,7 +26,7 @@ namespace emitbreaker.PawnControl
         /// The job to create when a valid target is found
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.RemoveRoof;
-        protected override string WorkTag => "Construction";
+        public override string WorkTag => "Construction";
         protected override int CacheUpdateInterval => 250; // Update every ~4 seconds
         protected override string DebugName => "roof removal assignment";
 

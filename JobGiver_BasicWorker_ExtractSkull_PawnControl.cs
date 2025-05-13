@@ -17,7 +17,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Use Hauling work tag
         /// </summary>
-        protected override string WorkTag => "Hauling";
+        public override string WorkTag => "BasicWorker";
 
         /// <summary>
         /// Human-readable name for debug logging 
@@ -41,7 +41,7 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Target Selection
+        #region Target selection
 
         /// <summary>
         /// Override GetTargets to filter corpses that have heads
@@ -82,7 +82,7 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Job Creation
+        #region Core flow
 
         /// <summary>
         /// Override CreateBasicWorkerJob to add Ideology-specific checks
@@ -97,9 +97,25 @@ namespace emitbreaker.PawnControl
             return base.CreateBasicWorkerJob(pawn, targets, forced);
         }
 
+        /// <summary>
+        /// Override AreMapRequirementsMet to add additional check that ModsConfig supports this task
+        /// </summary>
+        protected override bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // First check base requirements
+            if (!base.AreMapRequirementsMet(pawn))
+                return false;
+
+            // Check if Ideology is required but not active
+            if (!ModsConfig.IdeologyActive && !ModsConfig.AnomalyActive)
+                return false;
+
+            return true;
+        }
+
         #endregion
 
-        #region Ideology Compatibility
+        #region Ideology compatibility
 
         /// <summary>
         /// Checks if the pawn can extract skulls based on ideology requirements

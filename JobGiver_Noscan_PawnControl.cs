@@ -48,7 +48,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.Unknown;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.Unknown;
 
         /// <summary>
         /// Checks if a non-humanlike pawn has the required capabilities for this job giver
@@ -82,7 +82,7 @@ namespace emitbreaker.PawnControl
             if (RequiredTag != PawnEnumTags.Unknown && !modExtension.tags.Contains(RequiredTag.ToString()))
                 return false;
 
-            if (modExtension.tags.Contains(PawnEnumTags.BlockWork_Construction.ToString()))
+            if (modExtension.tags.Contains(ManagedTags.BlockWorkPrefix + WorkTag))
                 return false;
 
             return true;
@@ -100,19 +100,33 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Caching
+        #region Cache System
 
         /// <summary>
-        /// Last update tick for caches
+        /// Constructor that initializes the cache system
         /// </summary>
-        protected static readonly Dictionary<int, int> _lastCacheUpdateTick = new Dictionary<int, int>();
+        public JobGiver_Noscan_PawnControl()
+        {
+            // Register this job giver type with the cache manager
+            InitializeCache<Thing>();
+        }
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use base class Reset implementation, which will use the job giver type
+            // to reset only this job giver's cache
+            base.Reset();
+        }
 
         #endregion
 
         #region Core flow
 
         /// <summary>
-        /// Creates a job without scanning for targets, using specialized non-scan methods
+        /// Template method for creating a job that handles cache update logic
         /// </summary>
         protected override Job CreateJobFor(Pawn pawn, bool forced)
         {
@@ -126,15 +140,47 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Update specialized caches if needed
-            if (!_lastCacheUpdateTick.TryGetValue(mapId, out int last)
-                || now - last >= CacheUpdateInterval)
+            if (ShouldUpdateCache(mapId))
             {
-                _lastCacheUpdateTick[mapId] = now;
+                // Call specialized cache update method
                 UpdateSpecializedCache(pawn.Map, now);
+
+                // Mark cache as updated via parent class mechanism
+                UpdateCache(mapId, pawn.Map);
             }
 
             // Delegate to derived class to create the job from specialized cache
             return CreateJobFromSpecializedCache(pawn, forced);
+        }
+
+        /// <summary>
+        /// For no-scan job givers, returns empty since we don't use the standard cache system
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Non-scan job givers don't use the standard cache method
+            // but they do need to mark the cache as updated
+            return Enumerable.Empty<Thing>();
+        }
+
+        /// <summary>
+        /// Gets targets for this job giver - for backward compatibility with base class
+        /// For no-scan job givers, returns empty since we don't use the standard GetTargets approach
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // Non-scan job givers don't use the standard GetTargets method
+            return Enumerable.Empty<Thing>();
+        }
+
+        /// <summary>
+        /// Processes cached targets to find a valid job - not used in no-scan job givers
+        /// but required by base class. We delegate to CreateJobFromSpecializedCache instead.
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // Non-scan job givers use CreateJobFromSpecializedCache instead
+            return null;
         }
 
         #endregion
@@ -150,18 +196,6 @@ namespace emitbreaker.PawnControl
         /// Creates a job using specialized caches or non-scan methods
         /// </summary>
         protected abstract Job CreateJobFromSpecializedCache(Pawn pawn, bool forced);
-
-        #endregion
-
-        #region Cache management
-
-        /// <summary>
-        /// Reset all caches for this class
-        /// </summary>
-        public static void ResetCache()
-        {
-            _lastCacheUpdateTick.Clear();
-        }
 
         #endregion
     }

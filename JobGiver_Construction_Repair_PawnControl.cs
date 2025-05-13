@@ -11,21 +11,9 @@ namespace emitbreaker.PawnControl
     /// JobGiver that allows pawns to repair damaged buildings belonging to their faction.
     /// Uses the Construction work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Construction_Repair_PawnControl : JobGiver_Scan_PawnControl
+    public class JobGiver_Construction_Repair_PawnControl : JobGiver_Construction_PawnControl
     {
-        #region Overrides
-
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
-
-        // Translation strings
-        private static string NotInHomeAreaTrans;
-
-        /// <summary>
-        /// Whether this job giver requires a designator to operate (zone designation, etc.)
-        /// Most cleaning jobs require designators so default is true
-        /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        #region Configuration
 
         /// <summary>
         /// The job to create when a valid target is found
@@ -33,14 +21,49 @@ namespace emitbreaker.PawnControl
         protected override JobDef WorkJobDef => JobDefOf.Repair;
 
         /// <summary>
-        /// Use Construction work tag
+        /// Human-readable name for debug logging
         /// </summary>
-        protected override string WorkTag => "Construction";
+        protected override string DebugName => "building repair assignment";
 
         /// <summary>
-        /// Override cache update interval for repair jobs
+        /// Whether this job giver requires a designator to operate
+        /// Repairs don't require specific designations
         /// </summary>
-        protected override int CacheUpdateInterval => 180; // Update every 3 seconds
+        protected override bool RequiresDesignator => false;
+
+        /// <summary>
+        /// Whether this job giver requires map zone or area
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// Repair requires player faction for home area restrictions
+        /// </summary>
+        protected override bool RequiresPlayerFaction => true;
+
+        /// <summary>
+        /// Update cache every 3 seconds for repair jobs
+        /// </summary>
+        protected override int CacheUpdateInterval => 180;
+
+        // Translation strings
+        private static string NotInHomeAreaTrans;
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_Repair_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
 
         /// <summary>
         /// Repairing is fairly important
@@ -48,6 +71,38 @@ namespace emitbreaker.PawnControl
         protected override float GetBasePriority(string workTag)
         {
             return 5.8f;
+        }
+
+        /// <summary>
+        /// Checks if the map meets requirements for repair jobs
+        /// </summary>
+        protected override bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // Quick check if there are any buildings to repair
+            if (pawn?.Map == null || pawn.Faction == null)
+                return false;
+
+            try
+            {
+                return pawn.Map.listerBuildingsRepairable.RepairableBuildings(pawn.Faction).Count > 0;
+            }
+            catch (System.Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error checking repairable buildings: {ex.Message}");
+                return false;
+            }
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method that implements specialized target collection logic
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            return GetTargets(map);
         }
 
         /// <summary>
@@ -85,136 +140,145 @@ namespace emitbreaker.PawnControl
             }
         }
 
+        #endregion
+
+        #region Job Creation
+
         /// <summary>
-        /// Override TryGiveJob to use StandardTryGiveJob pattern
+        /// Implement to create the specific construction job for repairs
         /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
         {
-            // Quick check if there are any buildings to repair
             if (pawn?.Map == null || pawn.Faction == null)
                 return null;
 
-            try
+            int mapId = pawn.Map.uniqueID;
+
+            // Get targets from the cache
+            List<Thing> cachedTargets = GetCachedTargets(mapId);
+            List<Thing> repairableBuildings;
+
+            // If cache is empty or not yet populated
+            if (cachedTargets == null || cachedTargets.Count == 0)
             {
-                if (pawn.Map.listerBuildingsRepairable.RepairableBuildings(pawn.Faction).Count == 0)
-                    return null;
-            }
-            catch (System.Exception ex)
-            {
-                Utility_DebugManager.LogError($"Error checking repairable buildings: {ex.Message}");
-                return null;
-            }
-
-            return Utility_JobGiverManager.StandardTryGiveJob<Building>(
-                pawn,
-                "Construction",
-                (p, forced) => {
-                    if (p?.Map == null || p.Faction == null) return null;
-
-                    // Get buildings that need repairs
-                    List<Thing> repairableBuildings = GetTargets(p.Map).ToList();
-                    if (repairableBuildings.Count == 0) return null;
-
-                    // Use JobGiverManager for distance bucketing and target selection
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        repairableBuildings,
-                        (building) => (building.Position - p.Position).LengthHorizontalSquared,
-                        DISTANCE_THRESHOLDS
-                    );
-
-                    // Dictionary for tracking reachability checks - create a properly typed dictionary
-                    int mapId = p.Map.uniqueID;
-                    Dictionary<int, Dictionary<Thing, bool>> reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-                    reachabilityCache[mapId] = new Dictionary<Thing, bool>();
-
-                    // Find the best building to repair
-                    Thing bestBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (building, actor) => { // Changed parameter name from 'pawn' to 'actor' to avoid naming conflict
-                            // IMPORTANT: Check faction interaction validity first
-                            if (!Utility_JobGiverManager.IsValidFactionInteraction(building, actor, requiresDesignator: false))
-                                return false;
-
-                            // Skip if no longer valid
-                            if (building == null || building.Destroyed || !building.Spawned)
-                                return false;
-
-                            // Skip if already at max health
-                            if (building.HitPoints >= building.MaxHitPoints)
-                                return false;
-
-                            // Skip if outside home area for player pawns
-                            if (actor.Faction == Faction.OfPlayer && !actor.Map.areaManager.Home[building.Position])
-                            {
-                                JobFailReason.Is(NotInHomeAreaTrans);
-                                return false;
-                            }
-
-                            // Skip if forbidden or burning or unreachable
-                            if (building.IsForbidden(actor) ||
-                                building.IsBurning() ||
-                                !actor.CanReserve(building, 1, -1, null, forced) ||
-                                !actor.CanReach(building, PathEndMode.Touch, Danger.Deadly))
-                                return false;
-
-                            // Skip if has a deconstruct or mine designation
-                            if (building.Map.designationManager.DesignationOn(building, DesignationDefOf.Deconstruct) != null)
-                                return false;
-
-                            if (building.def.mineable &&
-                                (building.Map.designationManager.DesignationAt(building.Position, DesignationDefOf.Mine) != null ||
-                                 building.Map.designationManager.DesignationAt(building.Position, DesignationDefOf.MineVein) != null))
-                                return false;
-
-                            return true;
-                        },
-                        reachabilityCache
-                    );
-
-                    // Create job if target found
-                    if (bestBuilding != null)
-                    {
-                        Job job = JobMaker.MakeJob(WorkJobDef, bestBuilding);
-
-                        if (Prefs.DevMode)
-                        {
-                            Utility_DebugManager.LogNormal($"{p.LabelShort} created job to repair {bestBuilding.LabelCap} ({bestBuilding.HitPoints}/{bestBuilding.MaxHitPoints})");
-                        }
-
-                        return job;
-                    }
-
-                    return null;
-                },
-                debugJobDesc: "building repair assignment");
-        }
-
-        /// <summary>
-        /// Process cached targets to create a repair job for the pawn.
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            if (targets == null || targets.Count == 0)
-                return null;
-
-            // Find the best target to repair
-            foreach (var target in targets)
-            {
-                if (target is Building building && building.HitPoints < building.MaxHitPoints)
+                // Try to update cache if needed
+                if (ShouldUpdateCache(mapId))
                 {
-                    if (pawn.CanReserveAndReach(building, PathEndMode.Touch, Danger.Deadly, 1, -1, null, forced))
-                    {
-                        return JobMaker.MakeJob(WorkJobDef, building);
-                    }
+                    UpdateCache(mapId, pawn.Map);
+                    cachedTargets = GetCachedTargets(mapId);
                 }
+
+                // If still empty, get targets directly
+                if (cachedTargets == null || cachedTargets.Count == 0)
+                {
+                    repairableBuildings = GetTargets(pawn.Map).ToList();
+                }
+                else
+                {
+                    repairableBuildings = cachedTargets;
+                }
+            }
+            else
+            {
+                repairableBuildings = cachedTargets;
+            }
+
+            if (repairableBuildings.Count == 0)
+                return null;
+
+            // Use JobGiverManager for distance bucketing
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                repairableBuildings,
+                (building) => (building.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds
+            );
+
+            // Find the best building to repair - let JobGiverManager handle reachability caching internally
+            Thing bestBuilding = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (building, actor) => ValidateConstructionTarget(building, actor, forced),
+                null  // Pass null to use the centralized caching system
+            );
+
+            // Create job if target found
+            if (bestBuilding != null)
+            {
+                Job job = JobMaker.MakeJob(WorkJobDef, bestBuilding);
+
+                if (Prefs.DevMode)
+                {
+                    Building bldg = bestBuilding as Building;
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to repair {bestBuilding.LabelCap} ({bldg?.HitPoints}/{bldg?.MaxHitPoints})");
+                }
+
+                return job;
             }
 
             return null;
         }
 
         #endregion
+
+        #region Thing-Based Helpers
+
+        /// <summary>
+        /// Basic validation for repair targets
+        /// </summary>
+        protected override bool ValidateConstructionTarget(Thing thing, Pawn pawn, bool forced = false)
+        {
+            // First perform base validation
+            if (!base.ValidateConstructionTarget(thing, pawn, forced))
+                return false;
+
+            Building building = thing as Building;
+            if (building == null)
+                return false;
+
+            // Skip if already at max health
+            if (building.HitPoints >= building.MaxHitPoints)
+                return false;
+
+            // Skip if outside home area for player pawns
+            if (pawn.Faction == Faction.OfPlayer && !pawn.Map.areaManager.Home[building.Position])
+            {
+                JobFailReason.Is(NotInHomeAreaTrans);
+                return false;
+            }
+
+            // Skip if has a deconstruct or mine designation
+            if (building.Map.designationManager.DesignationOn(building, DesignationDefOf.Deconstruct) != null)
+                return false;
+
+            if (building.def.mineable &&
+                (building.Map.designationManager.DesignationAt(building.Position, DesignationDefOf.Mine) != null ||
+                 building.Map.designationManager.DesignationAt(building.Position, DesignationDefOf.MineVein) != null))
+                return false;
+
+            // Skip if burning
+            if (building.IsBurning())
+                return false;
+
+            return true;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset from parent
+            base.Reset();
+        }
+
+        #endregion
+
+        #region Utility
 
         /// <summary>
         /// Initialize static data
@@ -224,12 +288,11 @@ namespace emitbreaker.PawnControl
             NotInHomeAreaTrans = "NotInHomeArea".Translate();
         }
 
-        /// <summary>
-        /// Custom ToString implementation for debugging
-        /// </summary>
         public override string ToString()
         {
             return "JobGiver_Repair_PawnControl";
         }
+
+        #endregion
     }
 }

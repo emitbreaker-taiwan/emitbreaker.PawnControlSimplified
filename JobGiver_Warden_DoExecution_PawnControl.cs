@@ -15,8 +15,20 @@ namespace emitbreaker.PawnControl
     {
         #region Configuration
 
-        protected override float[] DistanceThresholds => new float[] { 400f, 1600f, 2500f }; // 20, 40, 50 tiles
-        private const int CACHE_UPDATE_INTERVAL = 180; // Update every 3 seconds
+        /// <summary>
+        /// Human-readable name for debug logging 
+        /// </summary>
+        protected override string DebugName => "DoExecution";
+
+        /// <summary>
+        /// Cache update interval in ticks (180 ticks = 3 seconds)
+        /// </summary>
+        protected override int CacheUpdateInterval => 180;
+
+        /// <summary>
+        /// Distance thresholds for bucketing (20, 40, 50 tiles squared)
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 400f, 1600f, 2500f };
 
         #endregion
 
@@ -25,11 +37,9 @@ namespace emitbreaker.PawnControl
         // Static string caching for better performance
         private static string IncapableOfViolenceLowerTrans;
 
-        #endregion
-
-        #region Initialization
-
-        // Reset static strings when language changes
+        /// <summary>
+        /// Reset static strings when language changes
+        /// </summary>
         public static void ResetStaticData()
         {
             IncapableOfViolenceLowerTrans = "IncapableOfViolenceLower".Translate();
@@ -37,18 +47,20 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Job Priority
+        #region Core flow
 
+        /// <summary>
+        /// Gets base priority for the job giver
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             // Higher priority than basic tasks but lower than emergency tasks
             return 7.0f;
         }
 
-        #endregion
-
-        #region Core Flow
-
+        /// <summary>
+        /// Creates a job for the warden to execute a prisoner
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Check if pawn can do violent work first
@@ -62,34 +74,18 @@ namespace emitbreaker.PawnControl
                 pawn,
                 WorkTag,
                 (p, forced) => {
+                    // Process cached targets to create job
                     if (p?.Map == null) return null;
 
-                    // Update prisoner cache
-                    int lastUpdateTick = 0;
-                    if (_lastWardenCacheUpdate.ContainsKey(p.Map.uniqueID))
-                    {
-                        lastUpdateTick = _lastWardenCacheUpdate[p.Map.uniqueID];
-                    }
+                    // Get prisoners from centralized cache system
+                    var prisoners = GetOrCreatePrisonerCache(p.Map);
 
-                    UpdatePrisonerCache(
-                        p.Map,
-                        ref lastUpdateTick,
-                        CACHE_UPDATE_INTERVAL,
-                        _prisonerCache,
-                        _prisonerReachabilityCache,
-                        FilterExecutionTargets
-                    );
-                    _lastWardenCacheUpdate[p.Map.uniqueID] = lastUpdateTick;
-
-                    // Process cached targets
-                    List<Thing> targets;
-                    if (_prisonerCache.TryGetValue(p.Map.uniqueID, out var prisonerList) && prisonerList != null)
+                    // Convert to Thing list for processing
+                    List<Thing> targets = new List<Thing>();
+                    foreach (Pawn prisoner in prisoners)
                     {
-                        targets = new List<Thing>(prisonerList.Cast<Thing>());
-                    }
-                    else
-                    {
-                        targets = new List<Thing>();
+                        if (prisoner != null && !prisoner.Dead && prisoner.Spawned)
+                            targets.Add(prisoner);
                     }
 
                     return ProcessCachedTargets(p, targets, forced);
@@ -97,28 +93,66 @@ namespace emitbreaker.PawnControl
                 debugJobDesc: "execute prisoner");
         }
 
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        /// <summary>
+        /// Checks whether this job giver should be skipped for a pawn
+        /// </summary>
+        public override bool ShouldSkip(Pawn pawn)
         {
-            // Assuming prisoners are the targets for this job
-            foreach (var prisoner in map.mapPawns.PrisonersOfColony)
+            if (pawn == null || pawn.Dead || pawn.InMentalState)
+                return true;
+
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null)
+                return true;
+
+            // Skip if pawn is not a warden
+            if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
+                return true;
+
+            // Skip if pawn can't do violent work
+            if (pawn.WorkTagIsDisabled(WorkTags.Violent))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Determines if the job giver should execute based on cache status
+        /// </summary>
+        protected override bool ShouldExecuteNow(int mapId)
+        {
+            // Check if there's any prisoners of the colony on the map
+            Map map = Find.Maps.Find(m => m.uniqueID == mapId);
+            if (map == null || map.mapPawns.PrisonersOfColonySpawnedCount == 0)
+                return false;
+
+            // Check if cache needs updating
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            return Find.TickManager.TicksGame > lastUpdateTick + CacheUpdateInterval;
+        }
+
+        #endregion
+
+        #region Prisoner Selection
+
+        /// <summary>
+        /// Get prisoners that match the criteria for execution
+        /// </summary>
+        protected override IEnumerable<Pawn> GetPrisonersMatchingCriteria(Map map)
+        {
+            if (map == null)
+                yield break;
+
+            // Get all prisoner pawns on the map marked for execution
+            foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
             {
                 if (FilterExecutionTargets(prisoner))
                 {
                     yield return prisoner;
                 }
             }
-        }
-
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            foreach (var target in targets)
-            {
-                if (target is Pawn prisoner && ValidateCanExecute(prisoner, pawn))
-                {
-                    return CreateExecutionJob(pawn, prisoner);
-                }
-            }
-            return null;
         }
 
         /// <summary>
@@ -138,8 +172,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Validates if a warden can execute a specific prisoner
         /// </summary>
-        private bool ValidateCanExecute(Pawn prisoner, Pawn warden)
+        protected override bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden)
         {
+            // First check base class validation
+            if (!base.IsValidPrisonerTarget(prisoner, warden))
+                return false;
+
             // Skip if interaction mode changed
             if (prisoner?.guest == null ||
                 prisoner.guest.ExclusiveInteractionMode != PrisonerInteractionModeDefOf.Execution ||
@@ -154,9 +192,18 @@ namespace emitbreaker.PawnControl
 
             return true;
         }
+
+        /// <summary>
+        /// Create a job for the given prisoner
+        /// </summary>
+        protected override Job CreateJobForPrisoner(Pawn warden, Pawn prisoner, bool forced)
+        {
+            return CreateExecutionJob(warden, prisoner);
+        }
+
         #endregion
 
-        #region Job Creation
+        #region Job creation
 
         /// <summary>
         /// Creates the execution job for the warden
@@ -230,13 +277,19 @@ namespace emitbreaker.PawnControl
         {
             ResetStaticData();
         }
+
         #endregion
 
-        #region Object Information
+        #region Debug
+
+        /// <summary>
+        /// For debugging purposes
+        /// </summary>
         public override string ToString()
         {
             return "JobGiver_Warden_DoExecution_PawnControl";
         }
+
         #endregion
     }
 }

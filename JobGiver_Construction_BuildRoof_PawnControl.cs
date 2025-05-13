@@ -15,45 +15,69 @@ namespace emitbreaker.PawnControl
     {
         #region Configuration
 
-        protected override int CacheUpdateInterval => 250; // Update every ~4 seconds
+        /// <summary>
+        /// Cache update interval - update every ~4 seconds
+        /// </summary>
+        protected override int CacheUpdateInterval => 250;
+
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
         protected override string DebugName => "roof building assignment";
 
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
-        /// Most cleaning jobs require designators so default is true
         /// </summary>
         protected override bool RequiresMapZoneorArea => true;
 
-        // Only player faction can build roofs
+        /// <summary>
+        /// Whether this job giver requires player faction specifically
+        /// </summary>
         protected override bool RequiresPlayerFaction => true;
+
+        /// <summary>
+        /// The designation type this job giver handles - not used for roof building
+        /// </summary>
+        protected override DesignationDef TargetDesignation => null;
 
         /// <summary>
         /// The job to create when a valid target is found
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.BuildRoof;
 
-        // Distance thresholds for bucketing - slightly larger for roof building
+        /// <summary>
+        /// Distance thresholds for bucketing - slightly larger for roof building
+        /// </summary>
         protected override float[] DistanceThresholds => new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
 
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_BuildRoof_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
+
+        /// <summary>
+        /// Quick check if there are roof building areas on the map before executing
+        /// </summary>
         protected override bool ShouldExecuteNow(int mapId)
         {
+            // Check base conditions first
+            if (!base.ShouldExecuteNow(mapId))
+                return false;
+
             // Quick check if there are roof building areas on the map
             var map = Find.Maps.FirstOrDefault(m => m.uniqueID == mapId);
             return map != null && map.areaManager.BuildRoof != null && map.areaManager.BuildRoof.TrueCount > 0;
-        }
-
-        protected override IEnumerable<Thing> GetTargets(Map map)
-        {
-            // This job works with IntVec3 cells rather than Things
-            return Enumerable.Empty<Thing>();
-        }
-
-        /// <summary>
-        /// Whether this job uses thing targets or cell-based targets
-        /// </summary>
-        protected override bool RequiresThingTargets()
-        {
-            return false; // Uses cell-based targets instead
         }
 
         /// <summary>
@@ -67,11 +91,48 @@ namespace emitbreaker.PawnControl
                    pawn.Map.areaManager.BuildRoof.TrueCount > 0;
         }
 
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method for roof building cells
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Roof building doesn't have Thing targets, so return an empty collection
+            return Enumerable.Empty<Thing>();
+        }
+
+        /// <summary>
+        /// This job works with IntVec3 cells rather than Things
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            // Roof building doesn't have Thing targets, so return an empty collection
+            return Enumerable.Empty<Thing>();
+        }
+
+        /// <summary>
+        /// Whether this job uses thing targets or cell-based targets
+        /// </summary>
+        protected override bool RequiresThingTargets()
+        {
+            return false; // Uses cell-based targets instead
+        }
+
+        #endregion
+
+        #region Job Creation
+
         /// <summary>
         /// Creates a roof building job for the pawn
         /// </summary>
         protected override Job CreateConstructionJob(Pawn pawn, bool forced)
         {
+            if (pawn?.Map == null)
+                return null;
+
             // Get cells that need roofs built
             List<IntVec3> cells = GetRoofBuildCells(pawn.Map);
             if (cells.Count == 0)
@@ -79,6 +140,8 @@ namespace emitbreaker.PawnControl
 
             // Use distance bucketing for cell selection
             List<IntVec3>[] buckets = CreateDistanceBuckets(pawn, cells);
+            if (buckets == null)
+                return null;
 
             // Find best cell to build roof
             IntVec3 bestCell = FindBestCell(buckets, pawn, (cell, p) => ValidateRoofBuildCell(cell, p, forced));
@@ -89,6 +152,8 @@ namespace emitbreaker.PawnControl
                 Job job = JobMaker.MakeJob(WorkJobDef);
                 job.targetA = bestCell;
                 job.targetB = bestCell;
+
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to build roof at {bestCell}");
                 return job;
             }
 
@@ -97,7 +162,7 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Roof-specific helpers
+        #region Cell-Based Helpers
 
         /// <summary>
         /// Gets cells marked for roof building that need roofs
@@ -165,6 +230,19 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return true;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset
+            base.Reset();
         }
 
         #endregion

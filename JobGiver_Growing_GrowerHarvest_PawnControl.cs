@@ -27,6 +27,9 @@ namespace emitbreaker.PawnControl
         // Maximum plants per job
         private const int MAX_PLANTS_PER_JOB = 40;
 
+        // Cache key for harvestable plants
+        private const string HARVEST_CACHE_KEY_SUFFIX = "_HarvestablePlants";
+
         #endregion
 
         #region Overrides
@@ -91,6 +94,114 @@ namespace emitbreaker.PawnControl
         #region Harvesting-specific implementation
 
         /// <summary>
+        /// Get or create a cache of harvestable plants for a specific map
+        /// </summary>
+        private List<Plant> GetOrCreateHarvestablePlantsCache(Pawn pawn, List<IntVec3> cells)
+        {
+            if (pawn?.Map == null || cells == null || cells.Count == 0)
+                return new List<Plant>();
+
+            int mapId = pawn.Map.uniqueID;
+            string cacheKey = this.GetType().Name + HARVEST_CACHE_KEY_SUFFIX;
+
+            // Try to get cached plants from the central cache manager
+            var plantCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Plant>>(mapId);
+
+            // Check if we need to update the cache
+            int currentTick = Find.TickManager.TicksGame;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            if (currentTick - lastUpdateTick > CacheUpdateInterval ||
+                !plantCache.TryGetValue(cacheKey, out List<Plant> result) ||
+                result == null ||
+                result.Any(p => p == null || p.Destroyed))
+            {
+                // Cache is invalid or expired, rebuild it
+                result = new List<Plant>();
+                Map map = pawn.Map;
+
+                // Find harvestable plants in the cells
+                foreach (IntVec3 cell in cells)
+                {
+                    Plant plant = cell.GetPlant(map);
+                    if (plant == null)
+                        continue;
+
+                    // Check if harvestable - don't check pawn-specific conditions yet
+                    // as those may change between different pawns using the same cache
+                    if (IsPlantGenericHarvestable(plant, map))
+                    {
+                        result.Add(plant);
+                    }
+                }
+
+                // Store in the central cache
+                plantCache[cacheKey] = result;
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, currentTick);
+
+                if (Prefs.DevMode)
+                {
+                    Utility_DebugManager.LogNormal($"Updated harvest cache for {this.GetType().Name}, found {result.Count} harvestable plants");
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Check if a plant is harvestable in general (no pawn-specific checks)
+        /// </summary>
+        private bool IsPlantGenericHarvestable(Plant plant, Map map)
+        {
+            if (plant == null || plant.Destroyed || !plant.Spawned)
+                return false;
+
+            if (!plant.HarvestableNow || plant.LifeStage != PlantLifeStage.Mature || !plant.CanYieldNow())
+                return false;
+
+            // Check if plant is designated for harvest
+            if (map.designationManager.DesignationOn(plant, DesignationDefOf.HarvestPlant) != null)
+                return true;
+
+            // Check if plant is in a growing zone
+            Zone_Growing zone = plant.Position.GetZone(map) as Zone_Growing;
+            if (zone == null)
+                return plant.def.plant.autoHarvestable; // Only wild plants with autoHarvestable
+
+            // Check if the plant matches what the zone wants to grow
+            ThingDef plantDef = zone.GetPlantDefToGrow();
+            return plantDef != null && plant.def == plantDef;
+        }
+
+        /// <summary>
+        /// Filter plants for a specific pawn from the cached harvestable plants
+        /// </summary>
+        private List<Plant> FilterPlantsForPawn(Pawn pawn, List<Plant> harvestable)
+        {
+            if (pawn?.Map == null || harvestable == null || harvestable.Count == 0)
+                return new List<Plant>();
+
+            List<Plant> result = new List<Plant>();
+
+            foreach (Plant plant in harvestable)
+            {
+                // Skip destroyed or invalid plants
+                if (plant == null || plant.Destroyed || !plant.Spawned)
+                    continue;
+
+                // Check pawn-specific conditions
+                if (!plant.IsForbidden(pawn) &&
+                    pawn.CanReserve(plant, 1, -1) &&
+                    PlantUtility.PawnWillingToCutPlant_Job(plant, pawn))
+                {
+                    result.Add(plant);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Custom processor for harvesting jobs
         /// </summary>
         private Job ProcessCellsForHarvesting(Pawn pawn, List<IntVec3> cells)
@@ -98,25 +209,16 @@ namespace emitbreaker.PawnControl
             if (pawn?.Map == null || cells == null || cells.Count == 0)
                 return null;
 
-            Map map = pawn.Map;
-            List<Plant> harvestablePlants = new List<Plant>();
+            // Get harvestable plants from cache
+            List<Plant> cachedHarvestable = GetOrCreateHarvestablePlantsCache(pawn, cells);
 
-            // Find harvestable plants in the cells
-            foreach (IntVec3 cell in cells)
-            {
-                Plant plant = cell.GetPlant(map);
-                if (plant == null)
-                    continue;
-
-                // Check if harvestable
-                if (IsPlantHarvestable(plant, pawn, map))
-                {
-                    harvestablePlants.Add(plant);
-                }
-            }
+            // Filter for pawn-specific conditions
+            List<Plant> harvestablePlants = FilterPlantsForPawn(pawn, cachedHarvestable);
 
             if (harvestablePlants.Count == 0)
                 return null;
+
+            Map map = pawn.Map;
 
             // Sort by distance to pawn
             harvestablePlants.Sort((a, b) =>
@@ -166,12 +268,16 @@ namespace emitbreaker.PawnControl
                 job.targetQueueA.SortBy((targ) => targ.Cell.DistanceToSquared(pawn.Position));
             }
 
-            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to harvest {plantsAdded} plants starting with {targetPlant.Label}");
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to harvest {plantsAdded} plants starting with {targetPlant.Label}");
+            }
+
             return job;
         }
 
         /// <summary>
-        /// Check if a plant is valid for harvesting
+        /// Check if a plant is valid for harvesting for a specific pawn
         /// </summary>
         private bool IsPlantHarvestable(Plant plant, Pawn pawn, Map map)
         {
@@ -199,6 +305,39 @@ namespace emitbreaker.PawnControl
             // Check if the plant matches what the zone wants to grow
             ThingDef plantDef = zone.GetPlantDefToGrow();
             return plantDef != null && plant.def == plantDef;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - extends base Reset implementation
+        /// </summary>
+        public override void Reset()
+        {
+            // Call base reset first to handle growing cell caches
+            base.Reset();
+
+            // Now clear harvesting-specific caches
+            foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
+            {
+                string cacheKey = this.GetType().Name + HARVEST_CACHE_KEY_SUFFIX;
+                var plantCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Plant>>(mapId);
+
+                if (plantCache.ContainsKey(cacheKey))
+                {
+                    plantCache.Remove(cacheKey);
+                }
+
+                // Clear the update tick record too
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Reset harvest caches for {this.GetType().Name}");
+            }
         }
 
         #endregion

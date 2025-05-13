@@ -70,61 +70,13 @@ namespace emitbreaker.PawnControl
             if (!(pawn?.MentalState is MentalState_CorpseObsession))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_HaulCorpseToPublicPlace_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    // Always execute for mental breaks
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Use the shared cache updating logic from base class
-                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastHaulingCacheUpdate[mapId] = now;
-                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    // Get all potential targets
-                    if (!_haulableCache.TryGetValue(mapId, out var possibleTargets) || possibleTargets.Count == 0)
-                        return null;
-
-                    // Find a corpse or grave containing a corpse
-                    Thing bestTarget = FindBestCorpseTarget(p, possibleTargets);
-                    if (bestTarget == null)
-                        return null;
-
-                    // Find a destination for the corpse (table or public location)
-                    IntVec3 displayCell = FindCorpseDisplayLocation(p);
-                    if (!displayCell.IsValid)
-                        return null;
-
-                    // Create job based on source type
-                    if (bestTarget is Building_Grave grave && grave.Corpse != null)
-                    {
-                        // Create job to dig up corpse and display it
-                        return JobMaker.MakeJob(WorkJobDef, grave.Corpse, grave, displayCell);
-                    }
-                    else if (bestTarget is Corpse corpse)
-                    {
-                        // Create job to display corpse
-                        return JobMaker.MakeJob(WorkJobDef, corpse, null, displayCell);
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName,
-                skipEmergencyCheck: true); // Mental breaks are emergencies
+            // Use the standard base implementation with standard emergency check skipping
+            return base.TryGiveJob(pawn);
         }
 
+        /// <summary>
+        /// Process cached targets to find a valid job for this pawn
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
             // Validate input
@@ -145,12 +97,16 @@ namespace emitbreaker.PawnControl
             if (bestTarget is Building_Grave grave && grave.Corpse != null)
             {
                 // Create job to dig up corpse and display it
-                return JobMaker.MakeJob(WorkJobDef, grave.Corpse, grave, displayCell);
+                Job job = JobMaker.MakeJob(WorkJobDef, grave.Corpse, grave, displayCell);
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to dig up and display corpse from grave");
+                return job;
             }
             else if (bestTarget is Corpse corpse)
             {
                 // Create job to display corpse
-                return JobMaker.MakeJob(WorkJobDef, corpse, null, displayCell);
+                Job job = JobMaker.MakeJob(WorkJobDef, corpse, null, displayCell);
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to display corpse");
+                return job;
             }
 
             return null;

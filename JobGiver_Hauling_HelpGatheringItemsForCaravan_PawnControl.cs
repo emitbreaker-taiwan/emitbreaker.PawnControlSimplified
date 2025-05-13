@@ -1,9 +1,8 @@
-using RimWorld;
-using RimWorld.Planet;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
+using RimWorld;
+using RimWorld.Planet;
 using Verse;
 using Verse.AI;
 using Verse.AI.Group;
@@ -23,7 +22,12 @@ namespace emitbreaker.PawnControl
         /// Most cleaning jobs require designators so default is true
         /// </summary>
         protected override bool RequiresMapZoneorArea => false;
-        
+
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "HelpGatheringItemsForCaravan";
+
         /// <summary>
         /// The job to create when a valid target is found
         /// </summary>
@@ -40,19 +44,10 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Caching
-
-        // Cache for active caravan forming lords that are gathering items
-        private static readonly Dictionary<int, List<Lord>> _caravanLordsCache = new Dictionary<int, List<Lord>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _thingToHaulCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-
-        #endregion
-
-        #region Overrides
+        #region Core flow
 
         /// <summary>
-        /// Override TryGiveJob to implement caravan-specific logic
+        /// Pre-filter pawns to ensure only valid candidates attempt caravan jobs
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
@@ -67,88 +62,28 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Update caravan lords cache
-                    UpdateCaravanLordsCache(p.Map);
-
-                    // Find and create a job for gathering items for caravans
-                    return TryCreateGatherItemsJob(pawn);
-                },
-                debugJobDesc: "gather items for caravan assignment");
+            return base.TryGiveJob(pawn);
         }
 
-        protected override IEnumerable<Thing> GetTargets(Map map)
-        {
-            // This won't be used since we're overriding TryGiveJob directly
-            yield break;
-        }
-
+        /// <summary>
+        /// Process cached targets to create jobs for gathering caravan items
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // This won't be used since we're overriding TryGiveJob directly
-            return null;
-        }
-
-        #endregion
-
-        #region Caravan-specific methods
-
-        /// <summary>
-        /// Updates the cache of lords that are currently forming caravans and gathering items
-        /// </summary>
-        private void UpdateCaravanLordsCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CacheUpdateInterval ||
-                !_caravanLordsCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_caravanLordsCache.ContainsKey(mapId))
-                    _caravanLordsCache[mapId].Clear();
-                else
-                    _caravanLordsCache[mapId] = new List<Lord>();
-
-                // Clear thing to haul cache too
-                if (_thingToHaulCache.ContainsKey(mapId))
-                    _thingToHaulCache[mapId].Clear();
-                else
-                    _thingToHaulCache[mapId] = new Dictionary<Thing, bool>();
-
-                // Find all lords that are forming caravans and gathering items
-                List<Lord> activeCaravanLords = new List<Lord>();
-                foreach (Lord lord in map.lordManager.lords)
-                {
-                    if (lord.LordJob is LordJob_FormAndSendCaravan caravanLordJob && caravanLordJob.GatheringItemsNow)
-                    {
-                        activeCaravanLords.Add(lord);
-                    }
-                }
-
-                _caravanLordsCache[mapId] = activeCaravanLords;
-                _lastCacheUpdateTick = currentTick;
-            }
-        }
-
-        /// <summary>
-        /// Create a job for gathering items for a caravan
-        /// </summary>
-        private Job TryCreateGatherItemsJob(Pawn pawn)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_caravanLordsCache.ContainsKey(mapId) || _caravanLordsCache[mapId].Count == 0)
+            if (pawn?.Map == null || targets == null || targets.Count == 0)
                 return null;
 
-            foreach (Lord lord in _caravanLordsCache[mapId])
+            // Process each target (which contains a Lord)
+            foreach (Thing target in targets)
             {
+                // We need to use a LordWrapper object here
+                LordWrapper wrapper = target as LordWrapper;
+                if (wrapper == null) continue;
+
+                // Get the lord from the wrapper
+                Lord lord = wrapper.Lord;
+                if (lord == null) continue;
+
                 // Find a thing to haul for this caravan
                 Thing thingToHaul = FindThingToHaul(pawn, lord);
                 if (thingToHaul != null)
@@ -165,8 +100,54 @@ namespace emitbreaker.PawnControl
                 }
             }
 
+            // Return null if no valid job was created
             return null;
         }
+
+        #endregion
+
+        #region Target selection
+
+        /// <summary>
+        /// Gets all active caravan lords that are in the gathering phase as targets
+        /// </summary>
+        protected override IEnumerable<Thing> GetTargets(Map map)
+        {
+            if (map?.lordManager?.lords == null)
+                yield break;
+
+            // Find all lords that are forming caravans and gathering items
+            foreach (Lord lord in map.lordManager.lords)
+            {
+                if (lord.LordJob is LordJob_FormAndSendCaravan caravanLordJob &&
+                    caravanLordJob.GatheringItemsNow)
+                {
+                    // Create a wrapper that implements Thing to store the Lord
+                    yield return new LordWrapper(lord);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Lord wrapper class
+
+        /// <summary>
+        /// Wrapper class to make Lords compatible with the Thing-based job system
+        /// </summary>
+        private class LordWrapper : Thing
+        {
+            public Lord Lord { get; private set; }
+
+            public LordWrapper(Lord lord)
+            {
+                this.Lord = lord;
+            }
+        }
+
+        #endregion
+
+        #region Caravan-specific methods
 
         /// <summary>
         /// Find a thing to haul for the caravan
@@ -174,17 +155,16 @@ namespace emitbreaker.PawnControl
         private Thing FindThingToHaul(Pawn pawn, Lord lord)
         {
             // Use the utility method if available
-            if (GatherItemsForCaravanUtility.FindThingToHaul(pawn, lord) != null)
+            try
             {
-                try
-                {
-                    return GatherItemsForCaravanUtility.FindThingToHaul(pawn, lord);
-                }
-                catch (Exception ex)
-                {
-                    // Fallback to our own implementation if the utility method fails
-                    Utility_DebugManager.LogWarning($"Error using GatherItemsForCaravanUtility.FindThingToHaul: {ex.Message}");
-                }
+                Thing utilityResult = GatherItemsForCaravanUtility.FindThingToHaul(pawn, lord);
+                if (utilityResult != null)
+                    return utilityResult;
+            }
+            catch (Exception ex)
+            {
+                // Fallback to our own implementation if the utility method fails
+                Utility_DebugManager.LogWarning($"Error using GatherItemsForCaravanUtility.FindThingToHaul: {ex.Message}");
             }
 
             // Fallback implementation
@@ -264,24 +244,35 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Cache management
+        #region Reset
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Reset the cache - implements IResettableCache
         /// </summary>
-        public static new void ResetCache()
+        public override void Reset()
         {
-            _caravanLordsCache.Clear();
-            _thingToHaulCache.Clear();
-            _lastCacheUpdateTick = -999;
+            // Call the parent class's Reset method to use the centralized cache system
+            base.Reset();
 
-            Utility_DebugManager.LogNormal("Reset JobGiver_HelpGatheringItemsForCaravan cache");
+            // Log the reset for debugging
+            Utility_DebugManager.LogNormal($"Reset {GetType().Name} cache");
+        }
+
+        /// <summary>
+        /// Static method to reset the caravan cache
+        /// </summary>
+        public static void ResetCache()
+        {
+            // Any additional cache clearing logic specific to this class
         }
 
         #endregion
 
         #region Utility
 
+        /// <summary>
+        /// Returns a descriptive string for debugging
+        /// </summary>
         public override string ToString()
         {
             return "JobGiver_Hauling_HelpGatheringItemsForCaravan_PawnControl";

@@ -40,68 +40,16 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
-        protected override Job TryGiveJob(Pawn pawn)
+        /// <summary>
+        /// The job to create when a valid target is found
+        /// Custom implementation for corpse hauling is used instead
+        /// </summary>
+        protected override JobDef WorkJobDef => null;
+
+        protected override float GetBasePriority(string workTag)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_HaulCorpses_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Use the shared cache updating logic from base class
-                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastHaulingCacheUpdate[mapId] = now;
-                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    // Get corpses from shared cache
-                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
-                        return null;
-
-                    // Filter only corpses from the shared cache
-                    var corpses = haulables.OfType<Corpse>().ToList();
-                    if (corpses.Count == 0)
-                        return null;
-
-                    // Use the bucketing system to find the closest valid corpse
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        corpses,
-                        (corpse) => (corpse.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Create a custom validator that uses our Thing-based cache but works with Corpses
-                    Func<Corpse, Pawn, bool> corpseValidator = (corpse, worker) => {
-                        // Use our standard validation but cast the corpse to Thing for reachability cache
-                        return IsValidCorpseTarget(corpse, worker);
-                    };
-
-                    // Use the regular Thing-based FindFirstValidTargetInBuckets
-                    Corpse targetCorpse = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Corpse>(
-                        buckets,
-                        p,
-                        corpseValidator,
-                        null); // Don't use reachability cache to avoid type mismatch
-
-                    // Create and return job if we found a valid target
-                    if (targetCorpse != null)
-                    {
-                        return HaulAIUtility.HaulToStorageJob(p, targetCorpse);
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
+            // Hauling corpses is more important than regular hauling
+            return 4.2f;
         }
 
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
@@ -118,22 +66,25 @@ namespace emitbreaker.PawnControl
                 (corpse) => (corpse.Position - pawn.Position).LengthHorizontalSquared,
                 DistanceThresholds);
 
-            // Create a custom validator that uses our Thing-based cache but works with Corpses
-            Func<Corpse, Pawn, bool> corpseValidator = (corpse, worker) => {
-                return IsValidCorpseTarget(corpse, worker);
-            };
-
-            // Use the regular Thing-based FindFirstValidTargetInBuckets
-            Corpse targetCorpse = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Corpse>(
+            // Use the centralized cache system with proper typing
+            Corpse targetCorpse = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
-                corpseValidator,
-                null); // Don't use reachability cache to avoid type mismatch
+                (corpse, worker) => IsValidCorpseTarget(corpse, worker),
+                null); // Reachability cache handled by parent class
 
             // Create and return job if we found a valid target
             if (targetCorpse != null)
             {
-                return HaulAIUtility.HaulToStorageJob(pawn, targetCorpse);
+                // Use the appropriate hauling utility method to create the job
+                Job haulJob = HaulAIUtility.HaulToStorageJob(pawn, targetCorpse);
+
+                if (haulJob != null)
+                {
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to haul corpse: {targetCorpse.Label}");
+                }
+
+                return haulJob;
             }
 
             return null;
@@ -180,7 +131,6 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Check if there's a storage location for this corpse
-            // Using the correct method StoreUtility.TryFindBestBetterStoreCellFor
             if (!StoreUtility.TryFindBestBetterStoreCellFor(corpse, pawn, pawn.Map,
                 StoragePriority.Unstored, pawn.Faction, out _, true))
             {

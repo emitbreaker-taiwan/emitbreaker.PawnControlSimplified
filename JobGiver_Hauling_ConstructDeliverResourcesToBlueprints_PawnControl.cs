@@ -12,7 +12,7 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Hauling_ConstructDeliverResourcesToBlueprints_PawnControl : JobGiver_Common_ConstructDeliverResources_PawnControl<Blueprint>
     {
-        #region Overrides
+        #region Configuration
 
         /// <summary>
         /// The job to create when a valid target is found
@@ -22,7 +22,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Use Hauling work tag
         /// </summary>
-        protected override string WorkTag => "Hauling";
+        public override string WorkTag => "Hauling";
 
         /// <summary>
         /// Unique name for debug messages
@@ -30,9 +30,35 @@ namespace emitbreaker.PawnControl
         protected override string JobDescription => "delivering resources to blueprints (hauling) assignment";
 
         /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => JobDescription;
+
+        /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+
+        /// <summary>
+        /// Cache update interval - update moderately often for blueprint resource delivery
+        /// </summary>
+        protected override int CacheUpdateInterval => 220; // ~3.7 seconds
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Hauling_ConstructDeliverResourcesToBlueprints_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
 
         /// <summary>
         /// Blueprint delivery is slightly more important than frame delivery
@@ -40,6 +66,36 @@ namespace emitbreaker.PawnControl
         protected override float GetBasePriority(string workTag)
         {
             return 5.7f;
+        }
+
+        /// <summary>
+        /// Check if map meets requirements for blueprint resource delivery
+        /// </summary>
+        protected override bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // Check if map has any blueprints that need resources
+            if (pawn?.Map == null)
+                return false;
+
+            // Quick check for blueprint count
+            return pawn.Map.listerThings.ThingsInGroup(ThingRequestGroup.Blueprint).Any(b =>
+                b is Blueprint blueprint &&
+                !(blueprint is Blueprint_Install) &&
+                blueprint.Spawned &&
+                blueprint.TotalMaterialCost().Count > 0);
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method for blueprint resource delivery
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Get all blueprints that need resources
+            return GetConstructionTargets(map).Cast<Thing>();
         }
 
         /// <summary>
@@ -65,14 +121,12 @@ namespace emitbreaker.PawnControl
             }
 
             // Limit cache size for performance
-            int maxCacheSize = 200;
-            if (result.Count > maxCacheSize)
-            {
-                result = result.Take(maxCacheSize).ToList();
-            }
-
-            return result;
+            return LimitListSize(result, 200);
         }
+
+        #endregion
+
+        #region Job Creation
 
         /// <summary>
         /// Processes cached targets to create a job for the pawn.
@@ -105,6 +159,80 @@ namespace emitbreaker.PawnControl
 
             return null;
         }
+
+        /// <summary>
+        /// Creates a construction job for delivering resources to blueprints
+        /// </summary>
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
+        {
+            if (pawn?.Map == null)
+                return null;
+
+            int mapId = pawn.Map.uniqueID;
+
+            // Get targets from the cache
+            List<Thing> cachedTargets = GetCachedTargets(mapId);
+            List<Blueprint> blueprints;
+
+            // If cache is empty or not yet populated
+            if (cachedTargets == null || cachedTargets.Count == 0)
+            {
+                // Try to update cache if needed
+                if (ShouldUpdateCache(mapId))
+                {
+                    UpdateCache(mapId, pawn.Map);
+                    cachedTargets = GetCachedTargets(mapId);
+                }
+
+                // If still empty, get targets directly
+                if (cachedTargets == null || cachedTargets.Count == 0)
+                {
+                    blueprints = GetConstructionTargets(pawn.Map);
+                }
+                else
+                {
+                    // Convert cached targets to proper type
+                    blueprints = cachedTargets.OfType<Blueprint>().ToList();
+                }
+            }
+            else
+            {
+                // Convert cached targets to proper type
+                blueprints = cachedTargets.OfType<Blueprint>().ToList();
+            }
+
+            if (blueprints.Count == 0)
+                return null;
+
+            // Filter for valid blueprints
+            blueprints = blueprints
+                .Where(b => b.Spawned &&
+                          !b.IsForbidden(pawn) &&
+                          IsValidTargetFaction(b, pawn))
+                .ToList();
+
+            if (blueprints.Count == 0)
+                return null;
+
+            // Try to create a job for each valid blueprint
+            foreach (Blueprint blueprint in blueprints)
+            {
+                // Check if we can deliver resources to this blueprint
+                if (!GenConstruct.CanConstruct(blueprint, pawn, false))
+                    continue;
+
+                // Try to create a job for this target
+                Job job = ResourceDeliverJobFor(pawn, blueprint);
+                if (job != null)
+                    return job;
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        #region Resource Delivery Helpers
 
         /// <summary>
         /// Finds nearby blueprints that need the same resources
@@ -190,6 +318,57 @@ namespace emitbreaker.PawnControl
                    !nearbyNeeders.Contains(blueprint) &&
                    !blueprint.IsForbidden(pawn) &&
                    GenConstruct.CanConstruct(blueprint, pawn, false, jobForReservation: WorkJobDef);
+        }
+
+        #endregion
+
+        #region Thing-Based Helpers
+
+        /// <summary>
+        /// Basic validation for blueprint targets
+        /// </summary>
+        protected override bool ValidateConstructionTarget(Thing thing, Pawn pawn, bool forced = false)
+        {
+            // First perform base validation
+            if (!base.ValidateConstructionTarget(thing, pawn, forced))
+                return false;
+
+            // Add blueprint-specific validation
+            Blueprint blueprint = thing as Blueprint;
+            if (blueprint == null)
+                return false;
+
+            // Skip Blueprint_Install (those are handled by a different job giver)
+            if (blueprint is Blueprint_Install)
+                return false;
+
+            // Skip plant blueprints (handled by Growing job giver)
+            if (blueprint.def.entityDefToBuild is ThingDef entityDefToBuild && entityDefToBuild.plant != null)
+                return false;
+
+            return true;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset from parent
+            base.Reset();
+        }
+
+        #endregion
+
+        #region Utility
+
+        public override string ToString()
+        {
+            return "JobGiver_Hauling_ConstructDeliverResourcesToBlueprints_PawnControl";
         }
 
         #endregion

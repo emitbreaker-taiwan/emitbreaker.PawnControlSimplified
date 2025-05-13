@@ -23,6 +23,36 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.RemoveFloor;
 
+        /// <summary>
+        /// Cache update interval - update slightly less often for floor removal
+        /// </summary>
+        protected override int CacheUpdateInterval => 180; // 3 seconds
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_RemoveFloor_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method for floor removal cells
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Floor removal doesn't use Thing targets, so delegate to base implementation
+            return base.UpdateJobSpecificCache(map);
+        }
+
         #endregion
 
         #region Validation
@@ -37,6 +67,7 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Add RemoveFloor-specific validation if needed
+            // For now, no additional validation is needed
 
             return true;
         }
@@ -46,12 +77,62 @@ namespace emitbreaker.PawnControl
         #region Job Creation
 
         /// <summary>
+        /// Creates a job for removing floors using the proper cell target
+        /// </summary>
+        protected override Job CreateFloorConstructionJob(Pawn pawn, bool forced)
+        {
+            // Get cells marked for floor removal
+            List<IntVec3> cells = GetDesignatedCells(pawn.Map);
+            if (cells.Count == 0)
+                return null;
+
+            // Create buckets and find best cell
+            var buckets = CreateDistanceBuckets(pawn, cells);
+            if (buckets == null)
+                return null;
+
+            // Find the best cell to remove floor from
+            IntVec3 targetCell = FindBestCell(buckets, pawn, (cell, p) => ValidateFloorCell(cell, p, forced));
+
+            if (!targetCell.IsValid)
+                return null;
+
+            // Create the job with the specific target cell
+            Job job = JobMaker.MakeJob(WorkJobDef, targetCell);
+
+            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to remove floor at {targetCell}");
+            return job;
+        }
+
+        /// <summary>
         /// Creates a construction job for removing floors.
         /// </summary>
         protected override Job CreateConstructionJob(Pawn pawn, bool forced)
         {
-            // Create a job for removing floors
-            return JobMaker.MakeJob(WorkJobDef);
+            // For floor removal, we delegate to the specialized floor construction job method
+            return CreateFloorConstructionJob(pawn, forced);
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset from parent
+            base.Reset();
+        }
+
+        #endregion
+
+        #region Utility
+
+        public override string ToString()
+        {
+            return "JobGiver_Construction_RemoveFloor_PawnControl";
         }
 
         #endregion

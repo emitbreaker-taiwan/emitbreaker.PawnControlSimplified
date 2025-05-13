@@ -43,25 +43,6 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Cache Management
-
-        // Merge-specific cache
-        private static readonly Dictionary<int, List<Thing>> _mergeableCache = new Dictionary<int, List<Thing>>();
-        private static readonly Dictionary<int, Dictionary<Thing, bool>> _mergeReachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        private static int _lastMergeCacheUpdateTick = -999;
-
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetMergeCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_mergeableCache, _mergeReachabilityCache);
-            _lastMergeCacheUpdateTick = -999;
-            ResetHaulingCache(); // Call base class reset too
-        }
-
-        #endregion
-
         #region Core flow
 
         protected override float GetBasePriority(string workTag)
@@ -70,53 +51,9 @@ namespace emitbreaker.PawnControl
             return 5.0f;
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_HaulMerge_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Update the cache if needed
-                    if (now > _lastMergeCacheUpdateTick + CacheUpdateInterval ||
-                        !_mergeableCache.ContainsKey(mapId))
-                    {
-                        UpdateMergeableCache(p.Map);
-                    }
-
-                    // Process cached targets
-                    return TryCreateMergeJob(p);
-                },
-                debugJobDesc: DebugName);
-        }
-
-        protected override IEnumerable<Thing> GetTargets(Map map)
-        {
-            // Get all things potentially needing merging from the map's lister
-            if (map?.listerMergeables != null)
-            {
-                List<Thing> mergeables = map.listerMergeables.ThingsPotentiallyNeedingMerging();
-                if (mergeables != null)
-                {
-                    foreach (Thing thing in mergeables)
-                    {
-                        if (thing != null && thing.Spawned && !thing.Destroyed)
-                        {
-                            yield return thing;
-                        }
-                    }
-                }
-            }
-        }
-
+        /// <summary>
+        /// Process cached targets to find valid merge jobs
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
             if (targets == null || targets.Count == 0)
@@ -165,63 +102,30 @@ namespace emitbreaker.PawnControl
             return null;
         }
 
-        /// <summary>
-        /// Determines if the job giver should execute based on cache status
-        /// </summary>
-        protected override bool ShouldExecuteNow(int mapId)
-        {
-            return Find.TickManager.TicksGame > _lastMergeCacheUpdateTick + CacheUpdateInterval ||
-                  !_mergeableCache.ContainsKey(mapId);
-        }
-
         #endregion
 
-        #region Target processing
+        #region Target selection
 
         /// <summary>
-        /// Updates the cache of things potentially needing merging
+        /// Gets all things potentially needing merging from the map
         /// </summary>
-        private void UpdateMergeableCache(Map map)
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            // Clear outdated cache
-            if (_mergeableCache.ContainsKey(mapId))
-                _mergeableCache[mapId].Clear();
-            else
-                _mergeableCache[mapId] = new List<Thing>();
-
-            // Clear reachability cache too
-            if (_mergeReachabilityCache.ContainsKey(mapId))
-                _mergeReachabilityCache[mapId].Clear();
-            else
-                _mergeReachabilityCache[mapId] = new Dictionary<Thing, bool>();
-
-            // Find all things potentially needing merging
-            List<Thing> mergeables = map.listerMergeables.ThingsPotentiallyNeedingMerging();
-            if (mergeables != null && mergeables.Count > 0)
+            // Get all things potentially needing merging from the map's lister
+            if (map?.listerMergeables != null)
             {
-                _mergeableCache[mapId].AddRange(mergeables);
+                List<Thing> mergeables = map.listerMergeables.ThingsPotentiallyNeedingMerging();
+                if (mergeables != null)
+                {
+                    foreach (Thing thing in mergeables)
+                    {
+                        if (thing != null && thing.Spawned && !thing.Destroyed)
+                        {
+                            yield return thing;
+                        }
+                    }
+                }
             }
-
-            _lastMergeCacheUpdateTick = currentTick;
-        }
-
-        /// <summary>
-        /// Create a job for merging items
-        /// </summary>
-        private Job TryCreateMergeJob(Pawn pawn)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_mergeableCache.ContainsKey(mapId) || _mergeableCache[mapId].Count == 0)
-                return null;
-
-            return ProcessCachedTargets(pawn, _mergeableCache[mapId], false);
         }
 
         /// <summary>
@@ -277,11 +181,14 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Utility
+        #region Reset
 
-        public override string ToString()
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
         {
-            return "JobGiver_Merge_PawnControl";
+            base.Reset();
         }
 
         #endregion

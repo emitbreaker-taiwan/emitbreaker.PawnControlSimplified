@@ -23,7 +23,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Work tag for eligibility
         /// </summary>
-        protected override string WorkTag => "Hauling";
+        public override string WorkTag => "Hauling";
 
         /// <summary>
         /// Update cache every 5 seconds - cremation bills don't change often
@@ -70,7 +70,19 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Hauling;
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Hauling_DoBillsCremate_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache
+        }
 
         #endregion
 
@@ -87,7 +99,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Override to strictly limit cremation to player pawns
         /// </summary>
-        protected override bool IsValidFactionForBillWork(Pawn pawn)
+        protected override bool IsValidFactionForCrafting(Pawn pawn)
         {
             // For cremation, strictly require player faction or player's slaves
             return pawn != null && (pawn.Faction == Faction.OfPlayer ||
@@ -117,17 +129,19 @@ namespace emitbreaker.PawnControl
         /// <returns>A job for the pawn, or null if no job is found.</returns>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            // Example implementation: Iterate through targets and find a valid job.
-            foreach (var target in targets)
-            {
-                if (IsValidBillGiver(target, pawn, forced))
-                {
-                    return StartOrResumeBillJob(pawn, (IBillGiver)target, forced);
-                }
-            }
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
 
-            // Return null if no valid job is found.
-            return null;
+            // Filter bill givers to those that are valid for this pawn
+            var validBillGivers = targets
+                .Where(thing => IsValidBillGiver(thing, pawn, forced))
+                .ToList();
+
+            if (validBillGivers.Count == 0)
+                return null;
+
+            // Find the best bill giver job using the parent class's method
+            return FindBestBillGiverJob(pawn, validBillGivers, forced);
         }
 
         #endregion
@@ -158,6 +172,60 @@ namespace emitbreaker.PawnControl
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Job-specific cache update method that overrides the parent class method
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Use the GetBillGivers method to populate the cache
+            return GetBillGivers(map);
+        }
+
+        /// <summary>
+        /// Checks if a bill giver has valid work for a specific pawn
+        /// Specialized for cremation tasks
+        /// </summary>
+        protected override bool HasWorkForPawn(Thing thing, Pawn pawn, bool forced = false)
+        {
+            // First perform the basic check from the parent class
+            if (!base.HasWorkForPawn(thing, pawn, forced))
+                return false;
+
+            // Additional crematorium-specific validation could be added here
+            // For example, checking if there are corpses available to be cremated
+
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if a bill giver is valid for cremation work
+        /// </summary>
+        protected override bool IsValidBillGiver(Thing thing, Pawn pawn, bool forced = false)
+        {
+            // First perform the basic check from the parent class
+            if (!base.IsValidBillGiver(thing, pawn, forced))
+                return false;
+
+            // Additional validation specific to cremation could be added here
+
+            return true;
+        }
+
+        #endregion
+
+        #region Cache Management
+
+        /// <summary>
+        /// Reset the cache - overrides the Reset method from the parent class
+        /// </summary>
+        public override void Reset()
+        {
+            // Call the base class Reset method to use the centralized cache system
+            base.Reset();
+
+            // Any cremation-specific cache clearing could be added here
         }
 
         #endregion

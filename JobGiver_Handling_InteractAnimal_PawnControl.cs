@@ -49,6 +49,11 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected virtual bool IgnoreSkillRequirements => false;
 
+        /// <summary>
+        /// Cache key suffix specifically for interactable animals
+        /// </summary>
+        private const string INTERACTABLE_CACHE_SUFFIX = "_InteractableAnimals";
+
         #endregion
 
         #region Static data
@@ -76,26 +81,168 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Cache Management
-
-        // Interaction-specific cache
-        private static readonly Dictionary<int, List<Pawn>> _interactableAnimalsCache = new Dictionary<int, List<Pawn>>();
-        private static readonly Dictionary<int, Dictionary<Pawn, bool>> _interactableReachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        private static int _lastInteractCacheUpdateTick = -999;
+        #region Target Selection
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Get interactable animals on the given map
         /// </summary>
-        public static void ResetInteractCache()
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            Utility_CacheManager.ResetJobGiverCache(_interactableAnimalsCache, _interactableReachabilityCache);
-            _lastInteractCacheUpdateTick = -999;
+            if (map == null) yield break;
+
+            // Get cached interactable animals from centralized cache
+            var animals = GetOrCreateInteractableAnimalsCache(map);
+
+            // Return animals as targets
+            foreach (Pawn animal in animals)
+            {
+                if (animal != null && !animal.Dead && animal.Spawned)
+                    yield return animal;
+            }
+        }
+
+        /// <summary>
+        /// Override to use interaction-specific cache keys
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            if (map == null)
+                yield break;
+
+            // Find all animals that can potentially be interacted with
+            List<Pawn> interactableAnimals = new List<Pawn>();
+
+            foreach (Pawn animal in map.mapPawns.AllPawnsSpawned)
+            {
+                if (CanInteractWithAnimalInPrinciple(animal))
+                {
+                    interactableAnimals.Add(animal);
+                }
+            }
+
+            // Store in the centralized cache
+            StoreInteractableAnimalsCache(map, interactableAnimals);
+
+            // Convert to Things for the base class caching system
+            foreach (Pawn animal in interactableAnimals)
+            {
+                yield return animal;
+            }
+        }
+
+        /// <summary>
+        /// Gets or creates a cache of interactable animals for a specific map
+        /// </summary>
+        protected List<Pawn> GetOrCreateInteractableAnimalsCache(Map map)
+        {
+            if (map == null)
+                return new List<Pawn>();
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + INTERACTABLE_CACHE_SUFFIX;
+
+            // Try to get cached animals from the map cache manager
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+            // Check if we need to update the cache
+            int currentTick = Find.TickManager.TicksGame;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            if (currentTick - lastUpdateTick > CacheUpdateInterval ||
+                !animalCache.TryGetValue(cacheKey, out List<Pawn> animals) ||
+                animals == null ||
+                animals.Any(a => a == null || a.Dead || !a.Spawned))
+            {
+                // Cache is invalid or expired, rebuild it
+                animals = new List<Pawn>();
+
+                foreach (Pawn animal in map.mapPawns.AllPawnsSpawned)
+                {
+                    if (CanInteractWithAnimalInPrinciple(animal))
+                    {
+                        animals.Add(animal);
+                    }
+                }
+
+                // Store in the central cache
+                StoreInteractableAnimalsCache(map, animals);
+            }
+
+            return animals;
+        }
+
+        /// <summary>
+        /// Store a list of interactable animals in the centralized cache
+        /// </summary>
+        private void StoreInteractableAnimalsCache(Map map, List<Pawn> animals)
+        {
+            if (map == null)
+                return;
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + INTERACTABLE_CACHE_SUFFIX;
+            int currentTick = Find.TickManager.TicksGame;
+
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+            animalCache[cacheKey] = animals;
+            Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, currentTick);
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Updated interactable animals cache for {this.GetType().Name}, found {animals.Count} animals");
+            }
+        }
+
+        /// <summary>
+        /// Creates a reachability cache for this specific JobGiver
+        /// </summary>
+        protected Dictionary<Pawn, bool> GetOrCreateReachabilityCache(Map map)
+        {
+            if (map == null)
+                return new Dictionary<Pawn, bool>();
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + "_Reachability";
+
+            return Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
         }
 
         #endregion
 
-        #region Core flow
+        #region Job Processing
 
+        /// <summary>
+        /// Processes cached targets to find a valid job for animal interaction
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            if (pawn?.Map == null || targets.Count == 0)
+                return null;
+
+            // Initialize static data if needed
+            InitializeStaticData();
+
+            // Filter to valid animals
+            var animalTargets = targets.OfType<Pawn>().Where(a => a != null && a.Spawned && !a.Dead).ToList();
+
+            // Find the best animal to interact with
+            Pawn targetAnimal = FindBestInteractTarget(pawn, animalTargets, forced);
+            if (targetAnimal == null)
+                return null;
+
+            // Create specific job for this animal
+            Job job = MakeInteractionJob(pawn, targetAnimal, forced);
+            if (job != null && Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to {DebugName.ToLower()} {targetAnimal.LabelShort}");
+            }
+
+            return job;
+        }
+
+        /// <summary>
+        /// Core job creation method that handles food acquisition if needed
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Initialize static data if needed
@@ -109,190 +256,106 @@ namespace emitbreaker.PawnControl
             if (pawn.WorkTagIsDisabled(WorkTags.Animals))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_InteractAnimal_PawnControl>(
+            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
                 pawn,
                 WorkTag,
                 (p, forced) => {
                     if (p?.Map == null)
                         return null;
 
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Update the cache if needed
-                    if (now > _lastInteractCacheUpdateTick + CacheUpdateInterval ||
-                        !_interactableAnimalsCache.ContainsKey(mapId))
-                    {
-                        UpdateInteractableAnimalsCache(p.Map);
-                    }
-
-                    // Process cached targets
-                    Job job = ProcessInteractTargets(p, forced);
+                    // Use the base job creation method which handles caching
+                    Job job = base.TryGiveJob(p);
 
                     // If we need food for the interaction but don't have it,
                     // try to get some food first
                     if (job == null && NeedsFoodForInteraction())
                     {
-                        Pawn targetAnimal = FindBestInteractTarget(p, forced);
-                        if (targetAnimal != null && !HasFoodToInteractAnimal(p, targetAnimal))
+                        List<Pawn> animals = GetOrCreateInteractableAnimalsCache(p.Map);
+                        if (animals.Count > 0)
                         {
-                            return TakeFoodForAnimalInteractJob(p, targetAnimal);
+                            // Find a valid animal to interact with
+                            Pawn targetAnimal = FindBestInteractTarget(p, animals, forced);
+                            if (targetAnimal != null && !HasFoodToInteractAnimal(p, targetAnimal))
+                            {
+                                return TakeFoodForAnimalInteractJob(p, targetAnimal);
+                            }
                         }
                     }
 
                     return job;
                 },
+                (p, setFailReason) => {
+                    // Additional check for animals work tag
+                    if (p.WorkTagIsDisabled(WorkTags.Animals))
+                    {
+                        if (setFailReason)
+                            JobFailReason.Is("CannotPrioritizeWorkTypeDisabled".Translate(WorkTypeDefOf.Handling.gerundLabel).CapitalizeFirst());
+                        return false;
+                    }
+                    return true;
+                },
                 debugJobDesc: DebugName);
-        }
-
-        protected override IEnumerable<Thing> GetTargets(Map map)
-        {
-            // Implement in derived classes based on specific interaction type
-            if (map == null) yield break;
-
-            foreach (Pawn animal in map.mapPawns.AllPawnsSpawned)
-            {
-                if (CanInteractWithAnimalInPrinciple(animal))
-                {
-                    yield return animal;
-                }
-            }
-        }
-
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            // Just use the specialized version that works with pawns directly
-            return ProcessInteractTargets(pawn, forced);
-        }
-
-        /// <summary>
-        /// Process the cached targets for animal interaction
-        /// </summary>
-        protected virtual Job ProcessInteractTargets(Pawn pawn, bool forced = false)
-        {
-            if (pawn?.Map == null)
-                return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_interactableAnimalsCache.ContainsKey(mapId) || _interactableAnimalsCache[mapId].Count == 0)
-                return null;
-
-            // Find the best animal to interact with
-            Pawn targetAnimal = FindBestInteractTarget(pawn, forced);
-            if (targetAnimal == null)
-                return null;
-
-            // Create specific job for this animal
-            Job job = MakeInteractionJob(pawn, targetAnimal, forced);
-            if (job != null)
-            {
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to {DebugName.ToLower()} {targetAnimal.LabelShort}");
-            }
-
-            return job;
-        }
-
-        /// <summary>
-        /// Determines if the job giver should execute based on cache status
-        /// </summary>
-        protected override bool ShouldExecuteNow(int mapId)
-        {
-            return Find.TickManager.TicksGame > _lastInteractCacheUpdateTick + CacheUpdateInterval ||
-                  !_interactableAnimalsCache.ContainsKey(mapId);
-        }
-
-        /// <summary>
-        /// Override the base class method for animal handling
-        /// </summary>
-        protected override bool CanHandleAnimal(Pawn animal, Pawn handler)
-        {
-            // Use the WorkGiver_InteractAnimal logic
-            return CanInteractWithAnimal(handler, animal, false);
-        }
-
-        /// <summary>
-        /// Implements the animal-specific validity check
-        /// </summary>
-        protected override bool IsValidAnimalTarget(Pawn animal, Pawn handler)
-        {
-            // Use the WorkGiver_InteractAnimal logic
-            string failReason = null;
-            return CanInteractWithAnimal(handler, animal, out failReason, false,
-                CanInteractWhileSleeping, IgnoreSkillRequirements, CanInteractWhileRoaming);
-        }
-
-        #endregion
-
-        #region Target processing
-
-        /// <summary>
-        /// Updates the cache of animals that can be interacted with
-        /// </summary>
-        private void UpdateInteractableAnimalsCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            // Clear outdated cache
-            if (_interactableAnimalsCache.ContainsKey(mapId))
-                _interactableAnimalsCache[mapId].Clear();
-            else
-                _interactableAnimalsCache[mapId] = new List<Pawn>();
-
-            // Clear reachability cache too
-            if (_interactableReachabilityCache.ContainsKey(mapId))
-                _interactableReachabilityCache[mapId].Clear();
-            else
-                _interactableReachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-            // Find all animals that can potentially be interacted with
-            foreach (Pawn animal in map.mapPawns.AllPawnsSpawned)
-            {
-                if (CanInteractWithAnimalInPrinciple(animal))
-                {
-                    _interactableAnimalsCache[mapId].Add(animal);
-                }
-            }
-
-            _lastInteractCacheUpdateTick = currentTick;
         }
 
         /// <summary>
         /// Finds the best animal to interact with
         /// </summary>
-        protected virtual Pawn FindBestInteractTarget(Pawn pawn, bool forced)
+        protected virtual Pawn FindBestInteractTarget(Pawn pawn, List<Pawn> animals, bool forced)
         {
-            if (pawn?.Map == null)
+            if (pawn?.Map == null || animals == null || animals.Count == 0)
                 return null;
 
-            int mapId = pawn.Map.uniqueID;
-            if (!_interactableAnimalsCache.ContainsKey(mapId) || _interactableAnimalsCache[mapId].Count == 0)
-                return null;
+            // Create distance buckets for more efficient selection
+            List<Pawn>[] buckets = new List<Pawn>[DistanceThresholds.Length + 1];
+            for (int i = 0; i < buckets.Length; i++)
+            {
+                buckets[i] = new List<Pawn>();
+            }
 
-            // Use distance bucketing to find animals efficiently
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                _interactableAnimalsCache[mapId],
-                (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
-                DistanceThresholds);
+            // Sort animals into buckets by distance
+            foreach (Pawn animal in animals)
+            {
+                float distanceSq = (animal.Position - pawn.Position).LengthHorizontalSquared;
 
-            // Find first valid animal
-            return Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (animal, handler) => {
-                    // Check if this specific animal is valid for interaction
+                int bucketIndex = 0;
+                while (bucketIndex < DistanceThresholds.Length && distanceSq > DistanceThresholds[bucketIndex])
+                {
+                    bucketIndex++;
+                }
+
+                buckets[bucketIndex].Add(animal);
+            }
+
+            // Get the reachability cache
+            var reachabilityCache = GetOrCreateReachabilityCache(pawn.Map);
+
+            // Find the closest valid animal
+            for (int b = 0; b < buckets.Length; b++)
+            {
+                if (buckets[b].Count == 0)
+                    continue;
+
+                // Randomize within each bucket for even distribution
+                buckets[b].Shuffle();
+
+                foreach (Pawn animal in buckets[b])
+                {
+                    // Check if valid and reachable
                     string failReason;
-                    return CanInteractWithAnimal(handler, animal, out failReason, forced,
-                        CanInteractWhileSleeping, IgnoreSkillRequirements, CanInteractWhileRoaming)
-                        && IsValidForSpecificInteraction(handler, animal, forced);
-                },
-                _interactableReachabilityCache);
+                    bool isValid = CanInteractWithAnimal(pawn, animal, out failReason, forced,
+                        CanInteractWhileSleeping, IgnoreSkillRequirements, CanInteractWhileRoaming) &&
+                        IsValidForSpecificInteraction(pawn, animal, forced);
+
+                    if (isValid)
+                    {
+                        // Cache the reachability result
+                        reachabilityCache[animal] = true;
+                        return animal;
+                    }
+                }
+            }
+
+            return null;
         }
 
         #endregion
@@ -368,6 +431,26 @@ namespace emitbreaker.PawnControl
 
             // Additional checks specific to the interaction
             return true;
+        }
+
+        /// <summary>
+        /// Override the base class method for animal handling
+        /// </summary>
+        protected override bool CanHandleAnimal(Pawn animal, Pawn handler)
+        {
+            // Use the specialized interaction logic
+            return CanInteractWithAnimal(handler, animal, false);
+        }
+
+        /// <summary>
+        /// Implements the animal-specific validity check
+        /// </summary>
+        protected override bool IsValidAnimalTarget(Pawn animal, Pawn handler)
+        {
+            // Use the specialized interaction logic
+            string failReason = null;
+            return CanInteractWithAnimal(handler, animal, out failReason, false,
+                CanInteractWhileSleeping, IgnoreSkillRequirements, CanInteractWhileRoaming);
         }
 
         /// <summary>
@@ -474,6 +557,84 @@ namespace emitbreaker.PawnControl
             Job job = JobMaker.MakeJob(WorkJobDef, foodSource);
             job.count = count;
             return job;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Call base reset first to handle animal caches
+            base.Reset();
+
+            // Now clear interaction-specific caches
+            foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
+            {
+                string cacheKey = this.GetType().Name + INTERACTABLE_CACHE_SUFFIX;
+                var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+                if (animalCache.ContainsKey(cacheKey))
+                {
+                    animalCache.Remove(cacheKey);
+                }
+
+                // Clear the reachability cache too
+                string reachabilityKey = this.GetType().Name + "_Reachability";
+                var reachCache = Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
+                // Just clear the entire cache since we can't easily filter it
+                reachCache.Clear();
+
+                // Clear the update tick records
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, reachabilityKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Reset interaction caches for {this.GetType().Name}");
+            }
+        }
+
+        /// <summary>
+        /// Static method to reset all interaction caches
+        /// </summary>
+        public static void ResetInteractCache()
+        {
+            // Clear all interaction caches from all maps
+            foreach (Map map in Find.Maps)
+            {
+                int mapId = map.uniqueID;
+
+                // Clear all interaction-related caches
+                foreach (var type in typeof(JobGiver_Handling_InteractAnimal_PawnControl).AllSubclasses())
+                {
+                    string cacheKey = type.Name + INTERACTABLE_CACHE_SUFFIX;
+                    string reachabilityKey = type.Name + "_Reachability";
+
+                    var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+                    if (animalCache.ContainsKey(cacheKey))
+                    {
+                        animalCache.Remove(cacheKey);
+                    }
+
+                    // Reset the update tick
+                    Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+                    Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, reachabilityKey, -1);
+                }
+
+                // Clear reachability caches
+                var reachCache = Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
+                reachCache.Clear();
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal("Reset all animal interaction caches");
+            }
         }
 
         #endregion

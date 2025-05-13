@@ -13,7 +13,7 @@ namespace emitbreaker.PawnControl
     public class JobGiver_Handling_Slaughter_PawnControl : JobGiver_Handling_PawnControl
     {
         #region Configuration
- 
+
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
@@ -40,24 +40,10 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f };
 
-        #endregion
-
-        #region Cache Management
-
-        // Slaughter-specific cache
-        private static readonly Dictionary<int, List<Pawn>> _slaughterCache = new Dictionary<int, List<Pawn>>();
-        private static readonly Dictionary<int, Dictionary<Pawn, bool>> _slaughterReachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        private static int _lastSlaughterCacheUpdateTick = -999;
-
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Cache key suffix specifically for slaughterable animals
         /// </summary>
-        public static void ResetSlaughterCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_slaughterCache, _slaughterReachabilityCache);
-            _lastSlaughterCacheUpdateTick = -999;
-            ResetHandlingCache(); // Call base class reset too
-        }
+        private const string SLAUGHTERABLE_CACHE_SUFFIX = "_SlaughterableAnimals";
 
         #endregion
 
@@ -72,7 +58,7 @@ namespace emitbreaker.PawnControl
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Quick early exit if slaughtering is not possible
-            if (pawn.WorkTagIsDisabled(WorkTags.Violent))
+            if (pawn?.Map == null || pawn.WorkTagIsDisabled(WorkTags.Violent))
                 return null;
 
             // Quick early exit if no animals are marked for slaughter
@@ -80,99 +66,166 @@ namespace emitbreaker.PawnControl
                 pawn.Map.autoSlaughterManager.AnimalsToSlaughter.Count == 0)
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_Slaughter_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Update the cache if needed
-                    if (now > _lastSlaughterCacheUpdateTick + CacheUpdateInterval ||
-                        !_slaughterCache.ContainsKey(mapId))
-                    {
-                        UpdateSlaughterCache(p.Map);
-                    }
-
-                    // Process cached targets
-                    return TryCreateSlaughterJob(p, forced);
-                },
-                debugJobDesc: DebugName);
+            // Use the parent class job creation logic
+            return base.TryGiveJob(pawn);
         }
 
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Get animals marked for slaughter on the given map
+        /// </summary>
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            // Get all slaughter-designated animals and auto-slaughter animals
-            if (map?.designationManager != null)
+            if (map == null)
+                yield break;
+
+            // Get cached slaughterable animals from centralized cache
+            var animals = GetOrCreateSlaughterableAnimalsCache(map);
+
+            // Return animals as targets
+            foreach (Pawn animal in animals)
             {
-                // Regular slaughter designations
-                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Slaughter))
-                {
-                    if (designation.target.HasThing && designation.target.Thing is Pawn animal && animal.IsNonMutantAnimal)
-                    {
-                        yield return animal;
-                    }
-                }
-
-                // Auto-slaughter manager animals
-                foreach (Pawn animal in map.autoSlaughterManager.AnimalsToSlaughter)
-                {
-                    if (animal != null && animal.Spawned && animal.IsNonMutantAnimal)
-                    {
-                        yield return animal;
-                    }
-                }
+                if (animal != null && !animal.Dead && animal.Spawned)
+                    yield return animal;
             }
-        }
-
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            if (targets == null || targets.Count == 0 || pawn?.Map == null)
-                return null;
-
-            // Convert to pawns (we know they're all animals)
-            List<Pawn> animals = targets.OfType<Pawn>().ToList();
-            if (animals.Count == 0)
-                return null;
-
-            // Use the bucketing system to find the closest valid animal
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                animals,
-                (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
-                DistanceThresholds);
-
-            // Find the best animal to slaughter
-            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (animal, p) => IsValidSlaughterTarget(animal, p, forced),
-                _slaughterReachabilityCache);
-
-            // Create job if target found
-            if (targetAnimal != null)
-            {
-                Job job = JobMaker.MakeJob(WorkJobDef, targetAnimal);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to slaughter {targetAnimal.LabelShort}");
-                return job;
-            }
-
-            return null;
         }
 
         /// <summary>
-        /// Determines if the job giver should execute based on cache status
+        /// Update the job-specific cache with animals that need to be slaughtered
         /// </summary>
-        protected override bool ShouldExecuteNow(int mapId)
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
-            return Find.TickManager.TicksGame > _lastSlaughterCacheUpdateTick + CacheUpdateInterval ||
-                  !_slaughterCache.ContainsKey(mapId);
+            if (map == null)
+                yield break;
+
+            // Find all animals marked for slaughter
+            List<Pawn> slaughterableAnimals = new List<Pawn>();
+
+            // Add animals with slaughter designations
+            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Slaughter))
+            {
+                if (designation.target.Thing is Pawn animal && animal.IsNonMutantAnimal)
+                {
+                    slaughterableAnimals.Add(animal);
+                }
+            }
+
+            // Add auto-slaughter manager animals
+            foreach (Pawn animal in map.autoSlaughterManager.AnimalsToSlaughter)
+            {
+                if (animal != null && animal.Spawned && animal.IsNonMutantAnimal && !slaughterableAnimals.Contains(animal))
+                {
+                    slaughterableAnimals.Add(animal);
+                }
+            }
+
+            // Store in the centralized cache
+            StoreSlaughterableAnimalsCache(map, slaughterableAnimals);
+
+            // Convert to Things for the base class caching system
+            foreach (Pawn animal in slaughterableAnimals)
+            {
+                yield return animal;
+            }
+        }
+
+        /// <summary>
+        /// Gets or creates a cache of slaughterable animals for a specific map
+        /// </summary>
+        protected List<Pawn> GetOrCreateSlaughterableAnimalsCache(Map map)
+        {
+            if (map == null)
+                return new List<Pawn>();
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + SLAUGHTERABLE_CACHE_SUFFIX;
+
+            // Try to get cached animals from the map cache manager
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+            // Check if we need to update the cache
+            int currentTick = Find.TickManager.TicksGame;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            if (currentTick - lastUpdateTick > CacheUpdateInterval ||
+                !animalCache.TryGetValue(cacheKey, out List<Pawn> animals) ||
+                animals == null ||
+                animals.Any(a => a == null || a.Dead || !a.Spawned))
+            {
+                // Cache is invalid or expired, rebuild it
+                animals = new List<Pawn>();
+
+                // Add animals with slaughter designations
+                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Slaughter))
+                {
+                    if (designation.target.Thing is Pawn animal && animal.IsNonMutantAnimal)
+                    {
+                        animals.Add(animal);
+                    }
+                }
+
+                // Add auto-slaughter manager animals
+                foreach (Pawn animal in map.autoSlaughterManager.AnimalsToSlaughter)
+                {
+                    if (animal != null && animal.Spawned && animal.IsNonMutantAnimal && !animals.Contains(animal))
+                    {
+                        animals.Add(animal);
+                    }
+                }
+
+                // Store in the central cache
+                StoreSlaughterableAnimalsCache(map, animals);
+            }
+
+            return animals;
+        }
+
+        /// <summary>
+        /// Store a list of slaughterable animals in the centralized cache
+        /// </summary>
+        private void StoreSlaughterableAnimalsCache(Map map, List<Pawn> animals)
+        {
+            if (map == null)
+                return;
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + SLAUGHTERABLE_CACHE_SUFFIX;
+            int currentTick = Find.TickManager.TicksGame;
+
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+            animalCache[cacheKey] = animals;
+            Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, currentTick);
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Updated slaughterable animals cache for {this.GetType().Name}, found {animals.Count} animals");
+            }
+        }
+
+        #endregion
+
+        #region Job Processing
+
+        /// <summary>
+        /// Creates a job for a specific animal
+        /// </summary>
+        protected override Job CreateJobForAnimal(Pawn pawn, Pawn animal, bool forced)
+        {
+            if (!IsValidSlaughterTarget(animal, pawn, forced))
+                return null;
+
+            // Create job if target found
+            Job job = JobMaker.MakeJob(WorkJobDef, animal);
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to slaughter {animal.LabelShort}");
+            }
+
+            return job;
         }
 
         /// <summary>
@@ -205,67 +258,6 @@ namespace emitbreaker.PawnControl
         protected override bool IsValidAnimalTarget(Pawn animal, Pawn handler)
         {
             return IsValidSlaughterTarget(animal, handler, false);
-        }
-
-        #endregion
-
-        #region Target processing
-
-        /// <summary>
-        /// Updates the cache of animals that need to be slaughtered
-        /// </summary>
-        private void UpdateSlaughterCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            // Clear outdated cache
-            if (_slaughterCache.ContainsKey(mapId))
-                _slaughterCache[mapId].Clear();
-            else
-                _slaughterCache[mapId] = new List<Pawn>();
-
-            // Clear reachability cache too
-            if (_slaughterReachabilityCache.ContainsKey(mapId))
-                _slaughterReachabilityCache[mapId].Clear();
-            else
-                _slaughterReachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-            // Add animals with slaughter designations
-            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Slaughter))
-            {
-                if (designation.target.Thing is Pawn animal && animal.IsNonMutantAnimal)
-                {
-                    _slaughterCache[mapId].Add(animal);
-                }
-            }
-
-            // Add auto-slaughter manager animals
-            foreach (Pawn animal in map.autoSlaughterManager.AnimalsToSlaughter)
-            {
-                if (animal != null && animal.Spawned && animal.IsNonMutantAnimal && !_slaughterCache[mapId].Contains(animal))
-                {
-                    _slaughterCache[mapId].Add(animal);
-                }
-            }
-
-            _lastSlaughterCacheUpdateTick = currentTick;
-        }
-
-        /// <summary>
-        /// Create a job to slaughter an animal
-        /// </summary>
-        private Job TryCreateSlaughterJob(Pawn pawn, bool forced = false)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_slaughterCache.ContainsKey(mapId) || _slaughterCache[mapId].Count == 0)
-                return null;
-
-            return ProcessCachedTargets(pawn, _slaughterCache[mapId].Cast<Thing>().ToList(), forced);
         }
 
         /// <summary>
@@ -320,7 +312,40 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Utility
+        #region Reset
+
+        /// <summary>
+        /// Reset the slaughter-specific cache
+        /// </summary>
+        public override void Reset()
+        {
+            // Call base reset first
+            base.Reset();
+
+            // Now clear slaughter-specific caches
+            foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
+            {
+                string cacheKey = this.GetType().Name + SLAUGHTERABLE_CACHE_SUFFIX;
+                var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+                if (animalCache.ContainsKey(cacheKey))
+                {
+                    animalCache.Remove(cacheKey);
+                }
+
+                // Clear the update tick record too
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Reset slaughter caches for {this.GetType().Name}");
+            }
+        }
+
+        #endregion
+
+        #region Debug
 
         public override string ToString()
         {

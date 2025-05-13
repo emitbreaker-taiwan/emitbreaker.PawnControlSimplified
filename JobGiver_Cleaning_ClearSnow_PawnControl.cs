@@ -52,7 +52,28 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Cleaning_ClearSnow_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
         #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method for snow cells
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Snow clearing doesn't use Thing targets, so return empty
+            return Enumerable.Empty<Thing>();
+        }
 
         /// <summary>
         /// Snow clearing doesn't use Thing targets
@@ -80,6 +101,27 @@ namespace emitbreaker.PawnControl
             return pawn?.Map != null &&
                    pawn.Map.areaManager.SnowClear != null &&
                    pawn.Map.areaManager.SnowClear.TrueCount > 0;
+        }
+
+        #endregion
+
+        #region Core Flow
+
+        /// <summary>
+        /// Only execute if there's actually snow on the map
+        /// </summary>
+        protected override bool ShouldExecuteNow(int mapId)
+        {
+            // First check base conditions
+            if (!base.ShouldExecuteNow(mapId))
+                return false;
+
+            // Check if the map exists and has snow
+            Map map = Find.Maps.FirstOrDefault(m => m.uniqueID == mapId);
+            if (map == null)
+                return false;
+
+            return map.snowGrid.TotalDepth > 0.1f;
         }
 
         #endregion
@@ -156,6 +198,19 @@ namespace emitbreaker.PawnControl
             return pawn.Map.snowGrid.GetDepth(cell) >= MIN_SNOW_DEPTH &&
                    !cell.IsForbidden(pawn) &&
                    pawn.CanReserve(cell);
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset
+            base.Reset();
         }
 
         #endregion

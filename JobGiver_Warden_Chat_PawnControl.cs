@@ -25,7 +25,7 @@ namespace emitbreaker.PawnControl
         protected override int CacheUpdateInterval => 180;
 
         /// <summary>
-        /// Distance thresholds for bucketing (10, 20, 30 tiles)
+        /// Distance thresholds for bucketing (10, 20, 30 tiles squared)
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f };
 
@@ -33,12 +33,18 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
+        /// <summary>
+        /// Gets base priority for the job giver
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             // Chatting with prisoners for recruitment or resistance reduction is important
             return 5.7f;
         }
 
+        /// <summary>
+        /// Creates a job for the warden to interact with a prisoner
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_Chat_PawnControl>(
@@ -48,15 +54,15 @@ namespace emitbreaker.PawnControl
                     // Process cached targets to create job
                     if (p?.Map == null) return null;
 
-                    int mapId = p.Map.uniqueID;
-                    List<Thing> targets;
-                    if (_prisonerCache.TryGetValue(mapId, out var prisonerList) && prisonerList != null)
+                    // Get prisoners from centralized cache system
+                    var prisoners = GetOrCreatePrisonerCache(p.Map);
+
+                    // Convert to Thing list for processing
+                    List<Thing> targets = new List<Thing>();
+                    foreach (Pawn prisoner in prisoners)
                     {
-                        targets = new List<Thing>(prisonerList.Cast<Thing>());
-                    }
-                    else
-                    {
-                        targets = new List<Thing>();
+                        if (prisoner != null && !prisoner.Dead && prisoner.Spawned)
+                            targets.Add(prisoner);
                     }
 
                     return ProcessCachedTargets(p, targets, forced);
@@ -66,14 +72,15 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Target processing
+        #region Prisoner Selection
 
         /// <summary>
-        /// Get all prisoners eligible for chat interaction
+        /// Get prisoners that match the criteria for chat interactions
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override IEnumerable<Pawn> GetPrisonersMatchingCriteria(Map map)
         {
-            if (map == null) yield break;
+            if (map == null)
+                yield break;
 
             // Get all prisoner pawns on the map
             foreach (Pawn prisoner in map.mapPawns.PrisonersOfColonySpawned)
@@ -116,46 +123,15 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Process the cached targets to create jobs
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn warden, List<Thing> targets, bool forced)
-        {
-            if (warden?.Map == null || targets.Count == 0)
-                return null;
-
-            int mapId = warden.Map.uniqueID;
-
-            // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets<Pawn>(
-                warden,
-                targets.ConvertAll(t => t as Pawn),
-                (prisoner) => (prisoner.Position - warden.Position).LengthHorizontalSquared,
-                DistanceThresholds
-            );
-
-            // Find the first valid prisoner to chat with
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
-                buckets,
-                warden,
-                (prisoner, p) => IsValidPrisonerTarget(prisoner, p),
-                _prisonerReachabilityCache.TryGetValue(mapId, out var cache) ?
-                    new Dictionary<int, Dictionary<Pawn, bool>> { { mapId, cache } } :
-                    new Dictionary<int, Dictionary<Pawn, bool>>()
-            );
-
-            if (targetPrisoner == null)
-                return null;
-
-            // Create chat job
-            return CreateChatJob(warden, targetPrisoner);
-        }
-
-        /// <summary>
         /// Validates if a warden can chat with a specific prisoner
         /// </summary>
         protected override bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden)
         {
-            if (prisoner?.guest == null || warden?.Faction == null)
+            // First check base class validation
+            if (!base.IsValidPrisonerTarget(prisoner, warden))
+                return false;
+
+            if (prisoner?.guest == null)
                 return false;
 
             if (warden.Faction != prisoner.HostFaction)
@@ -182,13 +158,35 @@ namespace emitbreaker.PawnControl
             if (!prisoner.Awake())
                 return false;
 
-            // Check basic reachability
-            if (!prisoner.Spawned || prisoner.IsForbidden(warden) ||
-                !warden.CanReserve(prisoner, 1, -1, null, false))
+            // Check if warden can reserve prisoner
+            if (!warden.CanReserve(prisoner, 1, -1, null, false))
                 return false;
 
             return true;
         }
+
+        /// <summary>
+        /// Create a job for the given prisoner
+        /// </summary>
+        protected override Job CreateJobForPrisoner(Pawn warden, Pawn prisoner, bool forced)
+        {
+            Job job = JobMaker.MakeJob(JobDefOf.PrisonerAttemptRecruit, prisoner);
+
+            if (Prefs.DevMode)
+            {
+                PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
+                string interactionType = interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ?
+                    "recruit" : "reduce resistance of";
+
+                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to {interactionType} prisoner {prisoner.LabelShort}");
+            }
+
+            return job;
+        }
+
+        #endregion
+
+        #region Cache Management
 
         /// <summary>
         /// Determines if the job giver should execute based on cache status
@@ -200,33 +198,16 @@ namespace emitbreaker.PawnControl
             if (map == null || map.mapPawns.PrisonersOfColonySpawnedCount == 0)
                 return false;
 
-            return !_lastWardenCacheUpdate.TryGetValue(mapId, out int lastUpdate) ||
-                   Find.TickManager.TicksGame > lastUpdate + CacheUpdateInterval;
+            // Check if cache needs updating
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            return Find.TickManager.TicksGame > lastUpdateTick + CacheUpdateInterval;
         }
 
         #endregion
 
-        #region Job creation
-
-        /// <summary>
-        /// Creates the chat job for the warden
-        /// </summary>
-        private Job CreateChatJob(Pawn warden, Pawn prisoner)
-        {
-            Job job = JobMaker.MakeJob(JobDefOf.PrisonerAttemptRecruit, prisoner);
-
-            PrisonerInteractionModeDef interactionMode = prisoner.guest.ExclusiveInteractionMode;
-            string interactionType = interactionMode == PrisonerInteractionModeDefOf.AttemptRecruit ?
-                "recruit" : "reduce resistance of";
-
-            Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to {interactionType} prisoner {prisoner.LabelShort}");
-
-            return job;
-        }
-
-        #endregion
-
-        #region Utility
+        #region Debug
 
         /// <summary>
         /// For debugging purposes

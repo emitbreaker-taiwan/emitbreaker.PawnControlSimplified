@@ -18,7 +18,6 @@ namespace emitbreaker.PawnControl
             return DefDatabase<ThinkTreeDef>.GetNamed(defName);
         }
 
-
         /// <summary>Cached reflection access to the ResolveSubnodes method</summary>
         private static readonly MethodInfo resolveMethod = AccessTools.Method(typeof(ThinkNode), "ResolveSubnodes");
 

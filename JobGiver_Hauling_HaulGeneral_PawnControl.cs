@@ -45,97 +45,29 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_HaulGeneral_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Use the shared cache updating logic from base class
-                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastHaulingCacheUpdate[mapId] = now;
-                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    // Get general items from shared cache
-                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
-                        return null;
-
-                    // Filter only non-corpse items from the shared cache
-                    var generalItems = haulables.Where(t => !(t is Corpse)).ToList();
-                    if (generalItems.Count == 0)
-                        return null;
-
-                    // Use the bucketing system to find the closest valid item
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        generalItems,
-                        (item) => (item.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Find the best item to haul
-                    Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, worker) => IsValidHaulItem(thing, worker),
-                        _reachabilityCache);
-
-                    // Create and return job if we found a valid target
-                    if (targetThing != null)
-                    {
-                        // Find storage location
-                        IntVec3 storeCell;
-                        IHaulDestination haulDestination;
-                        if (!StoreUtility.TryFindBestBetterStorageFor(targetThing, p, p.Map,
-                            StoreUtility.CurrentStoragePriorityOf(targetThing), p.Faction, out storeCell, out haulDestination))
-                            return null;
-
-                        // Create haul job
-                        Job job = HaulAIUtility.HaulToCellStorageJob(p, targetThing, storeCell, false);
-
-                        if (job != null)
-                        {
-                            Utility_DebugManager.LogNormal($"{p.LabelShort} created general hauling job for {targetThing.Label} to {storeCell}");
-                        }
-
-                        return job;
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
-        }
-
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
             if (targets == null || targets.Count == 0)
                 return null;
 
+            // Filter out corpses - handled by corpse-specific job giver
+            var generalItems = targets.Where(t => !(t is Corpse)).ToList();
+            if (generalItems.Count == 0)
+                return null;
+
             // Use the bucketing system to find the closest valid item
             var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
-                targets,
+                generalItems,
                 (item) => (item.Position - pawn.Position).LengthHorizontalSquared,
                 DistanceThresholds);
 
-            // Find the best item to haul
+            // Find the best item to haul using the centralized cache system
             Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (thing, worker) => IsValidHaulItem(thing, worker),
-                _reachabilityCache);
+                null); // Let the parent class manage reachability caching
 
             if (targetThing != null)
             {
@@ -206,11 +138,12 @@ namespace emitbreaker.PawnControl
             if (thing is Corpse)
                 return false;
 
-            // Skip if forbidden or unreachable
-            if (thing.IsForbidden(pawn) || !pawn.CanReserveAndReach(thing, PathEndMode.ClosestTouch, pawn.NormalMaxDanger()))
+            // Use vanilla hauling validation first - this handles many edge cases
+            if (!HaulAIUtility.PawnCanAutomaticallyHaulFast(pawn, thing, false))
                 return false;
 
-            // Skip if already in valid storage
+            // Skip if already in valid storage (already checked by PawnCanAutomaticallyHaulFast,
+            // but keeping for clarity and redundancy)
             if (StoreUtility.IsInValidBestStorage(thing))
                 return false;
 

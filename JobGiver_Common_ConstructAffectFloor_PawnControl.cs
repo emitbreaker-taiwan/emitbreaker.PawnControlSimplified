@@ -15,18 +15,15 @@ namespace emitbreaker.PawnControl
     {
         #region Configuration
 
-        // Distance thresholds for bucketing
-        protected static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
-
         /// <summary>
         /// Set work tag to Construction for eligibility checks
         /// </summary>
-        protected override string WorkTag => "Construction";
+        public override string WorkTag => "Construction";
 
         /// <summary>
         /// Override debug name for better logging
         /// </summary>
-        protected override string DebugName => $"{TargetDesignation.defName} assignment";
+        protected override string DebugName => $"{TargetDesignation?.defName} assignment";
 
         /// <summary>
         /// Whether this job giver requires player faction (always true for designations)
@@ -42,27 +39,30 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Override cache interval
         /// </summary>
-        protected override int CacheUpdateInterval => CACHE_UPDATE_INTERVAL;
-
-        // Must be implemented by subclasses to specify which designation to target
-        protected override DesignationDef TargetDesignation { get; }
-
-        // Must be implemented by subclasses to specify which job to use
-        protected override JobDef WorkJobDef { get; }
+        protected override int CacheUpdateInterval => 120; // Update every 2 seconds
 
         /// <summary>
-        /// Cache update interval in ticks
+        /// Standard distance thresholds for floor construction bucketing
         /// </summary>
-        protected const int CACHE_UPDATE_INTERVAL = 120; // Update every 2 seconds
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f }; // 15, 25, 40 tiles
+
+        // Must be implemented by subclasses to specify which designation to target
+        protected abstract override DesignationDef TargetDesignation { get; }
+
+        // Must be implemented by subclasses to specify which job to use
+        protected abstract override JobDef WorkJobDef { get; }
 
         #endregion
 
-        #region Caching
+        #region Constructor
 
-        // Cache for cells with designations
-        protected static readonly Dictionary<int, Dictionary<DesignationDef, List<IntVec3>>> _designatedCellsCache = new Dictionary<int, Dictionary<DesignationDef, List<IntVec3>>>();
-        protected static readonly Dictionary<int, Dictionary<IntVec3, bool>> _reachabilityCache = new Dictionary<int, Dictionary<IntVec3, bool>>();
-        protected static int _lastCacheUpdateTick = -999;
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Common_ConstructAffectFloor_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
 
         #endregion
 
@@ -95,7 +95,66 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
+        #region Core Flow
+
+        /// <summary>
+        /// Standard implementation of TryGiveJob that ensures proper faction validation
+        /// and checks map requirements before proceeding with job creation
+        /// </summary>
+        protected override Job TryGiveJob(Pawn pawn)
+        {
+            // Skip if already filtered out by base class
+            if (ShouldSkip(pawn))
+                return null;
+
+            // Skip if map requirements not met
+            if (!AreMapRequirementsMet(pawn))
+                return null;
+
+            // Use the standard job creation flow from base
+            return base.TryGiveJob(pawn);
+        }
+
+        /// <summary>
+        /// Template method for creating a job that handles cache update logic
+        /// </summary>
+        protected override Job CreateJobFor(Pawn pawn, bool forced)
+        {
+            if (pawn?.Map == null)
+                return null;
+
+            int mapId = pawn.Map.uniqueID;
+
+            if (!ShouldExecuteNow(mapId))
+                return null;
+
+            // Create the floor construction job directly
+            return CreateFloorConstructionJob(pawn, forced);
+        }
+
+        /// <summary>
+        /// Checks if the map meets requirements for this floor job
+        /// </summary>
+        protected override bool AreMapRequirementsMet(Pawn pawn)
+        {
+            // Check if map has the required designations
+            return pawn?.Map != null &&
+                   TargetDesignation != null &&
+                   pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation);
+        }
+
+        #endregion
+
         #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method for floor cells
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            // Floor JobGivers work with cells, not things
+            return Enumerable.Empty<Thing>();
+        }
 
         /// <summary>
         /// Get targets - in this case we return an empty collection since we work with cells
@@ -120,30 +179,6 @@ namespace emitbreaker.PawnControl
         #region Job Creation
 
         /// <summary>
-        /// Standard implementation of TryGiveJob that ensures proper faction validation
-        /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            // Use the standardized job creation pattern
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Common_ConstructAffectFloor_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Extra faction validation in case this is called directly
-                    if (!IsValidFactionForConstruction(p))
-                        return null;
-
-                    // Check if map requirements are met
-                    if (!AreMapRequirementsMet(p))
-                        return null;
-
-                    // Call the specialized job creation method
-                    return CreateFloorConstructionJob(p, forced);
-                },
-                debugJobDesc: DebugName);
-        }
-
-        /// <summary>
         /// Creates a job for the pawn using the cached targets
         /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
@@ -157,38 +192,22 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Checks if the map meets requirements for this floor job
-        /// </summary>
-        protected override bool AreMapRequirementsMet(Pawn pawn)
-        {
-            // Check if map has the required designations
-            return pawn?.Map != null &&
-                   pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation);
-        }
-
-        /// <summary>
         /// Creates a job for the specified floor construction task
         /// </summary>
         protected virtual Job CreateFloorConstructionJob(Pawn pawn, bool forced)
         {
-            if (pawn?.Map == null)
+            if (pawn?.Map == null || TargetDesignation == null)
                 return null;
 
-            // Update cache
-            UpdateDesignatedCellsCache(pawn.Map);
-
-            // Get cells from cache
-            int mapId = pawn.Map.uniqueID;
-            if (!_designatedCellsCache.ContainsKey(mapId) ||
-                !_designatedCellsCache[mapId].ContainsKey(TargetDesignation) ||
-                _designatedCellsCache[mapId][TargetDesignation].Count == 0)
+            // Get all cells with the target designation
+            List<IntVec3> cells = GetDesignatedCells(pawn.Map);
+            if (cells.Count == 0)
                 return null;
-
-            // Get the list of designated cells
-            List<IntVec3> cells = _designatedCellsCache[mapId][TargetDesignation];
 
             // Create buckets and process cells
             List<IntVec3>[] buckets = CreateDistanceBuckets(pawn, cells);
+            if (buckets == null)
+                return null;
 
             // Find the best cell using the cell validator
             IntVec3 targetCell = FindBestCell(buckets, pawn, (cell, p) => ValidateFloorCell(cell, p, forced));
@@ -201,6 +220,36 @@ namespace emitbreaker.PawnControl
 
             Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to affect floor at {targetCell} using {TargetDesignation.defName}");
             return job;
+        }
+
+        /// <summary>
+        /// Implement to create the specific construction job
+        /// </summary>
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
+        {
+            // Just delegate to our specific implementation
+            return CreateFloorConstructionJob(pawn, forced);
+        }
+
+        #endregion
+
+        #region Helper Methods
+
+        /// <summary>
+        /// Gets all cells with the target designation
+        /// </summary>
+        protected List<IntVec3> GetDesignatedCells(Map map)
+        {
+            if (map == null || TargetDesignation == null)
+                return new List<IntVec3>();
+
+            List<IntVec3> cells = new List<IntVec3>();
+            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(TargetDesignation))
+            {
+                cells.Add(designation.target.Cell);
+            }
+
+            return LimitListSize(cells);
         }
 
         #endregion
@@ -225,60 +274,24 @@ namespace emitbreaker.PawnControl
                 !pawn.CanReach(cell, PathEndMode.Touch, Danger.Some))
                 return false;
 
+            // Check if cell is already reserved by another pawn
+            if (IsCellReservedByAnother(pawn, cell, WorkJobDef))
+                return false;
+
             return true;
         }
 
         #endregion
 
-        #region Cache Management
+        #region Reset
 
         /// <summary>
-        /// Updates the cache of cells with floor designations
+        /// Reset the cache - implements IResettableCache
         /// </summary>
-        protected void UpdateDesignatedCellsCache(Map map)
+        public override void Reset()
         {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CACHE_UPDATE_INTERVAL ||
-                !_designatedCellsCache.ContainsKey(mapId) ||
-                !_designatedCellsCache[mapId].ContainsKey(TargetDesignation))
-            {
-                // Initialize cache dictionaries if needed
-                if (!_designatedCellsCache.ContainsKey(mapId))
-                    _designatedCellsCache[mapId] = new Dictionary<DesignationDef, List<IntVec3>>();
-
-                if (!_designatedCellsCache[mapId].ContainsKey(TargetDesignation))
-                    _designatedCellsCache[mapId][TargetDesignation] = new List<IntVec3>();
-                else
-                    _designatedCellsCache[mapId][TargetDesignation].Clear();
-
-                // Clear reachability cache too
-                if (!_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId] = new Dictionary<IntVec3, bool>();
-                else
-                    _reachabilityCache[mapId].Clear();
-
-                // Find all cells with designations
-                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(TargetDesignation))
-                {
-                    _designatedCellsCache[mapId][TargetDesignation].Add(designation.target.Cell);
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
-        }
-
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetConstructAffectFloorCache()
-        {
-            _designatedCellsCache.Clear();
-            _reachabilityCache.Clear();
-            _lastCacheUpdateTick = -999;
+            // Use centralized cache reset
+            base.Reset();
         }
 
         #endregion

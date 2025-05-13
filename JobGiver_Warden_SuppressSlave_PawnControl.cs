@@ -33,41 +33,110 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 100f, 225f, 625f };
 
+        /// <summary>
+        /// Cache key identifier for this specific job giver
+        /// </summary>
+        private const string CACHE_KEY_SUFFIX = "_SuppressSlave";
+
+        #endregion
+
+        #region Initialization
+
+        /// <summary>
+        /// Reset the cache for suppress slave job giver
+        /// </summary>
+        public static void ResetSuppressionCache()
+        {
+            // Clear all slave suppression related caches from all maps
+            foreach (Map map in Find.Maps)
+            {
+                int mapId = map.uniqueID;
+                string cacheKey = typeof(JobGiver_Warden_SuppressSlave_PawnControl).Name + PRISONERS_CACHE_SUFFIX + CACHE_KEY_SUFFIX;
+                string reachCacheKey = typeof(JobGiver_Warden_SuppressSlave_PawnControl).Name + "_ReachCache" + CACHE_KEY_SUFFIX;
+
+                var slaveCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+                if (slaveCache.ContainsKey(cacheKey))
+                {
+                    slaveCache.Remove(cacheKey);
+                    Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+                }
+
+                // Clear reachability cache
+                var reachabilityCache = Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
+                reachabilityCache.Clear();
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, reachCacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal("Reset all suppress slave caches");
+            }
+        }
+
         #endregion
 
         #region Core flow
 
+        /// <summary>
+        /// Slave suppression has high priority
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             // Slave suppression has high priority
             return 6.0f;
         }
 
+        /// <summary>
+        /// Try to give a job, using the centralized cache system
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
+            // Check if Ideology DLC is active
+            if (!ModLister.CheckIdeology("Slave suppression"))
+                return null;
+
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_SuppressSlave_PawnControl>(
                 pawn,
                 WorkTag,
-                (p, forced) => {
-                    // Process cached targets to create job
-                    if (p?.Map == null) return null;
-
-                    int mapId = p.Map.uniqueID;
-                    List<Pawn> targets;
-                    if (_prisonerCache.TryGetValue(mapId, out var slaveList) && slaveList != null)
-                    {
-                        targets = new List<Pawn>(slaveList);
-                    }
-                    else
-                    {
-                        targets = new List<Pawn>();
-                    }
-
-                    return ProcessCachedTargets(p, targets.Cast<Thing>().ToList(), forced);
-                },
+                CreateJobFromCachedTargets,
                 debugJobDesc: "suppress slave");
         }
 
+        /// <summary>
+        /// Create a job using the cached targets
+        /// </summary>
+        private Job CreateJobFromCachedTargets(Pawn pawn, bool forced)
+        {
+            // Process cached targets to create job
+            if (pawn?.Map == null) return null;
+
+            int mapId = pawn.Map.uniqueID;
+
+            // Get slaves from cache using the proper cache key
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX + CACHE_KEY_SUFFIX;
+            var slaveCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+            List<Pawn> slaveList = slaveCache.TryGetValue(cacheKey, out var cachedList) ? cachedList : null;
+
+            List<Thing> targets;
+            if (slaveList != null)
+            {
+                targets = new List<Thing>(slaveList.Cast<Thing>());
+            }
+            else
+            {
+                // If cache miss, update the cache
+                var freshSlaves = GetPrisonersMatchingCriteria(pawn.Map).ToList();
+                slaveCache[cacheKey] = freshSlaves;
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, Find.TickManager.TicksGame);
+                targets = new List<Thing>(freshSlaves.Cast<Thing>());
+            }
+
+            return ProcessCachedTargets(pawn, targets, forced);
+        }
+
+        /// <summary>
+        /// Determines if this job giver should be skipped for the given pawn
+        /// </summary>
         public override bool ShouldSkip(Pawn pawn)
         {
             // Check if Ideology DLC is active
@@ -90,6 +159,26 @@ namespace emitbreaker.PawnControl
             if (map == null) yield break;
 
             // Find all slaves on the map
+            foreach (Pawn slave in map.mapPawns.SlavesOfColonySpawned)
+            {
+                if (slave != null && !slave.Destroyed && slave.Spawned)
+                {
+                    if (CanBeSuppressed(slave))
+                    {
+                        yield return slave;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get slaves matching specific criteria for this job giver
+        /// </summary>
+        protected override IEnumerable<Pawn> GetPrisonersMatchingCriteria(Map map)
+        {
+            if (map == null) yield break;
+
+            // Find all slaves eligible for suppression on the map
             foreach (Pawn slave in map.mapPawns.SlavesOfColonySpawned)
             {
                 if (slave != null && !slave.Destroyed && slave.Spawned)
@@ -146,28 +235,30 @@ namespace emitbreaker.PawnControl
             int mapId = warden.Map.uniqueID;
 
             // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets<Thing>(
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets<Pawn>(
                 warden,
-                targets,
-                (thing) => (thing.Position - warden.Position).LengthHorizontalSquared,
+                targets.ConvertAll(t => t as Pawn),
+                (slave) => (slave.Position - warden.Position).LengthHorizontalSquared,
                 DistanceThresholds
             );
 
+            // Get reachability cache for this job giver
+            string reachCacheKey = this.GetType().Name + "_ReachCache" + CACHE_KEY_SUFFIX;
+            var reachabilityCache = Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
+
             // Find the first valid slave to suppress
-            Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Thing>(
+            Pawn targetSlave = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
                 buckets,
                 warden,
-                (thing, p) => IsValidPrisonerTarget(thing as Pawn, p),
-                _prisonerReachabilityCache.TryGetValue(mapId, out var cache) ?
-                    new Dictionary<int, Dictionary<Thing, bool>> { { mapId, cache.ToDictionary(kvp => (Thing)kvp.Key, kvp => kvp.Value) } } :
-                    new Dictionary<int, Dictionary<Thing, bool>>()
+                (slave, p) => IsValidPrisonerTarget(slave, p),
+                new Dictionary<int, Dictionary<Pawn, bool>> { { mapId, reachabilityCache } }
             );
 
-            if (targetThing == null || !(targetThing is Pawn slave))
+            if (targetSlave == null)
                 return null;
 
-            // Create suppression job
-            return CreateSuppressionJob(warden, slave);
+            // Create job for the slave
+            return CreateJobForPrisoner(warden, targetSlave, forced);
         }
 
         /// <summary>
@@ -201,18 +292,30 @@ namespace emitbreaker.PawnControl
         {
             // Check if there are any slaves on the map
             Map map = Find.Maps.Find(m => m.uniqueID == mapId);
-            if (map == null || !map.mapPawns.SlavesOfColonySpawned.Any(s => 
-                s.guest?.slaveInteractionMode == SlaveInteractionModeDefOf.Suppress && 
+            if (map == null || !map.mapPawns.SlavesOfColonySpawned.Any(s =>
+                s.guest?.slaveInteractionMode == SlaveInteractionModeDefOf.Suppress &&
                 s.guest.ScheduledForSlaveSuppression))
                 return false;
 
-            return !_lastWardenCacheUpdate.TryGetValue(mapId, out int lastUpdate) ||
-                   Find.TickManager.TicksGame > lastUpdate + CacheUpdateInterval;
+            // Check cache update interval
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX + CACHE_KEY_SUFFIX;
+            int currentTick = Find.TickManager.TicksGame;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            return currentTick - lastUpdateTick >= CacheUpdateInterval;
         }
 
         #endregion
 
         #region Job creation
+
+        /// <summary>
+        /// Creates a job for the given slave
+        /// </summary>
+        protected override Job CreateJobForPrisoner(Pawn warden, Pawn slave, bool forced)
+        {
+            return CreateSuppressionJob(warden, slave);
+        }
 
         /// <summary>
         /// Creates the suppression job for the warden
@@ -228,7 +331,45 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Utility
+        #region Cache management
+
+        /// <summary>
+        /// Reset the cache for this job giver
+        /// </summary>
+        public override void Reset()
+        {
+            base.Reset();
+
+            // Clear specific caches for this job giver
+            foreach (Map map in Find.Maps)
+            {
+                int mapId = map.uniqueID;
+                string slaveCacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX + CACHE_KEY_SUFFIX;
+                string reachCacheKey = this.GetType().Name + "_ReachCache" + CACHE_KEY_SUFFIX;
+
+                // Clear slave cache
+                var slaveCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+                if (slaveCache.ContainsKey(slaveCacheKey))
+                {
+                    slaveCache.Remove(slaveCacheKey);
+                    Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, slaveCacheKey, -1);
+                }
+
+                // Clear reachability cache
+                var reachabilityCache = Utility_MapCacheManager.GetOrCreateMapCache<Pawn, bool>(mapId);
+                reachabilityCache.Clear();
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, reachCacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Reset suppress slave cache for {this.GetType().Name}");
+            }
+        }
+
+        #endregion
+
+        #region Debug support
 
         /// <summary>
         /// For debugging purposes

@@ -18,7 +18,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// All BasicWorker job givers share this work tag
         /// </summary>
-        protected override string WorkTag => "BasicWorker";
+        public override string WorkTag => "BasicWorker";
 
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
@@ -34,7 +34,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_BasicWorker;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_BasicWorker;
 
         /// <summary>
         /// Update cache every 5 seconds by default
@@ -48,14 +48,15 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Caching
+        #region Constructor
 
         /// <summary>
-        /// Domain-specific caches for BasicWorker jobs
+        /// Constructor that initializes the cache system
         /// </summary>
-        protected static readonly Dictionary<int, List<Thing>> _designationCache = new Dictionary<int, List<Thing>>();
-        protected static readonly Dictionary<int, Dictionary<Thing, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Thing, bool>>();
-        protected static readonly Dictionary<int, int> _lastDesignationCacheUpdate = new Dictionary<int, int>();
+        public JobGiver_BasicWorker_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
 
         #endregion
 
@@ -88,38 +89,20 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Job Creation
+        #region Core flow
 
         /// <summary>
         /// Standard implementation of TryGiveJob that ensures proper faction validation
+        /// and checks map requirements before proceeding with job creation
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Use the standardized job creation pattern
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_BasicWorker_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Extra faction validation in case this is called directly
-                    if (!IsValidFactionForDesignationWork(p))
-                        return null;
+            // Skip if map doesn't meet the requirements for this job type
+            if (pawn?.Map == null || !AreMapRequirementsMet(pawn))
+                return null;
 
-                    // Check if map has the required designations
-                    if (!AreMapRequirementsMet(p))
-                        return null;
-
-                    // Get targets from the map based on designation
-                    List<Thing> targets = _cachedTargets.TryGetValue(p.Map.uniqueID, out var cachedTargets) && cachedTargets.Count > 0
-                        ? cachedTargets
-                        : GetTargets(p.Map).ToList();
-
-                    if (targets.Count == 0)
-                        return null;
-
-                    // Create job for the best target
-                    return CreateBasicWorkerJob(p, targets, forced);
-                },
-                debugJobDesc: DebugName);
+            // Proceed with standard job creation flow from parent
+            return base.TryGiveJob(pawn);
         }
 
         /// <summary>
@@ -160,9 +143,9 @@ namespace emitbreaker.PawnControl
                 thing => (thing.Position - pawn.Position).LengthHorizontalSquared,
                 DistanceThresholds);
 
-            // Find the first valid target
+            // Find the first valid target using the centralized cache system
             Thing bestTarget = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets, pawn, IsValidTarget, _reachabilityCache);
+                buckets, pawn, IsValidTarget, null); // Use parent's reachability caching
 
             // Create a job for the target if found
             if (bestTarget != null)
@@ -175,7 +158,7 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Target Selection
+        #region Target selection
 
         /// <summary>
         /// Gets all targets with the specified designation
@@ -214,6 +197,18 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            base.Reset();
+        }
+
+        #endregion
+
         #region Utility
 
         /// <summary>
@@ -225,15 +220,6 @@ namespace emitbreaker.PawnControl
                 return list;
 
             return list.Take(maxSize).ToList();
-        }
-
-        /// <summary>
-        /// Reset caches when loading game or changing maps
-        /// </summary>
-        public static void ResetBasicWorkerCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_designationCache, _reachabilityCache);
-            _lastDesignationCacheUpdate.Clear();
         }
 
         #endregion

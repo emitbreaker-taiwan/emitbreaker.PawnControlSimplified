@@ -40,23 +40,10 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 225f, 625f, 1600f };
 
-        #endregion
-
-        #region Cache Management
-
-        // Release-specific cache
-        private static readonly Dictionary<int, List<Pawn>> _releaseCache = new Dictionary<int, List<Pawn>>();
-        private static readonly Dictionary<int, Dictionary<Pawn, bool>> _releaseReachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        private static int _lastReleaseCacheUpdateTick = -999;
-
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Cache key suffix specifically for releasable animals
         /// </summary>
-        public static void ResetReleaseCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_releaseCache, _releaseReachabilityCache);
-            _lastReleaseCacheUpdateTick = -999;
-        }
+        private const string RELEASABLE_CACHE_SUFFIX = "_ReleasableAnimals";
 
         #endregion
 
@@ -71,93 +58,155 @@ namespace emitbreaker.PawnControl
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Quick early exit if no animals are marked for release
-            if (!pawn.Map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.ReleaseAnimalToWild))
+            if (pawn?.Map == null || !pawn.Map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.ReleaseAnimalToWild))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_ReleaseAnimalsToWild_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Update the cache if needed
-                    if (now > _lastReleaseCacheUpdateTick + CacheUpdateInterval ||
-                        !_releaseCache.ContainsKey(mapId))
-                    {
-                        UpdateReleaseCache(p.Map);
-                    }
-
-                    // Process cached targets
-                    return TryCreateReleaseJob(p, forced);
-                },
-                debugJobDesc: DebugName);
+            // Use the parent class job creation logic
+            return base.TryGiveJob(pawn);
         }
 
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Get animals with release designations
+        /// </summary>
         protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            // We're using our custom release cache instead of the standard Thing targets
-            if (map?.designationManager != null)
+            if (map == null)
+                yield break;
+
+            // Get cached releasable animals from centralized cache
+            var animals = GetOrCreateReleasableAnimalsCache(map);
+
+            // Return animals as targets
+            foreach (Pawn animal in animals)
             {
-                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.ReleaseAnimalToWild))
-                {
-                    if (designation.target.HasThing && designation.target.Thing is Pawn animal && animal.IsNonMutantAnimal)
-                    {
-                        yield return animal;
-                    }
-                }
+                if (animal != null && !animal.Dead && animal.Spawned)
+                    yield return animal;
             }
-        }
-
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            if (targets == null || targets.Count == 0 || pawn?.Map == null)
-                return null;
-
-            // Convert to pawns (we know they're all animals)
-            List<Pawn> animals = targets.OfType<Pawn>().ToList();
-            if (animals.Count == 0)
-                return null;
-
-            // Use the bucketing system to find the closest valid animal
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                animals,
-                (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
-                DistanceThresholds);
-
-            // Find the best animal to release
-            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (animal, p) => IsValidReleaseTarget(animal, p, forced),
-                _releaseReachabilityCache);
-
-            // Create job if target found
-            if (targetAnimal != null)
-            {
-                Job job = JobMaker.MakeJob(WorkJobDef, targetAnimal);
-                job.count = 1;
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to release {targetAnimal.LabelShort} to the wild");
-                return job;
-            }
-
-            return null;
         }
 
         /// <summary>
-        /// Determines if the job giver should execute based on cache status
+        /// Update the job-specific cache with animals that have release designations
         /// </summary>
-        protected override bool ShouldExecuteNow(int mapId)
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
-            return Find.TickManager.TicksGame > _lastReleaseCacheUpdateTick + CacheUpdateInterval ||
-                  !_releaseCache.ContainsKey(mapId);
+            if (map == null)
+                yield break;
+
+            // Find all animals with release designation
+            List<Pawn> releasableAnimals = new List<Pawn>();
+
+            // Get animals with release designations - most efficient approach
+            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.ReleaseAnimalToWild))
+            {
+                if (designation.target.Thing is Pawn animal && animal.IsNonMutantAnimal)
+                {
+                    releasableAnimals.Add(animal);
+                }
+            }
+
+            // Store in the centralized cache
+            StoreReleasableAnimalsCache(map, releasableAnimals);
+
+            // Convert to Things for the base class caching system
+            foreach (Pawn animal in releasableAnimals)
+            {
+                yield return animal;
+            }
+        }
+
+        /// <summary>
+        /// Gets or creates a cache of releasable animals for a specific map
+        /// </summary>
+        protected List<Pawn> GetOrCreateReleasableAnimalsCache(Map map)
+        {
+            if (map == null)
+                return new List<Pawn>();
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + RELEASABLE_CACHE_SUFFIX;
+
+            // Try to get cached animals from the map cache manager
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+            // Check if we need to update the cache
+            int currentTick = Find.TickManager.TicksGame;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            if (currentTick - lastUpdateTick > CacheUpdateInterval ||
+                !animalCache.TryGetValue(cacheKey, out List<Pawn> animals) ||
+                animals == null ||
+                animals.Any(a => a == null || a.Dead || !a.Spawned))
+            {
+                // Cache is invalid or expired, rebuild it
+                animals = new List<Pawn>();
+
+                // Find animals with release designations
+                if (map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.ReleaseAnimalToWild))
+                {
+                    foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.ReleaseAnimalToWild))
+                    {
+                        if (designation.target.Thing is Pawn animal && animal.IsNonMutantAnimal)
+                        {
+                            animals.Add(animal);
+                        }
+                    }
+                }
+
+                // Store in the central cache
+                StoreReleasableAnimalsCache(map, animals);
+            }
+
+            return animals;
+        }
+
+        /// <summary>
+        /// Store a list of releasable animals in the centralized cache
+        /// </summary>
+        private void StoreReleasableAnimalsCache(Map map, List<Pawn> animals)
+        {
+            if (map == null)
+                return;
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + RELEASABLE_CACHE_SUFFIX;
+            int currentTick = Find.TickManager.TicksGame;
+
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+            animalCache[cacheKey] = animals;
+            Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, currentTick);
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Updated releasable animals cache for {this.GetType().Name}, found {animals.Count} animals");
+            }
+        }
+
+        #endregion
+
+        #region Job Processing
+
+        /// <summary>
+        /// Creates a job for a specific animal
+        /// </summary>
+        protected override Job CreateJobForAnimal(Pawn pawn, Pawn animal, bool forced)
+        {
+            if (!IsValidReleaseTarget(animal, pawn, forced))
+                return null;
+
+            // Create job if target found
+            Job job = JobMaker.MakeJob(WorkJobDef, animal);
+            job.count = 1;
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to release {animal.LabelShort} to the wild");
+            }
+
+            return job;
         }
 
         /// <summary>
@@ -187,58 +236,6 @@ namespace emitbreaker.PawnControl
         protected override bool IsValidAnimalTarget(Pawn animal, Pawn handler)
         {
             return IsValidReleaseTarget(animal, handler, false);
-        }
-
-        #endregion
-
-        #region Target processing
-
-        /// <summary>
-        /// Updates the cache of animals that need to be released to the wild
-        /// </summary>
-        private void UpdateReleaseCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            // Clear outdated cache
-            if (_releaseCache.ContainsKey(mapId))
-                _releaseCache[mapId].Clear();
-            else
-                _releaseCache[mapId] = new List<Pawn>();
-
-            // Clear reachability cache too
-            if (_releaseReachabilityCache.ContainsKey(mapId))
-                _releaseReachabilityCache[mapId].Clear();
-            else
-                _releaseReachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-            // Add animals with release designations
-            foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.ReleaseAnimalToWild))
-            {
-                if (designation.target.Thing is Pawn animal && animal.IsNonMutantAnimal)
-                {
-                    _releaseCache[mapId].Add(animal);
-                }
-            }
-
-            _lastReleaseCacheUpdateTick = currentTick;
-        }
-
-        /// <summary>
-        /// Create a job to release an animal to the wild
-        /// </summary>
-        private Job TryCreateReleaseJob(Pawn pawn, bool forced = false)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_releaseCache.ContainsKey(mapId) || _releaseCache[mapId].Count == 0)
-                return null;
-
-            return ProcessCachedTargets(pawn, _releaseCache[mapId].Cast<Thing>().ToList(), forced);
         }
 
         /// <summary>
@@ -282,7 +279,40 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Utility
+        #region Reset
+
+        /// <summary>
+        /// Reset the animal-specific cache
+        /// </summary>
+        public override void Reset()
+        {
+            // Call base reset first
+            base.Reset();
+
+            // Now clear release-specific caches
+            foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
+            {
+                string cacheKey = this.GetType().Name + RELEASABLE_CACHE_SUFFIX;
+                var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+                if (animalCache.ContainsKey(cacheKey))
+                {
+                    animalCache.Remove(cacheKey);
+                }
+
+                // Clear the update tick record too
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Reset release caches for {this.GetType().Name}");
+            }
+        }
+
+        #endregion
+
+        #region Debug
 
         public override string ToString()
         {

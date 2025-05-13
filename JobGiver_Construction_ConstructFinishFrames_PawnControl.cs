@@ -11,33 +11,62 @@ namespace emitbreaker.PawnControl
     /// JobGiver that allows pawns to finish construction frames belonging to their faction.
     /// Uses the Construction work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Construction_ConstructFinishFrames_PawnControl : JobGiver_Scan_PawnControl
+    public class JobGiver_Construction_ConstructFinishFrames_PawnControl : JobGiver_Construction_PawnControl
     {
-        #region Overrides
+        #region Configuration
 
         /// <summary>
         /// The job to create when a valid target is found
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.FinishFrame;
 
-        // Distance thresholds for bucketing
-        private static readonly float[] DISTANCE_THRESHOLDS = new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "finish construction assignment";
 
         /// <summary>
-        /// Whether this job giver requires a designator to operate (zone designation, etc.)
-        /// Most cleaning jobs require designators so default is true
+        /// Whether this job giver requires a designator to operate
+        /// Finishing frames doesn't require designations
+        /// </summary>
+        protected override bool RequiresDesignator => false;
+
+        /// <summary>
+        /// Whether this job giver requires map zone or area
         /// </summary>
         protected override bool RequiresMapZoneorArea => false;
 
         /// <summary>
-        /// Use Construction work tag
+        /// Whether this job requires player faction specifically
+        /// Frames can be finished by any faction that owns them
         /// </summary>
-        protected override string WorkTag => "Construction";
+        protected override bool RequiresPlayerFaction => false;
 
         /// <summary>
-        /// Override cache update interval for construction jobs
+        /// Update cache every 3 seconds for construction frame jobs
         /// </summary>
-        protected override int CacheUpdateInterval => 180; // Update every 3 seconds
+        protected override int CacheUpdateInterval => 180;
+
+        /// <summary>
+        /// Standard distance thresholds for bucketing frames
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 225f, 625f, 2500f }; // 15, 25, 50 tiles
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_ConstructFinishFrames_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
 
         /// <summary>
         /// Finishing construction is more important than starting new projects
@@ -48,11 +77,30 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Gets all frames that are ready to be finished
+        /// Checks if the map meets requirements for this frame finishing job
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override bool AreMapRequirementsMet(Pawn pawn)
         {
-            if (map == null) yield break;
+            // Check basic requirements first
+            if (pawn?.Map == null)
+                return false;
+
+            // Quick check - are there any building frames at all?
+            return pawn.Map.listerThings.ThingsInGroup(ThingRequestGroup.BuildingFrame).Any(f =>
+                f is Frame frame && frame.IsCompleted());
+        }
+
+        #endregion
+
+        #region Target Selection
+
+        /// <summary>
+        /// Job-specific cache update method that implements specialized target collection logic
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            if (map == null)
+                yield break;
 
             // Find all frames ready to be finished
             foreach (Frame frame in map.listerThings.ThingsInGroup(ThingRequestGroup.BuildingFrame))
@@ -66,141 +114,65 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Override TryGiveJob to use StandardTryGiveJob pattern
+        /// Gets all frames that are ready to be finished
         /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            // Use the StandardTryGiveJob pattern
-            return Utility_JobGiverManager.StandardTryGiveJob<Frame>(
-                pawn,
-                "Construction",
-                (p, forced) => {
-                    if (p?.Map == null)
-                        return null;
-
-                    // Quick early exit if there are no valid frames on the map
-                    if (!p.Map.listerThings.ThingsInGroup(ThingRequestGroup.BuildingFrame).Any())
-                        return null;
-
-                    // Get targets from cache and process them
-                    List<Thing> allTargets = GetTargets(p.Map).ToList();
-                    if (allTargets.Count == 0)
-                        return null;
-
-                    // Convert targets to frames for proper typing
-                    List<Frame> frames = allTargets.OfType<Frame>().ToList();
-                    if (frames.Count == 0)
-                        return null;
-
-                    // Use JobGiverManager for distance bucketing and target selection
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        frames,
-                        (frame) => (frame.Position - p.Position).LengthHorizontalSquared,
-                        DISTANCE_THRESHOLDS
-                    );
-
-                    // Process each bucket to first check for blocking jobs
-                    for (int i = 0; i < buckets.Length; i++)
-                    {
-                        foreach (Frame frame in buckets[i])
-                        {
-                            // Filter out invalid frames immediately
-                            if (frame.Faction != p.Faction || !frame.Spawned ||
-                                !frame.IsCompleted() || frame.IsForbidden(p))
-                                continue;
-
-                            // Check for blocking things first - this replaces the exception pattern
-                            Thing blocker = GenConstruct.FirstBlockingThing(frame, p);
-                            if (blocker != null)
-                            {
-                                Job blockingJob = GenConstruct.HandleBlockingThingJob(frame, p, forced);
-                                if (blockingJob != null)
-                                {
-                                    Utility_DebugManager.LogNormal($"{p.LabelShort} created job to handle {blocker.LabelCap} blocking construction");
-                                    return blockingJob;
-                                }
-                            }
-                        }
-                    }
-
-                    // Create dictionary for reachability cache with proper nesting
-                    int mapId = p.Map.uniqueID;
-                    Dictionary<int, Dictionary<Frame, bool>> reachabilityCache = new Dictionary<int, Dictionary<Frame, bool>>();
-                    reachabilityCache[mapId] = new Dictionary<Frame, bool>();
-
-                    // With no blocking jobs found, proceed with normal target selection
-                    Frame bestFrame = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (frame, actor) => { // Changed parameter name from 'pawn' to 'actor' to avoid naming conflict
-                            // IMPORTANT: Check faction interaction validity first
-                            if (!Utility_JobGiverManager.IsValidFactionInteraction(frame, actor, requiresDesignator: false))
-                                return false;
-
-                            // Skip frames from different factions
-                            if (frame.Faction != actor.Faction)
-                                return false;
-
-                            // Verify frame is still valid
-                            if (!frame.Spawned || !frame.IsCompleted() || frame.IsForbidden(actor))
-                                return false;
-
-                            // Check for blocking things - we already handled these
-                            Thing blocker = GenConstruct.FirstBlockingThing(frame, actor);
-                            if (blocker != null)
-                                return false;
-
-                            // Check if pawn can construct this
-                            if (!GenConstruct.CanConstruct(frame, actor, forced: forced))
-                                return false;
-
-                            // Check if building is an attachment
-                            bool isAttachment = false;
-                            ThingDef builtDef = GenConstruct.BuiltDefOf(frame.def) as ThingDef;
-                            if (builtDef?.building != null && builtDef.building.isAttachment)
-                                isAttachment = true;
-
-                            // Check reachability with correct path end mode
-                            PathEndMode pathEndMode = isAttachment ? PathEndMode.OnCell : PathEndMode.Touch;
-                            if (!actor.CanReach(frame, pathEndMode, Danger.Deadly))
-                                return false;
-
-                            // Skip if pawn can't reserve
-                            if (!actor.CanReserve(frame))
-                                return false;
-
-                            return true;
-                        },
-                        reachabilityCache
-                    ) as Frame;
-
-                    // Create job if valid frame found
-                    if (bestFrame != null)
-                    {
-                        Job job = JobMaker.MakeJob(WorkJobDef, bestFrame);
-                        Utility_DebugManager.LogNormal($"{p.LabelShort} created job to finish construction of {bestFrame.Label}");
-                        return job;
-                    }
-
-                    return null;
-                },
-                debugJobDesc: "finish construction assignment");
+            // Use the specialized cache update method
+            return UpdateJobSpecificCache(map);
         }
 
+        #endregion
+
+        #region Job Creation
+
         /// <summary>
-        /// Creates a job for the pawn using the cached targets
+        /// Implement to create the specific construction job for frame finishing
         /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
         {
-            if (pawn == null || targets == null || targets.Count == 0)
+            if (pawn?.Map == null)
                 return null;
 
-            // Convert targets to frames for proper typing
-            List<Frame> frames = targets
-                .OfType<Frame>()
-                .Where(f => f.Spawned && f.IsCompleted() && !f.IsForbidden(pawn))
-                .ToList();
+            int mapId = pawn.Map.uniqueID;
+
+            // Get targets from the cache
+            List<Thing> cachedTargets = GetCachedTargets(mapId);
+            List<Frame> frames;
+
+            // If cache is empty or not yet populated
+            if (cachedTargets == null || cachedTargets.Count == 0)
+            {
+                // Try to update cache if needed
+                if (ShouldUpdateCache(mapId))
+                {
+                    UpdateCache(mapId, pawn.Map);
+                    cachedTargets = GetCachedTargets(mapId);
+                }
+
+                // If still empty, get targets directly
+                if (cachedTargets == null || cachedTargets.Count == 0)
+                {
+                    frames = GetTargets(pawn.Map).OfType<Frame>().ToList();
+                }
+                else
+                {
+                    frames = cachedTargets.OfType<Frame>().ToList();
+                }
+            }
+            else
+            {
+                frames = cachedTargets.OfType<Frame>().ToList();
+            }
+
+            if (frames.Count == 0)
+                return null;
+
+            // Filter for valid frames
+            frames = frames.Where(f =>
+                f.Spawned &&
+                f.IsCompleted() &&
+                !f.IsForbidden(pawn)).ToList();
 
             if (frames.Count == 0)
                 return null;
@@ -223,38 +195,26 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            // Create dictionary for reachability cache
-            Dictionary<Frame, bool> reachabilityCache = new Dictionary<Frame, bool>();
+            // Use distance bucketing for more efficient frame selection
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                frames,
+                (frame) => (frame.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds
+            );
 
-            // Find the best frame to work on
-            foreach (Frame frame in frames)
+            // Find the best frame to work on using bucketed approach
+            Frame bestFrame = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (frame, actor) => ValidateConstructionTarget(frame, actor, forced),
+                null
+            ) as Frame;
+
+            if (bestFrame != null)
             {
-                // Skip frames from different factions
-                if (frame.Faction != pawn.Faction)
-                    continue;
-
-                // Check if pawn can construct this
-                if (!GenConstruct.CanConstruct(frame, pawn, forced: forced))
-                    continue;
-
-                // Check if building is an attachment
-                bool isAttachment = false;
-                ThingDef builtDef = GenConstruct.BuiltDefOf(frame.def) as ThingDef;
-                if (builtDef?.building != null && builtDef.building.isAttachment)
-                    isAttachment = true;
-
-                // Check reachability with correct path end mode
-                PathEndMode pathEndMode = isAttachment ? PathEndMode.OnCell : PathEndMode.Touch;
-                if (!pawn.CanReach(frame, pathEndMode, Danger.Deadly))
-                    continue;
-
-                // Skip if pawn can't reserve
-                if (!pawn.CanReserve(frame))
-                    continue;
-
-                // Create job if valid frame found
-                Job job = JobMaker.MakeJob(WorkJobDef, frame);
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to finish construction of {frame.Label}");
+                Job job = JobMaker.MakeJob(WorkJobDef, bestFrame);
+                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to finish construction of {bestFrame.Label}");
                 return job;
             }
 
@@ -263,12 +223,74 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
+        #region Thing-Based Helpers
+
         /// <summary>
-        /// Custom ToString implementation for debugging
+        /// Basic validation for construction frame targets
         /// </summary>
+        protected override bool ValidateConstructionTarget(Thing thing, Pawn pawn, bool forced = false)
+        {
+            // First perform base validation
+            if (!base.ValidateConstructionTarget(thing, pawn, forced))
+                return false;
+
+            Frame frame = thing as Frame;
+            if (frame == null)
+                return false;
+
+            // Skip frames from different factions
+            if (frame.Faction != pawn.Faction)
+                return false;
+
+            // Verify frame is still valid and completed
+            if (!frame.Spawned || !frame.IsCompleted())
+                return false;
+
+            // Check for blocking things
+            Thing blocker = GenConstruct.FirstBlockingThing(frame, pawn);
+            if (blocker != null)
+                return false;
+
+            // Check if pawn can construct this
+            if (!GenConstruct.CanConstruct(frame, pawn, forced))
+                return false;
+
+            // Check if building is an attachment
+            bool isAttachment = false;
+            ThingDef builtDef = GenConstruct.BuiltDefOf(frame.def) as ThingDef;
+            if (builtDef?.building != null && builtDef.building.isAttachment)
+                isAttachment = true;
+
+            // Check reachability with correct path end mode
+            PathEndMode pathEndMode = isAttachment ? PathEndMode.OnCell : PathEndMode.Touch;
+            if (!pawn.CanReach(frame, pathEndMode, Danger.Deadly))
+                return false;
+
+            return true;
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset from parent
+            base.Reset();
+        }
+
+        #endregion
+
+        #region Utility
+
         public override string ToString()
         {
             return "JobGiver_ConstructFinishFrames_PawnControl";
         }
+
+        #endregion
     }
 }

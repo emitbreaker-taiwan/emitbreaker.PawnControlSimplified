@@ -36,75 +36,54 @@ namespace emitbreaker.PawnControl
 
         protected override float GetBasePriority(string workTag)
         {
+            // Slightly higher priority than regular refueling since turrets are defensive structures
             return 5.9f;
         }
 
-        protected override Job TryGiveJob(Pawn pawn)
+        /// <summary>
+        /// Process cached targets to find a valid job for refueling turrets
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_Refuel_Turret_PawnControl>(
+            if (targets == null || targets.Count == 0)
+                return null;
+
+            // Filter to just turrets
+            var turrets = targets.OfType<Building_Turret>().ToList();
+            if (turrets.Count == 0)
+                return null;
+
+            // Use the bucketing system to find the closest valid turret
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
-                WorkTag,
-                (p, forced) =>
+                turrets.Cast<Thing>().ToList(),
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find the best turret to refuel using the centralized cache system
+            Thing targetTurret = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (thing, worker) => IsValidTurretTarget(thing, worker),
+                null); // Let the parent class handle reachability caching
+
+            // Create job if target found
+            if (targetTurret != null && targetTurret is Building_Turret turret)
+            {
+                CompRefuelable refuelable = turret.TryGetComp<CompRefuelable>();
+                if (refuelable != null)
                 {
-                    if (p?.Map == null)
-                        return null;
+                    // Use RearmTurret instead of Refuel for turrets
+                    JobDef jobDef = refuelable.Props.atomicFueling ?
+                        JobDefOf.RearmTurretAtomic : JobDefOf.RearmTurret;
 
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
+                    Job job = JobMaker.MakeJob(jobDef, turret);
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to refuel turret {turret.LabelCap}");
+                    return job;
+                }
+            }
 
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Use the shared cache updating logic from base class
-                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastHaulingCacheUpdate[mapId] = now;
-                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    // Get turrets from shared cache
-                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
-                        return null;
-
-                    // Filter to just turrets
-                    var turrets = haulables.OfType<Building_Turret>().ToList();
-                    if (turrets.Count == 0)
-                        return null;
-
-                    // Use the bucketing system to find the closest valid turret
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        turrets.Cast<Thing>().ToList(),
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Find the best turret to refuel
-                    Thing targetTurret = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, worker) => IsValidTurretTarget(thing, worker),
-                        _reachabilityCache);
-
-                    // Create job if target found
-                    if (targetTurret != null && targetTurret is Building_Turret turret)
-                    {
-                        CompRefuelable refuelable = turret.TryGetComp<CompRefuelable>();
-                        if (refuelable != null)
-                        {
-                            // Use RearmTurret instead of Refuel for turrets
-                            JobDef jobDef = refuelable.Props.atomicFueling ?
-                                JobDefOf.RearmTurretAtomic : JobDefOf.RearmTurret;
-
-                            Job job = JobMaker.MakeJob(jobDef, turret);
-                            Utility_DebugManager.LogNormal($"{p.LabelShort} created job to refuel turret {turret.LabelCap}");
-                            return job;
-                        }
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
+            return null;
         }
 
         #endregion

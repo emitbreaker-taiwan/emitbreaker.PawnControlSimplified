@@ -50,6 +50,9 @@ namespace emitbreaker.PawnControl
             return 5.8f;
         }
 
+        /// <summary>
+        /// Perform an early check before trying to find a job to optimize performance
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             // Skip if there are no pawns with UnloadEverything flag on the map (quick optimization)
@@ -58,64 +61,13 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Hauling_UnloadCarriers_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) =>
-                {
-                    if (p?.Map == null)
-                        return null;
-
-                    int mapId = p.Map.uniqueID;
-                    int now = Find.TickManager.TicksGame;
-
-                    if (!ShouldExecuteNow(mapId))
-                        return null;
-
-                    // Use the shared cache updating logic from base class
-                    if (!_lastHaulingCacheUpdate.TryGetValue(mapId, out int last)
-                        || now - last >= CacheUpdateInterval)
-                    {
-                        _lastHaulingCacheUpdate[mapId] = now;
-                        _haulableCache[mapId] = new List<Thing>(GetTargets(p.Map));
-                    }
-
-                    // Get carriers from shared cache
-                    if (!_haulableCache.TryGetValue(mapId, out var haulables) || haulables.Count == 0)
-                        return null;
-
-                    // Filter to pawns only
-                    var unloadablePawns = haulables.OfType<Pawn>().ToList();
-                    if (unloadablePawns.Count == 0)
-                        return null;
-
-                    // Use the bucketing system to find the closest valid carrier
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        unloadablePawns.Cast<Thing>().ToList(),
-                        (thing) => (thing.Position - p.Position).LengthHorizontalSquared,
-                        DistanceThresholds);
-
-                    // Find the best carrier to unload
-                    Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (thing, worker) => IsValidCarrierTarget(thing, worker),
-                        _reachabilityCache);
-
-                    // Create job if target found
-                    if (targetThing != null && targetThing is Pawn targetPawn)
-                    {
-                        Job job = JobMaker.MakeJob(WorkJobDef, targetPawn);
-                        Utility_DebugManager.LogNormal($"{p.LabelShort} created job to unload inventory of {targetPawn.LabelCap}");
-                        return job;
-                    }
-
-                    return null;
-                },
-                debugJobDesc: DebugName);
+            // Proceed with normal job creation flow from the base class
+            return base.TryGiveJob(pawn);
         }
 
+        /// <summary>
+        /// Process cached targets to find a valid unloading job
+        /// </summary>
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
         {
             if (targets == null || targets.Count == 0)
@@ -133,12 +85,12 @@ namespace emitbreaker.PawnControl
                 (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
                 DistanceThresholds);
 
-            // Find the best carrier to unload
+            // Find the best carrier to unload using the centralized cache system
             Thing targetThing = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
                 buckets,
                 pawn,
                 (thing, worker) => IsValidCarrierTarget(thing, worker),
-                _reachabilityCache);
+                null); // Let the parent class handle reachability caching
 
             // Create job if target found
             if (targetThing != null && targetThing is Pawn targetPawn)
@@ -156,6 +108,9 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public override bool ShouldSkip(Pawn pawn)
         {
+            if (base.ShouldSkip(pawn))
+                return true;
+
             if (pawn?.Map == null)
                 return true;
 

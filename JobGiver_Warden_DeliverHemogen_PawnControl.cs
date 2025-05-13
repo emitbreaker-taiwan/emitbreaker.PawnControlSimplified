@@ -25,7 +25,7 @@ namespace emitbreaker.PawnControl
         protected override int CacheUpdateInterval => 150;
 
         /// <summary>
-        /// Distance thresholds for bucketing (10, 20, 30 tiles)
+        /// Distance thresholds for bucketing (10, 20, 30 tiles squared)
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f };
 
@@ -33,11 +33,18 @@ namespace emitbreaker.PawnControl
 
         #region Core flow
 
+        /// <summary>
+        /// Gets base priority for the job giver
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
+            // Delivering hemogen to prisoners is moderately important
             return 5.6f;
         }
 
+        /// <summary>
+        /// Creates a job for the warden to deliver hemogen to prisoners
+        /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_DeliverHemogen_PawnControl>(
@@ -47,15 +54,15 @@ namespace emitbreaker.PawnControl
                     // Process cached targets to create job
                     if (p?.Map == null) return null;
 
-                    int mapId = p.Map.uniqueID;
-                    List<Thing> targets;
-                    if (_prisonerCache.TryGetValue(mapId, out var prisonerList) && prisonerList != null)
+                    // Get prisoners from centralized cache system
+                    var prisoners = GetOrCreatePrisonerCache(p.Map);
+
+                    // Convert to Thing list for processing
+                    List<Thing> targets = new List<Thing>();
+                    foreach (Pawn prisoner in prisoners)
                     {
-                        targets = prisonerList.Cast<Thing>().ToList();
-                    }
-                    else
-                    {
-                        targets = new List<Thing>();
+                        if (prisoner != null && !prisoner.Dead && prisoner.Spawned)
+                            targets.Add(prisoner);
                     }
 
                     return ProcessCachedTargets(p, targets, forced);
@@ -63,36 +70,40 @@ namespace emitbreaker.PawnControl
                 debugJobDesc: "deliver hemogen to prisoner");
         }
 
+        /// <summary>
+        /// Checks whether this job giver should be skipped for a pawn
+        /// </summary>
         public override bool ShouldSkip(Pawn pawn)
         {
             // Skip if biotech is not active
             if (!ModsConfig.BiotechActive)
                 return true;
-                
+
             if (pawn == null || pawn.Dead || pawn.InMentalState)
                 return true;
-                
+
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
                 return true;
-                
+
             // Skip if pawn is not a warden
             if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
                 return true;
-                
+
             return false;
         }
 
         #endregion
 
-        #region Target processing
+        #region Prisoner Selection
 
         /// <summary>
-        /// Get all prisoners eligible for hemogen delivery
+        /// Get prisoners that match the criteria for hemogen delivery
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override IEnumerable<Pawn> GetPrisonersMatchingCriteria(Map map)
         {
-            if (map == null) yield break;
+            if (map == null)
+                yield break;
 
             // Skip if biotech is not active
             if (!ModsConfig.BiotechActive)
@@ -149,58 +160,14 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Process the cached targets to create jobs
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn warden, List<Thing> targets, bool forced)
-        {
-            if (warden?.Map == null || targets.Count == 0)
-                return null;
-
-            int mapId = warden.Map.uniqueID;
-
-            // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets<Pawn>(
-                warden,
-                targets.ConvertAll(t => t as Pawn),
-                (prisoner) => (prisoner.Position - warden.Position).LengthHorizontalSquared,
-                DistanceThresholds
-            );
-
-            // Find the first valid prisoner to feed hemogen to
-            Pawn targetPrisoner = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
-                buckets,
-                warden,
-                (prisoner, p) => IsValidPrisonerTarget(prisoner, p),
-                _prisonerReachabilityCache.TryGetValue(mapId, out var cache) ?
-                    new Dictionary<int, Dictionary<Pawn, bool>> { { mapId, cache } } :
-                    new Dictionary<int, Dictionary<Pawn, bool>>()
-            );
-
-            if (targetPrisoner == null)
-                return null;
-
-            // Find hemogen pack to deliver
-            Thing hemogenPack = GenClosest.ClosestThingReachable(
-                warden.Position, 
-                warden.Map, 
-                ThingRequest.ForDef(ThingDefOf.HemogenPack), 
-                PathEndMode.OnCell, 
-                TraverseParms.For(warden), 
-                9999f, 
-                (Thing pack) => !pack.IsForbidden(warden) && warden.CanReserve(pack) && pack.GetRoom() != targetPrisoner.GetRoom());
-
-            if (hemogenPack == null)
-                return null;
-
-            // Create job to deliver hemogen pack
-            return CreateDeliverHemogenJob(warden, targetPrisoner, hemogenPack);
-        }
-
-        /// <summary>
         /// Validates if a warden can deliver hemogen to a specific prisoner
         /// </summary>
         protected override bool IsValidPrisonerTarget(Pawn prisoner, Pawn warden)
         {
+            // First check base class validation
+            if (!base.IsValidPrisonerTarget(prisoner, warden))
+                return false;
+
             if (prisoner?.guest == null)
                 return false;
 
@@ -228,12 +195,42 @@ namespace emitbreaker.PawnControl
             if (HemogenPackAlreadyAvailableFor(prisoner))
                 return false;
 
-            // Basic reachability checks
-            if (!prisoner.Spawned || prisoner.IsForbidden(warden) ||
-                !warden.CanReserve(prisoner, 1, -1, null, false))
+            // Find hemogen pack to deliver
+            Thing hemogenPack = GenClosest.ClosestThingReachable(
+                warden.Position,
+                warden.Map,
+                ThingRequest.ForDef(ThingDefOf.HemogenPack),
+                PathEndMode.OnCell,
+                TraverseParms.For(warden),
+                9999f,
+                (Thing pack) => !pack.IsForbidden(warden) && warden.CanReserve(pack) && pack.GetRoom() != prisoner.GetRoom());
+
+            // Skip if no hemogen packs are available
+            if (hemogenPack == null)
                 return false;
 
             return true;
+        }
+
+        /// <summary>
+        /// Create a job for the given prisoner
+        /// </summary>
+        protected override Job CreateJobForPrisoner(Pawn warden, Pawn prisoner, bool forced)
+        {
+            // Find hemogen pack to deliver
+            Thing hemogenPack = GenClosest.ClosestThingReachable(
+                warden.Position,
+                warden.Map,
+                ThingRequest.ForDef(ThingDefOf.HemogenPack),
+                PathEndMode.OnCell,
+                TraverseParms.For(warden),
+                9999f,
+                (Thing pack) => !pack.IsForbidden(warden) && warden.CanReserve(pack) && pack.GetRoom() != prisoner.GetRoom());
+
+            if (hemogenPack == null)
+                return null;
+
+            return CreateDeliverHemogenJob(warden, prisoner, hemogenPack);
         }
 
         /// <summary>
@@ -250,8 +247,11 @@ namespace emitbreaker.PawnControl
             if (map == null || map.mapPawns.PrisonersOfColonySpawnedCount == 0)
                 return false;
 
-            return !_lastWardenCacheUpdate.TryGetValue(mapId, out int lastUpdate) ||
-                   Find.TickManager.TicksGame > lastUpdate + CacheUpdateInterval;
+            // Check if cache needs updating
+            string cacheKey = this.GetType().Name + PRISONERS_CACHE_SUFFIX;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            return Find.TickManager.TicksGame > lastUpdateTick + CacheUpdateInterval;
         }
 
         #endregion
@@ -266,15 +266,18 @@ namespace emitbreaker.PawnControl
             Job job = JobMaker.MakeJob(JobDefOf.DeliverFood, hemogenPack, prisoner);
             job.count = 1;
             job.targetC = RCellFinder.SpotToChewStandingNear(prisoner, hemogenPack);
-            
-            Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to deliver hemogen pack to prisoner {prisoner.LabelShort}");
-            
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"{warden.LabelShort} created job to deliver hemogen pack to prisoner {prisoner.LabelShort}");
+            }
+
             return job;
         }
 
         #endregion
 
-        #region Utility
+        #region Utility methods
 
         /// <summary>
         /// Checks if a hemogen pack is already available for the prisoner
@@ -307,6 +310,10 @@ namespace emitbreaker.PawnControl
             return false;
         }
 
+        #endregion
+
+        #region Debug
+
         /// <summary>
         /// For debugging purposes
         /// </summary>
@@ -314,7 +321,7 @@ namespace emitbreaker.PawnControl
         {
             return "JobGiver_Warden_DeliverHemogen_PawnControl";
         }
-        
+
         #endregion
     }
 }

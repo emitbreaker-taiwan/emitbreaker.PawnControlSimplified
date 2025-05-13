@@ -11,35 +11,24 @@ namespace emitbreaker.PawnControl
     /// Base JobGiver for feeding patients. Handles common logic for all patient feeding jobs.
     /// Can be specialized through inheritance to target specific patient types.
     /// </summary>
-    public abstract class JobGiver_Common_FeedPatient_PawnControl : JobGiver_Scan_PawnControl
+    public abstract class JobGiver_Common_FeedPatient_PawnControl : JobGiver_Doctor_PawnControl
     {
         #region Configuration
 
-        // Cache for hungry pawns to improve performance
-        private static readonly Dictionary<int, List<Pawn>> _hungryPawnCache = new Dictionary<int, List<Pawn>>();
-        private static readonly Dictionary<int, Dictionary<Pawn, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        private static int _lastCacheUpdateTick = -999;
-        private const int CACHE_UPDATE_INTERVAL = 180; // Update every 3 seconds
-
-        // Distance thresholds for bucketing
-        protected static readonly float[] DISTANCE_THRESHOLDS = new float[] { 100f, 400f, 900f }; // 10, 20, 30 tiles
-
-        #endregion
-
-        #region Override Configuration
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
+        protected override string DebugName => "feed patient";
 
         /// <summary>
-        /// Whether this construction job requires specific tag for non-humanlike pawns
+        /// Whether this job giver requires a designator to operate
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Doctor;
+        protected override bool RequiresDesignator => false;
 
-        // Configuration to be overridden by subclasses
-        protected virtual bool FeedHumanlikesOnly => true;
-        protected virtual bool FeedAnimalsOnly => false;
-        protected virtual bool FeedPrisonersOnly => false;
-        protected override string WorkTag => "Doctor";
-        protected virtual float JobPriority => 8.0f; // High priority - people shouldn't starve
-        protected virtual string JobDescription => "feed patient";
+        /// <summary>
+        /// Whether this job giver requires map zone or area
+        /// </summary>
+        protected override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Whether non-player pawns can feed patients (always within their own faction)
@@ -47,276 +36,234 @@ namespace emitbreaker.PawnControl
         protected override bool RequiresPlayerFaction => true;
 
         /// <summary>
-        /// Override cache interval for feeding jobs
+        /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override int CacheUpdateInterval => CACHE_UPDATE_INTERVAL;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.AllowWork_Doctor;
+
+        /// <summary>
+        /// Update cache every 3 seconds for feeding jobs
+        /// </summary>
+        protected override int CacheUpdateInterval => 180; // 3 seconds
+
+        /// <summary>
+        /// Distance thresholds for bucketing
+        /// </summary>
+        protected override float[] DistanceThresholds => new float[] { 100f, 400f, 900f }; // 10, 20, 30 tiles
+
+        // Configuration to be overridden by subclasses
+        protected virtual bool FeedHumanlikesOnly => true;
+        protected virtual bool FeedAnimalsOnly => false;
+        protected virtual bool FeedPrisonersOnly => false;
+        public override string WorkTag => "Doctor";
+        protected virtual float JobPriority => 8.0f; // High priority - people shouldn't starve
+        protected virtual string JobDescription => "feed patient";
 
         #endregion
 
-        #region Overrides
+        #region Constructor
 
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Common_FeedPatient_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
+
+        /// <summary>
+        /// Override to set the appropriate priority for feeding jobs
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             return JobPriority;
         }
 
         /// <summary>
-        /// Override to return hungry pawns as targets
+        /// Checks if the map meets requirements for this medical job
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override bool AreMapRequirementsMet(Pawn pawn)
         {
-            UpdateHungryPawnCache(map);
-            int mapId = map.uniqueID;
-
-            if (_hungryPawnCache.ContainsKey(mapId) && _hungryPawnCache[mapId].Count > 0)
-                return _hungryPawnCache[mapId].Cast<Thing>();
-
-            return new List<Thing>();
-        }
-
-        /// <summary>
-        /// Common implementation for ShouldSkip that enforces faction requirements
-        /// </summary>
-        public override bool ShouldSkip(Pawn pawn)
-        {
-            if (base.ShouldSkip(pawn))
-                return true;
-
-            // Allow player pawns and any other faction if AllowNonPlayerPawns is true
-            if (!IsValidFactionForFeedingPatients(pawn))
-                return true;
-
-            return false;
-        }
-
-        /// <summary>
-        /// Determines if a pawn's faction is allowed to feed patients
-        /// </summary>
-        protected virtual bool IsValidFactionForFeedingPatients(Pawn pawn)
-        {
-            // Always allow player pawns and their slaves
-            if (pawn.Faction == Faction.OfPlayer ||
-                (pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
-                return true;
-
-            // For non-player pawns, check if the setting allows them
-            if (RequiresPlayerFaction && pawn.Faction != null)
-                return true;
-
-            return false;
-        }
-
-        /// <summary>
-        /// Main job creation method, uses the CreateFeedJob helper
-        /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
-        {
-            return CreateFeedJob<JobGiver_Common_FeedPatient_PawnControl>(pawn);
+            // Check for hungry pawns on the map that might need feeding
+            return pawn?.Map != null && pawn.Map.mapPawns.AllPawnsSpawned.Any(p =>
+                !ShouldSkipPawn(p) &&
+                FeedPatientUtility.IsHungry(p) &&
+                FeedPatientUtility.ShouldBeFed(p) &&
+                IsPatientValidForDoctor(p, pawn));
         }
 
         #endregion
 
-        #region Helpers
+        #region Target Selection
 
         /// <summary>
-        /// Generic helper method to create a patient feeding job that can be used by all subclasses
+        /// Get all potential hungry patients on the given map
         /// </summary>
-        /// <typeparam name="T">The specific JobGiver subclass type</typeparam>
-        /// <param name="pawn">The pawn that will perform the feeding job</param>
-        /// <returns>A job to feed a patient, or null if no valid job could be created</returns>
-        protected Job CreateFeedJob<T>(Pawn pawn) where T : JobGiver_Common_FeedPatient_PawnControl
+        protected override IEnumerable<Thing> GetTargets(Map map)
         {
-            // Early validation check before job creation
-            if (!IsValidFactionForFeedingPatients(pawn))
+            if (map == null) yield break;
+
+            // Find all hungry pawns that need feeding
+            foreach (Pawn potentialPatient in map.mapPawns.AllPawnsSpawned)
+            {
+                // Skip pawns that don't match our criteria
+                if (ShouldSkipPawn(potentialPatient))
+                    continue;
+
+                // Check if hungry and should be fed
+                if (!FeedPatientUtility.IsHungry(potentialPatient) ||
+                    !FeedPatientUtility.ShouldBeFed(potentialPatient))
+                    continue;
+
+                // Check prisoner status if needed
+                if (FeedPrisonersOnly && !potentialPatient.IsPrisoner)
+                    continue;
+
+                if (!FeedPrisonersOnly && potentialPatient.IsPrisoner)
+                    continue;
+
+                // Check if this pawn is a valid patient
+                if (!IsValidPatientType(potentialPatient))
+                    continue;
+
+                yield return potentialPatient;
+            }
+        }
+
+        #endregion
+
+        #region Job Creation
+
+        /// <summary>
+        /// Implement to create the specific medical job for feeding
+        /// </summary>
+        protected override Job CreateMedicalJob(Pawn pawn, bool forced)
+        {
+            if (pawn?.Map == null) return null;
+
+            int mapId = pawn.Map.uniqueID;
+
+            // Get targets from the cache
+            List<Thing> cachedTargets = GetCachedTargets(mapId);
+            if (cachedTargets == null || cachedTargets.Count == 0)
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<T>(
+            // Filter to valid patients for this pawn
+            List<Pawn> validPatients = cachedTargets
+                .OfType<Pawn>()
+                .Where(patient => IsPatientValidForDoctor(patient, pawn))
+                .ToList();
+
+            if (validPatients.Count == 0)
+                return null;
+
+            // Use JobGiverManager for distance bucketing
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
                 pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Make sure cache is fresh
-                    UpdateHungryPawnCache(p.Map);
+                validPatients,
+                (patient) => (patient.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds
+            );
 
-                    if (p?.Map == null) return null;
+            // Find the best patient to feed - using the centralized reachability cache system
+            Pawn targetPatient = (Pawn)Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
+                buckets,
+                pawn,
+                (patient, feeder) => ValidatePatientForFeeding((Pawn)patient, feeder, forced),
+                null // Let the JobGiverManager handle reachability caching internally
+            );
 
-                    int mapId = p.Map.uniqueID;
-                    if (!_hungryPawnCache.ContainsKey(mapId) || _hungryPawnCache[mapId].Count == 0)
-                        return null;
+            // Create job if target found
+            if (targetPatient != null)
+            {
+                // Find the best food source
+                Thing foodSource;
+                ThingDef foodDef;
+                bool starving = targetPatient.needs?.food?.CurCategory == HungerCategory.Starving;
 
-                    // Create a local list of valid patients for this pawn
-                    // Filter based on faction relationship
-                    List<Pawn> validPatients = _hungryPawnCache[mapId]
-                        .Where(patient => IsPatientValidForPawn(patient, p))
-                        .ToList();
+                if (FoodUtility.TryFindBestFoodSourceFor(pawn, targetPatient, starving,
+                    out foodSource, out foodDef, false, canUsePackAnimalInventory: true, allowVenerated: true))
+                {
+                    float nutrition = FoodUtility.GetNutrition(targetPatient, foodSource, foodDef);
+                    Job job = JobMaker.MakeJob(JobDefOf.FeedPatient);
+                    job.targetA = foodSource;
+                    job.targetB = targetPatient;
+                    job.count = FoodUtility.WillIngestStackCountOf(targetPatient, foodDef, nutrition);
 
-                    if (validPatients.Count == 0)
-                        return null;
-
-                    // Use JobGiverManager for distance bucketing
-                    var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                        p,
-                        validPatients,
-                        (patient) => (patient.Position - p.Position).LengthHorizontalSquared,
-                        DISTANCE_THRESHOLDS
-                    );
-
-                    // Find the best patient to feed
-                    Pawn targetPatient = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                        buckets,
-                        p,
-                        (patient, feeder) => {
-                            // Skip if no longer a valid hungry patient
-                            if (!FeedPatientUtility.IsHungry(patient) || !FeedPatientUtility.ShouldBeFed(patient))
-                                return false;
-
-                            // Skip if forbidden or can't reserve
-                            if (patient.IsForbidden(feeder) || !feeder.CanReserve(patient, 1, -1, null, forced))
-                                return false;
-
-                            // Check food restriction policy
-                            if (patient.foodRestriction != null)
-                            {
-                                FoodPolicy respectedRestriction = patient.foodRestriction.GetCurrentRespectedRestriction(feeder);
-                                if (respectedRestriction != null && respectedRestriction.filter.AllowedDefCount == 0)
-                                    return false;
-                            }
-
-                            // Check if there's food available for this patient
-                            Thing foodSource;
-                            ThingDef foodDef;
-                            bool starving = patient.needs?.food?.CurCategory == HungerCategory.Starving;
-                            return FoodUtility.TryFindBestFoodSourceFor(feeder, patient, starving,
-                                out foodSource, out foodDef, false, canUsePackAnimalInventory: true, allowVenerated: true);
-                        },
-                        _reachabilityCache
-                    );
-
-                    // Create job if target found
-                    if (targetPatient != null)
+                    if (Prefs.DevMode)
                     {
-                        // Find the best food source
-                        Thing foodSource;
-                        ThingDef foodDef;
-                        bool starving = targetPatient.needs?.food?.CurCategory == HungerCategory.Starving;
+                        string foodInfo = "";
+                        if (FoodUtility.MoodFromIngesting(targetPatient, foodSource, FoodUtility.GetFinalIngestibleDef(foodSource)) < 0)
+                            foodInfo = " (disliked food)";
 
-                        if (FoodUtility.TryFindBestFoodSourceFor(p, targetPatient, starving,
-                            out foodSource, out foodDef, false, canUsePackAnimalInventory: true, allowVenerated: true))
-                        {
-                            float nutrition = FoodUtility.GetNutrition(targetPatient, foodSource, foodDef);
-                            Job job = JobMaker.MakeJob(JobDefOf.FeedPatient);
-                            job.targetA = foodSource;
-                            job.targetB = targetPatient;
-                            job.count = FoodUtility.WillIngestStackCountOf(targetPatient, foodDef, nutrition);
-
-                            if (Prefs.DevMode)
-                            {
-                                string foodInfo = "";
-                                if (FoodUtility.MoodFromIngesting(targetPatient, foodSource, FoodUtility.GetFinalIngestibleDef(foodSource)) < 0)
-                                    foodInfo = " (disliked food)";
-
-                                Utility_DebugManager.LogNormal($"{p.LabelShort} created job to feed {targetPatient.LabelShort}{foodInfo}");
-                            }
-
-                            return job;
-                        }
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to feed {targetPatient.LabelShort}{foodInfo}");
                     }
 
-                    return null;
-                },
-                debugJobDesc: JobDescription);
-        }
-
-        /// <summary>
-        /// Determines if a patient is valid for a specific feeder pawn based on faction relationships
-        /// </summary>
-        protected virtual bool IsPatientValidForPawn(Pawn patient, Pawn feeder)
-        {
-            // Player pawns can feed their own colonists, slaves, prisoners, and animals
-            if (feeder.Faction == Faction.OfPlayer ||
-               (feeder.IsSlave && feeder.HostFaction == Faction.OfPlayer))
-            {
-                // For player feeders, we check if the patient is:
-                // 1. A colonist (same faction)
-                // 2. A prisoner of the player
-                // 3. An animal owned by the player
-                // 4. A slave owned by the player
-                return patient.Faction == Faction.OfPlayer ||
-                       (patient.guest != null && patient.HostFaction == Faction.OfPlayer) ||
-                       (patient.IsPrisoner && patient.HostFaction == Faction.OfPlayer) ||
-                       (patient.RaceProps.Animal && patient.Faction == Faction.OfPlayer) ||
-                       (patient.IsSlave && patient.HostFaction == Faction.OfPlayer);
-            }
-
-            // For non-player pawns, they can only feed patients of their own faction
-            // This includes their own faction's animals
-            if (feeder.Faction != null)
-            {
-                return patient.Faction == feeder.Faction ||
-                       (patient.guest != null && patient.HostFaction == feeder.Faction) ||
-                       (patient.RaceProps.Animal && patient.Faction == feeder.Faction);
-            }
-
-            // No valid relationship found
-            return false;
-        }
-
-        /// <summary>
-        /// Updates the cache of hungry pawns that need to be fed
-        /// </summary>
-        protected virtual void UpdateHungryPawnCache(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CacheUpdateInterval ||
-                !_hungryPawnCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_hungryPawnCache.ContainsKey(mapId))
-                    _hungryPawnCache[mapId].Clear();
-                else
-                    _hungryPawnCache[mapId] = new List<Pawn>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Find all hungry pawns that need feeding
-                foreach (Pawn potentialPatient in map.mapPawns.AllPawnsSpawned)
-                {
-                    // Skip pawns that don't match our criteria
-                    if (ShouldSkipPawn(potentialPatient))
-                        continue;
-
-                    // Check if hungry and should be fed
-                    if (!FeedPatientUtility.IsHungry(potentialPatient) ||
-                        !FeedPatientUtility.ShouldBeFed(potentialPatient))
-                        continue;
-
-                    // Check prisoner status if needed
-                    if (FeedPrisonersOnly && !potentialPatient.IsPrisoner)
-                        continue;
-
-                    if (!FeedPrisonersOnly && potentialPatient.IsPrisoner)
-                        continue;
-
-                    // Check if this pawn is a valid patient
-                    // - Must be humanlike (if FeedHumanlikesOnly)
-                    // - Must be animal (if FeedAnimalsOnly)
-                    // - Must be part of a faction or a prisoner
-                    if (!IsValidPatientType(potentialPatient))
-                        continue;
-
-                    // Add to the cache
-                    _hungryPawnCache[mapId].Add(potentialPatient);
+                    return job;
                 }
-
-                _lastCacheUpdateTick = currentTick;
             }
+
+            return null;
+        }
+
+        #endregion
+
+        #region Patient Validation
+
+        /// <summary>
+        /// Determines if we should treat a pawn (i.e., feed them)
+        /// </summary>
+        protected override bool ShouldTreatPawn(Pawn patient, Pawn doctor)
+        {
+            // Skip pawns that don't match our criteria
+            if (ShouldSkipPawn(patient))
+                return false;
+
+            // Check if hungry and should be fed
+            if (!FeedPatientUtility.IsHungry(patient) || !FeedPatientUtility.ShouldBeFed(patient))
+                return false;
+
+            // Check prisoner status if needed
+            if (FeedPrisonersOnly && !patient.IsPrisoner)
+                return false;
+
+            if (!FeedPrisonersOnly && patient.IsPrisoner)
+                return false;
+
+            // Check if this pawn is a valid patient
+            return IsValidPatientType(patient);
+        }
+
+        /// <summary>
+        /// Additional validation for a patient during job creation
+        /// </summary>
+        protected bool ValidatePatientForFeeding(Pawn patient, Pawn feeder, bool forced)
+        {
+            // Skip if no longer valid
+            if (!IsValidPatient(patient, feeder, forced))
+                return false;
+
+            // Skip if no longer a valid hungry patient
+            if (!FeedPatientUtility.IsHungry(patient) || !FeedPatientUtility.ShouldBeFed(patient))
+                return false;
+
+            // Check food restriction policy
+            if (patient.foodRestriction != null)
+            {
+                FoodPolicy respectedRestriction = patient.foodRestriction.GetCurrentRespectedRestriction(feeder);
+                if (respectedRestriction != null && respectedRestriction.filter.AllowedDefCount == 0)
+                    return false;
+            }
+
+            // Check if there's food available for this patient
+            Thing foodSource;
+            ThingDef foodDef;
+            bool starving = patient.needs?.food?.CurCategory == HungerCategory.Starving;
+            return FoodUtility.TryFindBestFoodSourceFor(feeder, patient, starving,
+                out foodSource, out foodDef, false, canUsePackAnimalInventory: true, allowVenerated: true);
         }
 
         /// <summary>
@@ -362,20 +309,24 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Utility
+        #region Reset
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Reset the cache - implements IResettableCache
         /// </summary>
-        public static void ResetFeedPatientCache()
+        public override void Reset()
         {
-            Utility_CacheManager.ResetJobGiverCache(_hungryPawnCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
+            // Use centralized cache reset from parent
+            base.Reset();
         }
+
+        #endregion
+
+        #region Utility
 
         public override string ToString()
         {
-            return "JobGiver_Common_FeedPatient_PawnControl";
+            return $"JobGiver_Common_FeedPatient_PawnControl({DebugName})";
         }
 
         #endregion

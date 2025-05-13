@@ -32,9 +32,9 @@ namespace emitbreaker.PawnControl
         protected override string DebugName => "Train";
 
         /// <summary>
-        /// Maximum cache size to control memory usage
+        /// Cache key suffix specifically for trainable animals
         /// </summary>
-        private const int MAX_CACHE_SIZE = 1000;
+        private const string TRAINABLE_CACHE_SUFFIX = "_TrainableAnimals";
 
         /// <summary>
         /// Training doesn't require the animal to be awake
@@ -68,7 +68,7 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Target processing
+        #region Target Selection
 
         /// <summary>
         /// Override to get only animals that need training
@@ -87,24 +87,111 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Additional criteria for training
+        /// Override to use training-specific cache keys and caching mechanism
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
-            if (map == null) yield break;
+            if (map == null)
+                yield break;
 
             Faction playerFaction = Faction.OfPlayer;
-            if (playerFaction == null) yield break;
+            if (playerFaction == null)
+                yield break;
 
-            // Get animals from the faction that need training
+            // Find all animals that need training
+            List<Pawn> trainableAnimals = new List<Pawn>();
+
+            // Use map.mapPawns.SpawnedPawnsInFaction for better performance
             foreach (Pawn animal in map.mapPawns.SpawnedPawnsInFaction(playerFaction))
             {
-                if (CanInteractWithAnimalInPrinciple(animal))
+                if (animal == null || !animal.IsNonMutantAnimal)
+                    continue;
+
+                // Check if animal needs training
+                if (animal.training != null &&
+                    animal.training.NextTrainableToTrain() != null &&
+                    animal.RaceProps.animalType != AnimalType.Dryad &&
+                    !TrainableUtility.TrainedTooRecently(animal) &&
+                    !animal.Downed &&
+                    animal.CanCasuallyInteractNow())
                 {
-                    yield return animal;
+                    trainableAnimals.Add(animal);
                 }
             }
+
+            // Store in the centralized cache
+            StoreTrainableAnimalsCache(map, trainableAnimals);
+
+            // Convert to Things for the base class caching system
+            foreach (Pawn animal in trainableAnimals)
+            {
+                yield return animal;
+            }
         }
+
+        /// <summary>
+        /// Gets or creates a cache of trainable animals for a specific map
+        /// </summary>
+        protected List<Pawn> GetOrCreateTrainableAnimalsCache(Map map)
+        {
+            if (map == null)
+                return new List<Pawn>();
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + TRAINABLE_CACHE_SUFFIX;
+
+            // Try to get cached animals from the map cache manager
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+            // Check if we need to update the cache
+            int currentTick = Find.TickManager.TicksGame;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            if (currentTick - lastUpdateTick > CacheUpdateInterval ||
+                !animalCache.TryGetValue(cacheKey, out List<Pawn> animals) ||
+                animals == null ||
+                animals.Any(a => a == null || a.Dead || !a.Spawned))
+            {
+                // Cache is invalid or expired, rebuild it using the Update method
+                animals = new List<Pawn>();
+
+                foreach (Thing thing in UpdateJobSpecificCache(map))
+                {
+                    if (thing is Pawn animal)
+                    {
+                        animals.Add(animal);
+                    }
+                }
+            }
+
+            return animals;
+        }
+
+        /// <summary>
+        /// Store a list of trainable animals in the centralized cache
+        /// </summary>
+        private void StoreTrainableAnimalsCache(Map map, List<Pawn> animals)
+        {
+            if (map == null)
+                return;
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + TRAINABLE_CACHE_SUFFIX;
+            int currentTick = Find.TickManager.TicksGame;
+
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+            animalCache[cacheKey] = animals;
+            Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, currentTick);
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Updated trainable animals cache for {this.GetType().Name}, found {animals.Count} animals");
+            }
+        }
+
+        #endregion
+
+        #region Job Processing
 
         /// <summary>
         /// Training-specific checks for animal interaction
@@ -119,13 +206,17 @@ namespace emitbreaker.PawnControl
             if (animal.training == null ||
                 animal.training.NextTrainableToTrain() == null ||
                 TrainableUtility.TrainedTooRecently(animal))
+            {
                 return false;
+            }
 
             // Skip if animals marked venerated
             if (ModsConfig.IdeologyActive &&
                 handler.Ideo != null &&
                 handler.Ideo.IsVeneratedAnimal(animal))
+            {
                 return false;
+            }
 
             return true;
         }
@@ -139,7 +230,15 @@ namespace emitbreaker.PawnControl
                 return null;
 
             // Create the training job
-            return JobMaker.MakeJob(WorkJobDef, animal);
+            Job job = JobMaker.MakeJob(WorkJobDef, animal);
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"{handler.LabelShort} created job to train {animal.LabelShort} " +
+                    $"({animal.training.NextTrainableToTrain().defName})");
+            }
+
+            return job;
         }
 
         /// <summary>
@@ -153,6 +252,39 @@ namespace emitbreaker.PawnControl
 
             // Use base implementation for standard food check
             return base.HasFoodToInteractAnimal(pawn, animal);
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the training-specific cache
+        /// </summary>
+        public override void Reset()
+        {
+            // Call base reset first
+            base.Reset();
+
+            // Now clear training-specific caches
+            foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
+            {
+                string cacheKey = this.GetType().Name + TRAINABLE_CACHE_SUFFIX;
+                var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+                if (animalCache.ContainsKey(cacheKey))
+                {
+                    animalCache.Remove(cacheKey);
+                }
+
+                // Clear the update tick record too
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Reset training caches for {this.GetType().Name}");
+            }
         }
 
         #endregion

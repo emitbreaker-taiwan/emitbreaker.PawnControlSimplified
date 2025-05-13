@@ -117,7 +117,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Compute result
-            result = HasTag(def, ManagedTags.AllowAllWork) ||
+            result = HasTag(def, PawnEnumTags.AllowAllWork.ToString()) ||
                      HasTag(def, (ManagedTags.AllowWorkPrefix + workTypeDef.defName));
 
             // Store in cache
@@ -171,6 +171,12 @@ namespace emitbreaker.PawnControl
         public static bool WorkTypeSettingEnabled(Pawn pawn, string workTypeName)
         {
             var workTypeDef = Utility_WorkTypeManager.Named(workTypeName);
+            
+            if (workTypeDef == null)
+            {
+                return false; // Invalid work type name
+            }
+
             return WorkTypeSettingEnabled(pawn, workTypeDef);
         }
 

@@ -10,46 +10,87 @@ namespace emitbreaker.PawnControl
     /// </summary>
     public class JobGiver_Construction_Uninstall_PawnControl : JobGiver_Common_RemoveBuilding_PawnControl
     {
-        #region Overrides
+        #region Configuration
 
+        /// <summary>
+        /// The designation this job giver targets
+        /// </summary>
         protected override DesignationDef TargetDesignation => DesignationDefOf.Uninstall;
 
+        /// <summary>
+        /// The job to create
+        /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.Uninstall;
 
-        // Override debug name for better logging
+        /// <summary>
+        /// Human-readable name for debug logging
+        /// </summary>
         protected override string DebugName => "Uninstall";
 
+        /// <summary>
+        /// Cache update interval - slightly less often for uninstall tasks
+        /// </summary>
+        protected override int CacheUpdateInterval => 180; // 3 seconds
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Construction_Uninstall_PawnControl() : base()
+        {
+            // Base constructor already initializes the cache system
+        }
+
+        #endregion
+
+        #region Core Flow
+
+        /// <summary>
+        /// Define priority level for uninstall work
+        /// </summary>
         protected override float GetBasePriority(string workTag)
         {
             // Slightly lower priority than deconstruct
             return 5.8f;
         }
 
+        #endregion
+
+        #region Target Selection
+
         /// <summary>
-        /// Explicitly override TryGiveJob to handle uninstall-specific validation
+        /// Job-specific cache update method that implements specialized target collection
         /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
         {
-            return CreateRemovalJob<JobGiver_Construction_Uninstall_PawnControl>(pawn);
+            // Use the base implementation for uninstall targets
+            return base.UpdateJobSpecificCache(map);
         }
 
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        /// <summary>
+        /// Gets all targets with uninstall designations
+        /// </summary>
+        protected override IEnumerable<Thing> GetRemovalTargets(Map map)
         {
-            if (pawn == null || targets == null || targets.Count == 0)
-                return null;
-
-            // Extra faction validation to ensure only allowed pawns can perform this job
-            if (!IsPawnValidFaction(pawn))
-                return null;
-
-            // Use the parent class's ExecuteJobGiverInternal method for consistent behavior
-            return ExecuteJobGiverInternal(pawn, LimitListSize(targets));
+            // Use the base implementation to get targets with the Uninstall designation
+            return base.GetRemovalTargets(map);
         }
 
-        protected override bool ValidateTarget(Thing thing, Pawn pawn)
+        #endregion
+
+        #region Thing-Based Helpers
+
+        /// <summary>
+        /// Basic validation for construction target things
+        /// Override to add uninstall-specific validation
+        /// </summary>
+        protected override bool ValidateConstructionTarget(Thing thing, Pawn pawn, bool forced = false)
         {
-            // First perform base validation
-            if (!base.ValidateTarget(thing, pawn))
+            // First perform base validation from parent class
+            if (!base.ValidateConstructionTarget(thing, pawn, forced))
                 return false;
 
             // Then check uninstall-specific requirements
@@ -64,6 +105,32 @@ namespace emitbreaker.PawnControl
                 return false;
 
             return true;
+        }
+
+        #endregion
+
+        #region Job Creation
+
+        /// <summary>
+        /// Creates a construction job for uninstalling buildings
+        /// </summary>
+        protected override Job CreateConstructionJob(Pawn pawn, bool forced)
+        {
+            // Use the base implementation that creates jobs for designated targets
+            return base.CreateConstructionJob(pawn, forced);
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the cache - implements IResettableCache
+        /// </summary>
+        public override void Reset()
+        {
+            // Use centralized cache reset from parent
+            base.Reset();
         }
 
         #endregion

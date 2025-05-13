@@ -38,21 +38,21 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
         /// </summary>
-        protected override PawnEnumTags RequiredTag => PawnEnumTags.Unknown;
+        public override PawnEnumTags RequiredTag => PawnEnumTags.Unknown;
 
         /// <summary>
         /// Checks if a non-humanlike pawn has the required capabilities for this job giver
         /// </summary>
         protected override bool HasRequiredCapabilities(Pawn pawn)
         {
-            // For humanlike pawns, no additional capability checks
-            if (pawn.RaceProps.Humanlike)
-                return true;
-
             // For non-humanlike pawns, check for the required mod extension
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
                 return false;
+
+            // For humanlike pawns, no additional capability checks
+            if (pawn.RaceProps.Humanlike)
+                return true;
 
             if (modExtension.tags == null || modExtension.tags.Count == 0)
                 return false;
@@ -72,7 +72,7 @@ namespace emitbreaker.PawnControl
             if (RequiredTag != PawnEnumTags.Unknown && !modExtension.tags.Contains(RequiredTag.ToString()))
                 return false;
 
-            if (modExtension.tags.Contains(PawnEnumTags.BlockWork_Construction.ToString()))
+            if (modExtension.tags.Contains(ManagedTags.BlockWorkPrefix + WorkTag))
                 return false;
 
             return true;
@@ -90,17 +90,23 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Caching
+        #region Cache System
 
-        protected static readonly Dictionary<int, int> _lastCacheTick = new Dictionary<int, int>();
-        protected static readonly Dictionary<int, List<Thing>> _cachedTargets = new Dictionary<int, List<Thing>>();
+        /// <summary>
+        /// Constructor that initializes the cache system
+        /// </summary>
+        public JobGiver_Scan_PawnControl()
+        {
+            // Initialize the cache using the type-keyed cache manager
+            InitializeCache<Thing>();
+        }
 
         #endregion
 
         #region Core flow
 
         /// <summary>
-        /// Creates a job for the given pawn using scan-based target selection
+        /// Template method for creating a job that handles cache update logic
         /// </summary>
         protected override Job CreateJobFor(Pawn pawn, bool forced)
         {
@@ -108,26 +114,31 @@ namespace emitbreaker.PawnControl
                 return null;
 
             int mapId = pawn.Map.uniqueID;
-            int now = Find.TickManager.TicksGame;
 
             if (!ShouldExecuteNow(mapId))
                 return null;
 
-            // Update cache if needed
-            if (!_lastCacheTick.TryGetValue(mapId, out int last)
-                || now - last >= CacheUpdateInterval)
+            // Update cache if needed using the parent class method
+            if (ShouldUpdateCache(mapId))
             {
-                _lastCacheTick[mapId] = now;
-                _cachedTargets[mapId] = new List<Thing>(GetTargets(pawn.Map));
+                UpdateCache(mapId, pawn.Map);
             }
 
-            // Check if we have any targets
-            var list = _cachedTargets.TryGetValue(mapId, out var targets) ? targets : null;
-            if (list == null || list.Count == 0)
+            // Get targets from the cache
+            var targets = GetCachedTargets(mapId);
+            if (targets == null || targets.Count == 0)
                 return null;
 
             // Derived classes must implement the job creation from targets
-            return ProcessCachedTargets(pawn, list, forced);
+            return ProcessCachedTargets(pawn, targets, forced);
+        }
+
+        /// <summary>
+        /// Job-specific cache update method - delegates to GetTargets
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            return GetTargets(map);
         }
 
         #endregion
@@ -137,26 +148,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Gets all potential targets on the given map
         /// </summary>
-        protected abstract IEnumerable<Thing> GetTargets(Map map);
+        protected abstract override IEnumerable<Thing> GetTargets(Map map);
 
         /// <summary>
-        /// Creates a job for the pawn using the cached targets
+        /// Processes cached targets to find a valid job
         /// </summary>
-        protected abstract Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced);
-
-        #endregion
-
-        #region Cache management
-
-        /// <summary>
-        /// Reset the shared base class caches when loading game or changing maps
-        /// </summary>
-        public static void ResetCache()
-        {
-            _lastCacheTick.Clear();
-            _cachedTargets.Clear();
-            Utility_DebugManager.LogNormal("Reset JobGiver_Scan_PawnControl cache");
-        }
+        protected abstract override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced);
 
         #endregion
     }

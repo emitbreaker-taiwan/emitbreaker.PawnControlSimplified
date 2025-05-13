@@ -11,7 +11,7 @@ namespace emitbreaker.PawnControl
     /// JobGiver that assigns tasks to tame animals with tame designations.
     /// Uses the Handler work tag for eligibility checking.
     /// </summary>
-    public class JobGiver_Handling_Tame_PawnControl : JobGiver_Handling_PawnControl
+    public class JobGiver_Handling_Tame_PawnControl : JobGiver_Handling_InteractAnimal_PawnControl
     {
         #region Configuration
 
@@ -34,12 +34,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Work tag for eligibility checking
         /// </summary>
-        protected override string WorkTag => "Handling";
-
-        /// <summary>
-        /// Maximum cache size to control memory usage
-        /// </summary>
-        private const int MAX_CACHE_SIZE = 1000;
+        public override string WorkTag => "Handling";
 
         /// <summary>
         /// Cache update interval in ticks (180 ticks = 3 seconds)
@@ -51,76 +46,30 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override float[] DistanceThresholds => new float[] { 625f, 2500f, 10000f };
 
-        #endregion
-
-        #region Cache Management
-
-        // Cache for target animals with tame designation
-        private static readonly Dictionary<int, List<Pawn>> _tameDesignationCache = new Dictionary<int, List<Pawn>>();
-        private static readonly Dictionary<int, Dictionary<Pawn, bool>> _reachabilityCache = new Dictionary<int, Dictionary<Pawn, bool>>();
-        private static int _lastCacheUpdateTick = -999;
+        /// <summary>
+        /// Taming requires the animal to be awake
+        /// </summary>
+        protected override bool CanInteractWhileSleeping => false;
 
         /// <summary>
-        /// Reset caches when loading game or changing maps
+        /// Taming can't be done while animal is roaming
         /// </summary>
-        public static void ResetTameCache()
-        {
-            Utility_CacheManager.ResetJobGiverCache(_tameDesignationCache, _reachabilityCache);
-            _lastCacheUpdateTick = -999;
-        }
+        protected override bool CanInteractWhileRoaming => false;
 
         /// <summary>
-        /// Updates the cache of animals that need taming
+        /// Taming doesn't require handling skill levels
         /// </summary>
-        private void UpdateTameableCacheSafely(Map map)
-        {
-            if (map == null) return;
-
-            int currentTick = Find.TickManager.TicksGame;
-            int mapId = map.uniqueID;
-
-            if (currentTick > _lastCacheUpdateTick + CacheUpdateInterval ||
-                !_tameDesignationCache.ContainsKey(mapId))
-            {
-                // Clear outdated cache
-                if (_tameDesignationCache.ContainsKey(mapId))
-                    _tameDesignationCache[mapId].Clear();
-                else
-                    _tameDesignationCache[mapId] = new List<Pawn>();
-
-                // Clear reachability cache too
-                if (_reachabilityCache.ContainsKey(mapId))
-                    _reachabilityCache[mapId].Clear();
-                else
-                    _reachabilityCache[mapId] = new Dictionary<Pawn, bool>();
-
-                // Get animals with tame designations
-                foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Tame))
-                {
-                    if (designation.target.Thing is Pawn animal && TameUtility.CanTame(animal))
-                    {
-                        _tameDesignationCache[mapId].Add(animal);
-                    }
-                }
-
-                // Limit cache size for performance
-                if (_tameDesignationCache[mapId].Count > MAX_CACHE_SIZE)
-                {
-                    _tameDesignationCache[mapId] = _tameDesignationCache[mapId].Take(MAX_CACHE_SIZE).ToList();
-                }
-
-                _lastCacheUpdateTick = currentTick;
-            }
-        }
+        protected override bool IgnoreSkillRequirements => true;
 
         /// <summary>
-        /// Determines if the job giver should execute based on cache status
+        /// Taming requires food
         /// </summary>
-        protected override bool ShouldExecuteNow(int mapId)
-        {
-            return Find.TickManager.TicksGame > _lastCacheUpdateTick + CacheUpdateInterval ||
-                  !_tameDesignationCache.ContainsKey(mapId);
-        }
+        protected override bool NeedsFoodForInteraction() => true;
+
+        /// <summary>
+        /// Cache key suffix specifically for tameable animals
+        /// </summary>
+        private const string TAMEABLE_CACHE_SUFFIX = "_TameableAnimals";
 
         #endregion
 
@@ -143,157 +92,143 @@ namespace emitbreaker.PawnControl
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_Tame_PawnControl>(
-                pawn,
-                WorkTag,
-                (p, forced) => {
-                    // Update taming cache
-                    UpdateTameableCacheSafely(p.Map);
+            // Initialize static data if needed
+            InitializeStaticData();
 
-                    // Create taming job
-                    return TryCreateTameJob(p);
-                },
-                (p, setFailReason) => {
-                    // Additional check for animals work tag
-                    if (p.WorkTagIsDisabled(WorkTags.Animals))
-                    {
-                        if (setFailReason)
-                            JobFailReason.Is("CannotPrioritizeWorkTypeDisabled".Translate(WorkTypeDefOf.Handling.gerundLabel).CapitalizeFirst());
-                        return false;
-                    }
-                    return true;
-                },
-                debugJobDesc: "animal taming",
-                skipEmergencyCheck: false);
+            // Use the parent class job creation logic
+            return base.TryGiveJob(pawn);
         }
 
         #endregion
 
-        #region Target processing
+        #region Target Selection
 
         /// <summary>
-        /// Get all animals eligible for taming
+        /// Override to get only animals with tame designation
         /// </summary>
-        protected override IEnumerable<Thing> GetTargets(Map map)
+        protected override bool CanInteractWithAnimalInPrinciple(Pawn animal)
         {
-            if (map == null) yield break;
+            // Basic animal check
+            if (animal == null || !animal.RaceProps.Animal || !animal.Spawned || animal.Dead)
+                return false;
 
-            // Return animals with tame designations
+            // Check for tame designation and tameable status
+            return animal.Map?.designationManager.DesignationOn(animal, DesignationDefOf.Tame) != null &&
+                   TameUtility.CanTame(animal) &&
+                   !TameUtility.TriedToTameTooRecently(animal) &&
+                   !animal.InAggroMentalState;
+        }
+
+        /// <summary>
+        /// Override to use tame-specific cache keys
+        /// </summary>
+        protected override IEnumerable<Thing> UpdateJobSpecificCache(Map map)
+        {
+            if (map == null)
+                yield break;
+
+            // Find all animals with tame designation
+            List<Pawn> tameableAnimals = new List<Pawn>();
+
+            // Get animals with tame designations - most efficient approach
             foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Tame))
             {
                 if (designation.target.Thing is Pawn animal && TameUtility.CanTame(animal))
                 {
-                    yield return animal;
+                    tameableAnimals.Add(animal);
                 }
             }
-        }
 
-        /// <summary>
-        /// Process the cached targets for taming
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            return TryCreateTameJob(pawn);
-        }
+            // Store in the centralized cache
+            StoreTameableAnimalsCache(map, tameableAnimals);
 
-        /// <summary>
-        /// Creates a job for taming an animal with a tame designation
-        /// </summary>
-        private Job TryCreateTameJob(Pawn pawn)
-        {
-            if (pawn?.Map == null) return null;
-
-            int mapId = pawn.Map.uniqueID;
-            if (!_tameDesignationCache.ContainsKey(mapId) || _tameDesignationCache[mapId].Count == 0)
-                return null;
-
-            // Create distance buckets for optimized searching
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                _tameDesignationCache[mapId],
-                (animal) => (animal.Position - pawn.Position).LengthHorizontalSquared,
-                DistanceThresholds
-            );
-
-            // Find first valid target
-            Pawn targetAnimal = Utility_JobGiverManager.FindFirstValidTargetInBuckets<Pawn>(
-                buckets,
-                pawn,
-                (animal, p) => {
-                    // IMPORTANT: Check faction interaction validity first
-                    if (!Utility_JobGiverManager.IsValidFactionInteraction(animal, p, requiresDesignator: true))
-                        return false;
-
-                    // Skip if no longer valid
-                    if (animal == p || animal.Destroyed || !animal.Spawned || animal.Map != p.Map)
-                        return false;
-
-                    // Skip if no longer designated for taming
-                    if (p.Map.designationManager.DesignationOn(animal, DesignationDefOf.Tame) == null)
-                        return false;
-
-                    // Skip if cannot be tamed
-                    if (!TameUtility.CanTame(animal) || TameUtility.TriedToTameTooRecently(animal))
-                        return false;
-
-                    // Skip if in aggressive mental state
-                    if (animal.InAggroMentalState)
-                        return false;
-
-                    // Skip if not an animal (redundant with CanTame but added for clarity)
-                    if (!animal.RaceProps.Animal)
-                        return false;
-
-                    // Skip if forbidden or unreachable
-                    if (animal.IsForbidden(p) ||
-                        !p.CanReserve((LocalTargetInfo)animal) ||
-                        !p.CanReach((LocalTargetInfo)animal, PathEndMode.Touch, Danger.Some))
-                        return false;
-
-                    return true;
-                },
-                _reachabilityCache
-            );
-
-            if (targetAnimal == null)
-                return null;
-
-            // Handle food for taming
-            Thing foodSource = null;
-            int foodCount = -1;
-
-            if (targetAnimal.RaceProps.EatsFood && targetAnimal.needs?.food != null &&
-                !HasFoodToInteractAnimal(pawn, targetAnimal))
+            // Convert to Things for the base class caching system
+            foreach (Pawn animal in tameableAnimals)
             {
-                ThingDef foodDef;
-                foodSource = FoodUtility.BestFoodSourceOnMap(
-                    pawn, targetAnimal, false, out foodDef, FoodPreferability.RawTasty,
-                    false, false, false, false, false,
-                    minNutrition: new float?((float)((double)JobDriver_InteractAnimal.RequiredNutritionPerFeed(targetAnimal) * 2.0 * 4.0))
-                );
-
-                if (foodSource == null)
-                {
-                    JobFailReason.Is("NoFood".Translate());
-                    return null;
-                }
-
-                foodCount = Mathf.CeilToInt((float)((double)JobDriver_InteractAnimal.RequiredNutritionPerFeed(targetAnimal) * 2.0 * 4.0) /
-                    FoodUtility.GetNutrition(targetAnimal, foodSource, foodDef));
+                yield return animal;
             }
-
-            // Create job if target found
-            Job job = JobMaker.MakeJob(WorkJobDef, targetAnimal, null, foodSource);
-            job.count = foodCount;
-            Utility_DebugManager.LogNormal($"{pawn.LabelShort} created job to tame {targetAnimal.LabelShort}");
-            return job;
         }
 
         /// <summary>
-        /// Implements the animal-specific validity check
+        /// Gets or creates a cache of tameable animals for a specific map
         /// </summary>
-        protected override bool IsValidAnimalTarget(Pawn animal, Pawn handler)
+        protected List<Pawn> GetOrCreateTameableAnimalsCache(Map map)
         {
+            if (map == null)
+                return new List<Pawn>();
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + TAMEABLE_CACHE_SUFFIX;
+
+            // Try to get cached animals from the map cache manager
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+            // Check if we need to update the cache
+            int currentTick = Find.TickManager.TicksGame;
+            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+
+            if (currentTick - lastUpdateTick > CacheUpdateInterval ||
+                !animalCache.TryGetValue(cacheKey, out List<Pawn> animals) ||
+                animals == null ||
+                animals.Any(a => a == null || a.Dead || !a.Spawned))
+            {
+                // Cache is invalid or expired, rebuild it
+                animals = new List<Pawn>();
+
+                // Find animals with tame designations
+                if (map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.Tame))
+                {
+                    foreach (Designation designation in map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Tame))
+                    {
+                        if (designation.target.Thing is Pawn animal && TameUtility.CanTame(animal))
+                        {
+                            animals.Add(animal);
+                        }
+                    }
+                }
+
+                // Store in the central cache
+                StoreTameableAnimalsCache(map, animals);
+            }
+
+            return animals;
+        }
+
+        /// <summary>
+        /// Store a list of tameable animals in the centralized cache
+        /// </summary>
+        private void StoreTameableAnimalsCache(Map map, List<Pawn> animals)
+        {
+            if (map == null)
+                return;
+
+            int mapId = map.uniqueID;
+            string cacheKey = this.GetType().Name + TAMEABLE_CACHE_SUFFIX;
+            int currentTick = Find.TickManager.TicksGame;
+
+            var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+            animalCache[cacheKey] = animals;
+            Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, currentTick);
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Updated tameable animals cache for {this.GetType().Name}, found {animals.Count} animals");
+            }
+        }
+
+        #endregion
+
+        #region Job Processing
+
+        /// <summary>
+        /// Taming-specific checks for animal interaction
+        /// </summary>
+        protected override bool IsValidForSpecificInteraction(Pawn handler, Pawn animal, bool forced)
+        {
+            // Skip if not wild
+            if (animal.Faction != null)
+                return false;
+
             // Skip if no tame designation
             if (handler?.Map == null || animal?.Map == null ||
                 handler.Map.designationManager.DesignationOn(animal, DesignationDefOf.Tame) == null)
@@ -310,20 +245,113 @@ namespace emitbreaker.PawnControl
             return true;
         }
 
-        #endregion
+        /// <summary>
+        /// Create job for taming the animal
+        /// </summary>
+        protected override Job MakeInteractionJob(Pawn handler, Pawn animal, bool forced)
+        {
+            if (animal == null || handler == null ||
+                !IsValidForSpecificInteraction(handler, animal, forced))
+                return null;
 
-        #region Animal interaction helpers
+            // Handle food for taming
+            Thing foodSource = null;
+            int foodCount = -1;
+
+            if (animal.RaceProps.EatsFood && animal.needs?.food != null &&
+                !HasFoodToInteractAnimal(handler, animal))
+            {
+                ThingDef foodDef;
+                float requiredNutrition = JobDriver_InteractAnimal.RequiredNutritionPerFeed(animal) * 2f * 4f;
+
+                foodSource = FoodUtility.BestFoodSourceOnMap(
+                    handler,
+                    animal,
+                    false,
+                    out foodDef,
+                    FoodPreferability.RawTasty,
+                    allowPlant: false,
+                    allowDrug: false,
+                    allowCorpse: false,
+                    allowDispenserFull: false,
+                    allowDispenserEmpty: false,
+                    allowForbidden: false,
+                    allowSociallyImproper: false,
+                    allowHarvest: false,
+                    forceScanWholeMap: false,
+                    ignoreReservations: false,
+                    calculateWantedStackCount: false,
+                    minNutrition: requiredNutrition
+                );
+
+                if (foodSource == null)
+                {
+                    JobFailReason.Is("NoFood".Translate());
+                    return null;
+                }
+
+                foodCount = Mathf.CeilToInt(requiredNutrition / FoodUtility.GetNutrition(animal, foodSource, foodDef));
+            }
+
+            // Create job if target found
+            Job job = JobMaker.MakeJob(WorkJobDef, animal, null, foodSource);
+            job.count = foodCount;
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"{handler.LabelShort} created job to tame {animal.LabelShort}");
+            }
+
+            return job;
+        }
 
         /// <summary>
-        /// Checks if the pawn has appropriate food for interacting with the animal
+        /// Custom food check for taming animals
         /// </summary>
-        protected virtual bool HasFoodToInteractAnimal(Pawn pawn, Pawn animal)
+        protected override bool HasFoodToInteractAnimal(Pawn pawn, Pawn animal)
         {
+            // Some animals don't need food for taming
+            if (!animal.RaceProps.EatsFood || animal.needs?.food == null)
+                return true;
+
             return pawn.inventory.innerContainer.Contains(ThingDefOf.Kibble) ||
                    (animal.RaceProps.foodType & (FoodTypeFlags.Plant | FoodTypeFlags.VegetableOrFruit)) != FoodTypeFlags.None &&
                    pawn.inventory.innerContainer.Any(t => t.def.IsNutritionGivingIngestible &&
                    t.def.ingestible.preferability >= FoodPreferability.RawBad &&
                    (t.def.ingestible.foodType & (FoodTypeFlags.Plant | FoodTypeFlags.VegetableOrFruit)) != FoodTypeFlags.None);
+        }
+
+        #endregion
+
+        #region Reset
+
+        /// <summary>
+        /// Reset the taming-specific cache
+        /// </summary>
+        public override void Reset()
+        {
+            // Call base reset first
+            base.Reset();
+
+            // Now clear taming-specific caches
+            foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
+            {
+                string cacheKey = this.GetType().Name + TAMEABLE_CACHE_SUFFIX;
+                var animalCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Pawn>>(mapId);
+
+                if (animalCache.ContainsKey(cacheKey))
+                {
+                    animalCache.Remove(cacheKey);
+                }
+
+                // Clear the update tick record too
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+            }
+
+            if (Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Reset taming caches for {this.GetType().Name}");
+            }
         }
 
         #endregion
