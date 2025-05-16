@@ -21,7 +21,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Human-readable name for debug logging
@@ -40,7 +40,7 @@ namespace emitbreaker.PawnControl
         }
 
         // Use shorter cache update interval for more responsive caravan formation
-        protected override int CacheUpdateInterval => 120;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 
@@ -55,6 +55,11 @@ namespace emitbreaker.PawnControl
             if (pawn.Faction != Faction.OfPlayer &&
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
+
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
 
             // Don't assign caravan gathering jobs to pawns already forming caravans
             if (pawn.IsFormingCaravan())

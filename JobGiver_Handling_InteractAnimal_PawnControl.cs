@@ -27,7 +27,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every ~4 seconds
         /// </summary>
-        protected override int CacheUpdateInterval => 250;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (15, 25, 40 tiles)
@@ -252,11 +252,16 @@ namespace emitbreaker.PawnControl
             if (pawn?.Map == null)
                 return null;
 
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
             // Check if Animals skill is disabled
             if (pawn.WorkTagIsDisabled(WorkTags.Animals))
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_InteractAnimal_PawnControl>(
                 pawn,
                 WorkTag,
                 (p, forced) => {

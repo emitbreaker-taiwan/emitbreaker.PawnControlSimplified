@@ -53,6 +53,12 @@ namespace emitbreaker.PawnControl
             return GetTargets(map);
         }
 
+        protected override bool ShouldExecuteNow(int mapId)
+        {
+            // Hauling is cheap—run every tick
+            return true;
+        }
+
         #endregion
 
         #region Hooks for derived classes

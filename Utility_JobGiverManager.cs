@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using UnityEngine;
 using Verse;
 using Verse.AI;
 
@@ -46,10 +47,16 @@ namespace emitbreaker.PawnControl
                     return null;
                 }
 
+                // 0. Progressive scheduling check - determine if this pawn should run this JobGiver on this tick
+                if (jobGiverType != null && !Utility_JobGiverTickManager.ShouldExecuteForPawn(jobGiverType, pawn))
+                {
+                    return null;
+                }
+
                 // 1. Emergency check - yield to firefighting if there's a fire (unless we should skip it)
                 if (!skipEmergencyCheck && ShouldYieldToEmergencyJob(pawn))
                 {
-                    Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} yielding from {debugJobDesc ?? workTag} to handle emergency");
+                    Utility_DebugManager.LogNormal($"Injected {pawn.LabelShort} yielding from {debugJobDesc ?? workTag} job to handle emergency");
                     return null;
                 }
 
@@ -123,7 +130,8 @@ namespace emitbreaker.PawnControl
                 jobCreator,
                 additionalCheck != null ? new List<JobEligibilityCheck> { additionalCheck } : null,
                 debugJobDesc,
-                skipEmergencyCheck);
+                skipEmergencyCheck,
+                typeof(T));
             }
             catch (Exception ex)
             {
@@ -148,7 +156,7 @@ namespace emitbreaker.PawnControl
                 if (f != null && f.Spawned && pawn.Map.areaManager.Home[f.Position])
                 {
                     // only yield if pawn can do firefighting work
-                    if (Utility_TagManager.WorkEnabled(pawn.def, "Firefighter"))
+                    if (Utility_TagManager.IsWorkEnabled(pawn, "Firefighter"))
                         return true;
                     break;
                 }
@@ -170,12 +178,12 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Skip pawns without mod extension - let vanilla handle them
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
                 return false;
 
             // Using ThinkTreeManager for consistent tagging across codebase
-            if (!Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def))
+            if (!Utility_ThinkTreeManager.HasAllowWorkTag(pawn))
                 return false;
 
             if (!Utility_TagManager.WorkTypeSettingEnabled(pawn, workTypeName))
@@ -334,7 +342,7 @@ namespace emitbreaker.PawnControl
                     if (reachabilityCache != null)
                     {
                         int mapId = pawn.Map.uniqueID;
-                        var reachDict = Utility_CacheManager.GetOrNewReachabilityDict(reachabilityCache, mapId);
+                        var reachDict = Utility_UnifiedCache.GetReachabilityDict(reachabilityCache, mapId);
 
                         if (!reachDict.TryGetValue(thing, out canUse))
                         {
@@ -615,6 +623,5 @@ namespace emitbreaker.PawnControl
         }
 
         #endregion
-
     }
 }

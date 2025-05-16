@@ -43,14 +43,14 @@ namespace emitbreaker.PawnControl
 
             if (reload)
             {
-                animalCount = CountTrueValues(Utility_CacheManager._isAnimalCache);
-                humanlikeCount = CountTrueValues(Utility_CacheManager._isHumanlikeCache);
-                mechanoidCount = CountTrueValues(Utility_CacheManager._isMechanoidCache);
+                animalCount = CountTrueValues(Utility_UnifiedCache.IsAnimal);
+                humanlikeCount = CountTrueValues(Utility_UnifiedCache.IsHumanlike);
+                mechanoidCount = CountTrueValues(Utility_UnifiedCache.IsMechanoid);
             }
 
-            Utility_CacheManager._isAnimalCache.Clear();
-            Utility_CacheManager._isHumanlikeCache.Clear();
-            Utility_CacheManager._isMechanoidCache.Clear();
+            Utility_UnifiedCache.IsAnimal.Clear();
+            Utility_UnifiedCache.IsHumanlike.Clear();
+            Utility_UnifiedCache.IsMechanoid.Clear();
 
             foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
@@ -59,7 +59,7 @@ namespace emitbreaker.PawnControl
                     continue;
                 }
 
-                var modExtension = Utility_CacheManager.GetModExtension(def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(def);
                 if (modExtension == null)
                 {                    
                     continue;
@@ -68,30 +68,30 @@ namespace emitbreaker.PawnControl
                 bool forceAnimal = ForcedAnimalCondition(def, modExtension);
                 bool forceHumanlike = ForcedHumanlikeCondition(def, modExtension);
                 bool forceMechanoid = ForcedMechanoidCondition(def, modExtension);
-                Utility_CacheManager._isAnimalCache[def] = forceAnimal;
-                Utility_CacheManager._isHumanlikeCache[def] = forceHumanlike;
-                Utility_CacheManager._isMechanoidCache[def] = forceMechanoid;
+                Utility_UnifiedCache.IsAnimal[def] = forceAnimal;
+                Utility_UnifiedCache.IsHumanlike[def] = forceHumanlike;
+                Utility_UnifiedCache.IsMechanoid[def] = forceMechanoid;
             }
 
             identityFlagsPreloaded = true;
 
             if (reload)
             {
-                animalCountNew = CountTrueValues(Utility_CacheManager._isAnimalCache);
-                humanlikeCountNew = CountTrueValues(Utility_CacheManager._isHumanlikeCache);
-                mechanoidCountNew = CountTrueValues(Utility_CacheManager._isMechanoidCache);
+                animalCountNew = CountTrueValues(Utility_UnifiedCache.IsAnimal);
+                humanlikeCountNew = CountTrueValues(Utility_UnifiedCache.IsHumanlike);
+                mechanoidCountNew = CountTrueValues(Utility_UnifiedCache.IsMechanoid);
 
                 if ((animalCount != animalCountNew) || (humanlikeCount != humanlikeCountNew) || (mechanoidCount != mechanoidCountNew))
                 {
-                    Utility_DebugManager.LogNormal($"Identity flag summary: Animal={Utility_CacheManager._isAnimalCache.Count}, Humanlike={Utility_CacheManager._isHumanlikeCache.Count}, Mechanoid={Utility_CacheManager._isMechanoidCache.Count}");
+                    Utility_DebugManager.LogNormal($"Identity flag summary: Animal={Utility_UnifiedCache.IsAnimal.Count}, Humanlike={Utility_UnifiedCache.IsHumanlike.Count}, Mechanoid={Utility_UnifiedCache.IsMechanoid.Count}");
                 }
             }
         }
         
         // For Harmony Patch in early loading stage where Mod Extensions are not fully loaded yet.
-        public static bool IsForcedAnimal(ThingDef def) => def != null && Utility_CacheManager._isAnimalCache.TryGetValue(def, out var result) && result;
-        public static bool IsForcedHumanlike(ThingDef def) => def != null && Utility_CacheManager._isHumanlikeCache.TryGetValue(def, out var result) && result;
-        public static bool IsForcedMechanoid(ThingDef def) => def != null && Utility_CacheManager._isMechanoidCache.TryGetValue(def, out var result) && result;
+        public static bool IsForcedAnimal(ThingDef def) => def != null && Utility_UnifiedCache.IsAnimal.TryGetValue(def, out var result) && result;
+        public static bool IsForcedHumanlike(ThingDef def) => def != null && Utility_UnifiedCache.IsHumanlike.TryGetValue(def, out var result) && result;
+        public static bool IsForcedMechanoid(ThingDef def) => def != null && Utility_UnifiedCache.IsMechanoid.TryGetValue(def, out var result) && result;
 
         // Check whether does pawn forcefully converted to other type or not.
         private static bool ForcedAnimalCondition(ThingDef def, NonHumanlikePawnControlExtension modExtension)
@@ -143,7 +143,7 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (Utility_CacheManager._isAnimalCache.TryGetValue(def, out bool value))
+            if (Utility_UnifiedCache.IsAnimal.TryGetValue(def, out bool value))
             {
                 return value;
             }
@@ -158,7 +158,7 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (Utility_CacheManager._isHumanlikeCache.TryGetValue(def, out bool value))
+            if (Utility_UnifiedCache.IsHumanlike.TryGetValue(def, out bool value))
             {
                 return value;
             }
@@ -173,7 +173,7 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            if (Utility_CacheManager._isMechanoidCache.TryGetValue(def, out bool value))
+            if (Utility_UnifiedCache.IsMechanoid.TryGetValue(def, out bool value))
             {
                 return value;
             }
@@ -184,12 +184,12 @@ namespace emitbreaker.PawnControl
         // Dynamic Flag Management
         public static void SetFlagOverride(FlagScopeTarget flag, bool value)
         {
-            Utility_CacheManager._flagOverrides[flag] = value;
+            Utility_UnifiedCache.FlagOverrides[flag] = value;
         }
 
         public static bool IsFlagOverridden(FlagScopeTarget flag)
         {
-            return Utility_CacheManager._flagOverrides.TryGetValue(flag, out bool active) && active;
+            return Utility_UnifiedCache.FlagOverrides.TryGetValue(flag, out bool active) && active;
         }
 
         public static bool MatchesIdentityFlags(Pawn pawn, PawnIdentityFlags flags)
@@ -254,7 +254,7 @@ namespace emitbreaker.PawnControl
 
             if (IsFlagOverridden(FlagScopeTarget.IsColonist))
             {
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
                         AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
@@ -278,7 +278,7 @@ namespace emitbreaker.PawnControl
 
             if (IsFlagOverridden(FlagScopeTarget.IsPrisoner))
             {
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
                         AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
@@ -302,7 +302,7 @@ namespace emitbreaker.PawnControl
 
             if (IsFlagOverridden(FlagScopeTarget.IsSlave))
             {
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
                         AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
@@ -326,7 +326,7 @@ namespace emitbreaker.PawnControl
 
             if (IsFlagOverridden(FlagScopeTarget.IsGuest))
             {
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
                         AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
@@ -350,7 +350,7 @@ namespace emitbreaker.PawnControl
 
             if (IsFlagOverridden(FlagScopeTarget.IsPrisonerOfColony))
             {
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
                         AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
@@ -374,7 +374,7 @@ namespace emitbreaker.PawnControl
 
             if (IsFlagOverridden(FlagScopeTarget.IsSlaveOfColony))
             {
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension != null && (
                         Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
                         AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||

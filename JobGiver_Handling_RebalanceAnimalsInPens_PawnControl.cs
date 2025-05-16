@@ -57,7 +57,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_RebalanceAnimalsInPens_PawnControl>(
                 pawn,
                 WorkTag,
                 (p, forced) => {

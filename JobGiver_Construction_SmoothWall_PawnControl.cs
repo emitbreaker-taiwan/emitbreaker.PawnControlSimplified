@@ -27,7 +27,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval - walls don't change as often
         /// </summary>
-        protected override int CacheUpdateInterval => 220; // ~3.7 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 

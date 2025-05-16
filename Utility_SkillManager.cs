@@ -8,10 +8,10 @@ namespace emitbreaker.PawnControl
     {
         public static bool NeedsStatInjection(Pawn pawn)
         {
-            if (pawn == null || pawn.def == null || pawn.health == null || pawn.health.hediffSet == null)
+            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.health == null || pawn.health.hediffSet == null)
                 return false;
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return false;
@@ -27,12 +27,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static int SetInjectedSkillLevel(Pawn pawn, SkillDef skill = null)
         {
-            if (pawn == null || pawn.def == null)
+            if (!Utility_Common.RaceDefChecker(pawn.def))
             {
                 return 0;
             }
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
 
             if (modExtension == null)
             {
@@ -87,7 +87,7 @@ namespace emitbreaker.PawnControl
             SkillDef skill,
             SkillRecord record)
         {
-            if (pawn == null || pawn.RaceProps == null || modExtension == null)
+            if (!Utility_Common.RaceDefChecker(pawn.def) || modExtension == null)
                 return 0;
 
             // 1) global override
@@ -106,7 +106,7 @@ namespace emitbreaker.PawnControl
                     if (Utility_Common.SkillDefNamed(entry.skill) == skill)
                         return entry.level;
 
-                // b) fallback to SimulatedSkillDict if it’s been built
+                // b) fallback to SimulatedSkillDict if it's been built
                 if (modExtension.SimulatedSkillDict != null
                     && modExtension.SimulatedSkillDict.TryGetValue(skill, out int lvl))
                 {
@@ -116,7 +116,7 @@ namespace emitbreaker.PawnControl
                 // c) NO `return 0` here—let it fall through to race-based fallback
             }
 
-            // 4) “no specific skill requested” path
+            // 4) "no specific skill requested" path
             if (skill == null && modExtension.injectedSkills?.Count > 0)
             {
                 var dict = modExtension.SimulatedSkillDict;
@@ -144,20 +144,55 @@ namespace emitbreaker.PawnControl
                     ? modExtension.skillLevelToolUser
                     : 10;
 
+            // FIX HERE: Animal skill levels based on trainability
             if (rp.Animal)
             {
-                if (rp.trainability == TrainabilityDefOf.Advanced)
-                    return modExtension.skillLevelAnimalAdvanced > 0
-                        ? modExtension.skillLevelAnimalAdvanced
-                        : 5;
-                if (rp.trainability == TrainabilityDefOf.Intermediate)
-                    return modExtension.skillLevelAnimalIntermediate > 0
-                        ? modExtension.skillLevelAnimalIntermediate
-                        : 3;
+                // Log the trainability level for debugging
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"Animal {pawn.LabelShort} trainability: {rp.trainability?.defName ?? "null"}");
 
+                // Fix: Added null check for trainability and properly handle each case
+                if (rp.trainability != null)
+                {
+                    if (rp.trainability == TrainabilityDefOf.Advanced)
+                    {
+                        int level = modExtension.skillLevelAnimalAdvanced > 0
+                            ? modExtension.skillLevelAnimalAdvanced
+                            : 5;
+
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"Setting {pawn.LabelShort} to Advanced skill level: {level}");
+
+                        return level;
+                    }
+                    if (rp.trainability == TrainabilityDefOf.Intermediate)
+                    {
+                        int level = modExtension.skillLevelAnimalIntermediate > 0
+                            ? modExtension.skillLevelAnimalIntermediate
+                            : 3;
+
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"Setting {pawn.LabelShort} to Intermediate skill level: {level}");
+
+                        return level;
+                    }
+                    if (rp.trainability == TrainabilityDefOf.None)
+                    {
+                        int level = modExtension.skillLevelAnimalBasic > 0
+                            ? modExtension.skillLevelAnimalBasic
+                            : 1;
+
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"Setting {pawn.LabelShort} to Basic skill level: {level}");
+
+                        return level;
+                    }
+                }
+
+                // Fallback for animals without defined trainability
                 return modExtension.skillLevelAnimalBasic > 0
                     ? modExtension.skillLevelAnimalBasic
-                    : 3;
+                    : 1;
             }
 
             // 6) ultimate fallback
@@ -166,7 +201,7 @@ namespace emitbreaker.PawnControl
 
         public static Passion SetInjectedPassion(ThingDef def, SkillDef skillDef)
         {
-            var modExtension = Utility_CacheManager.GetModExtension(def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(def);
             if (modExtension?.SkillPassionDict == null)
             {
                 return Passion.None;
@@ -186,7 +221,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void ForceAttachSkillTrackerIfMissing(Pawn pawn)
         {
-            if (pawn == null || pawn.skills != null)
+            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.skills != null)
             {
                 return; // Already has skills, no need to modify
             }
@@ -265,7 +300,7 @@ namespace emitbreaker.PawnControl
                             continue;
                         }
 
-                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                         if (modExtension == null)
                         {
                             continue; // Skip if no mod extension is found
@@ -304,12 +339,12 @@ namespace emitbreaker.PawnControl
                     foreach (var pawn in Find.WorldPawns.AllPawnsAliveOrDead)
                     {
                         // Skip pawns that already have skills, are dead, or don't need skills
-                        if (pawn == null || pawn.Dead || pawn.Destroyed)
+                        if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.Dead || pawn.Destroyed)
                         {
                             continue;
                         }
 
-                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                         if (modExtension == null)
                         {
                             continue; // Skip if no mod extension is found
@@ -360,7 +395,7 @@ namespace emitbreaker.PawnControl
         public static bool ShouldHaveSkills(Pawn pawn)
         {
             // Skip null pawns or those without valid race properties
-            if (pawn?.RaceProps == null || pawn.def == null)
+            if (!Utility_Common.RaceDefChecker(pawn.def))
             {
                 return false;
             }
@@ -371,45 +406,45 @@ namespace emitbreaker.PawnControl
             }
 
             // Check for any managed extension that indicates this pawn should work
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return false;
             }
 
-            if (Utility_TagManager.WorkEnabled(pawn.def, ManagedTags.AllowAllWork))
+            if (Utility_TagManager.IsWorkEnabled(pawn, ManagedTags.AllowAllWork))
             {
                 Utility_DebugManager.LogNormal($"Injected all skills to {pawn.LabelShort}.");
                 return true;
             }
-            else if(Utility_TagManager.WorkEnabled(pawn.def, ManagedTags.BlockAllWork))
+            else if(Utility_TagManager.IsWorkEnabled(pawn, ManagedTags.BlockAllWork))
             {
                 Utility_DebugManager.LogNormal($"Blocked all skills to {pawn.LabelShort}.");
                 return false;
             }
             else
             {
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Construction.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Construction.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Construction.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Growing.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_PlantCutting.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Growing.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_PlantCutting.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Plants.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Research.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_DarkStudy.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Research.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_DarkStudy.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Intellectual.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Mining.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Mining.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Mining.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Hunting.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Hunting.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Shooting.label} to {pawn.LabelShort}.");
                     return true;
@@ -419,32 +454,32 @@ namespace emitbreaker.PawnControl
                 //    Utility_DebugManager.LogNormal($"[PawnControl] Injected {SkillDefOf.Melee.label} to {pawn.LabelShort}.");
                 //    return true;
                 //}
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Warden.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Childcare.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Warden.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Childcare.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Social.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Hunting.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Handling.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Hunting.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Handling.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Animals.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Cooking.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Cooking.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Cooking.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Doctor.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Doctor.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Medicine.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Art.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Art.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Artistic.label} to {pawn.LabelShort}.");
                     return true;
                 }
-                if (Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Crafting.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Smithing.ToString()) || Utility_TagManager.WorkEnabled(pawn.def, PawnEnumTags.AllowWork_Tailoring.ToString()))
+                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Crafting.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Smithing.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Tailoring.ToString()))
                 {
                     Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Crafting.label} to {pawn.LabelShort}.");
                     return true;

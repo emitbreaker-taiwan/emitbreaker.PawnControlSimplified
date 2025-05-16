@@ -36,12 +36,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval (in ticks)
         /// </summary>
-        protected override int CacheUpdateInterval => 500;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Plant cutting typically requires a zone or designated plant
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// Cache key suffix for plants needing cutting
@@ -290,6 +290,7 @@ namespace emitbreaker.PawnControl
             if (plant == null || plant.Destroyed || !plant.Spawned)
                 return false;
 
+            // Let the base class handle faction-aware reservation checking
             bool isDesignated =
                 pawn.Map.designationManager.DesignationOn(plant, DesignationDefOf.CutPlant) != null
                 || pawn.Map.designationManager.DesignationOn(plant, DesignationDefOf.HarvestPlant) != null;

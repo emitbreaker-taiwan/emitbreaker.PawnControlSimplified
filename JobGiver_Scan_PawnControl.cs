@@ -16,7 +16,13 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresDesignator
+        public override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// Whether this job giver requires a designator to operate (zone designation, etc.)
+        /// Most cleaning jobs require designators so default is true
+        /// </summary>
+        public override bool RequiresDesignator
         {
             get
             {
@@ -33,7 +39,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this job giver requires player faction specifically (for jobs like deconstruct)
         /// </summary>
-        protected override bool RequiresPlayerFaction => false;
+        public override bool RequiresPlayerFaction => false;
 
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
@@ -46,7 +52,7 @@ namespace emitbreaker.PawnControl
         protected override bool HasRequiredCapabilities(Pawn pawn)
         {
             // For non-humanlike pawns, check for the required mod extension
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
                 return false;
 
@@ -58,7 +64,7 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Check for work type enablement
-            if (!Utility_TagManager.WorkTypeEnabled(pawn.def, WorkTag))
+            if (!Utility_TagManager.IsWorkEnabled(pawn, WorkTag))
                 return false;
 
             // Allow if pawn has the AllowAllWork tag
@@ -110,27 +116,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job CreateJobFor(Pawn pawn, bool forced)
         {
-            if (pawn?.Map == null)
-                return null;
-
             int mapId = pawn.Map.uniqueID;
 
             if (!ShouldExecuteNow(mapId))
                 return null;
 
-            // Update cache if needed using the parent class method
-            if (ShouldUpdateCache(mapId))
-            {
-                UpdateCache(mapId, pawn.Map);
-            }
-
-            // Get targets from the cache
-            var targets = GetCachedTargets(mapId);
-            if (targets == null || targets.Count == 0)
-                return null;
-
-            // Derived classes must implement the job creation from targets
-            return ProcessCachedTargets(pawn, targets, forced);
+            return base.CreateJobFor(pawn, forced);
         }
 
         /// <summary>

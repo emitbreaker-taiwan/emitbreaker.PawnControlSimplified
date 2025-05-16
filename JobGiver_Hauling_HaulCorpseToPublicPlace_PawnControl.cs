@@ -20,7 +20,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// The job to create when a valid target is found
@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 2 seconds - mental breaks should be responsive
         /// </summary>
-        protected override int CacheUpdateInterval => 120;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Smaller distance thresholds for corpses during mental breaks - cover colony area quickly
@@ -69,6 +69,11 @@ namespace emitbreaker.PawnControl
             // Only apply to pawns in CorpseObsession mental state
             if (!(pawn?.MentalState is MentalState_CorpseObsession))
                 return null;
+
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
 
             // Use the standard base implementation with standard emergency check skipping
             return base.TryGiveJob(pawn);

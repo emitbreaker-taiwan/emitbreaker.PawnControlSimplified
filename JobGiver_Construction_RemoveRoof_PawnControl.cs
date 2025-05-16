@@ -20,14 +20,14 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// The job to create when a valid target is found
         /// </summary>
         protected override JobDef WorkJobDef => JobDefOf.RemoveRoof;
         public override string WorkTag => "Construction";
-        protected override int CacheUpdateInterval => 250; // Update every ~4 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
         protected override string DebugName => "roof removal assignment";
 
         // Distance thresholds for bucketing
@@ -49,8 +49,13 @@ namespace emitbreaker.PawnControl
 
         protected override Job TryGiveJob(Pawn pawn)
         {
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
             // Use the StandardTryGiveJob pattern directly
-            return Utility_JobGiverManager.StandardTryGiveJob<Thing>(
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Construction_RemoveRoof_PawnControl>(
                 pawn,
                 WorkTag,  // Use the WorkTag property from the base class
                 (p, forced) => {

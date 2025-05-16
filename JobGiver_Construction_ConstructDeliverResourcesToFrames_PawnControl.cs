@@ -32,7 +32,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval - frames need more frequent updates than blueprints
         /// </summary>
-        protected override int CacheUpdateInterval => 180; // 3 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 

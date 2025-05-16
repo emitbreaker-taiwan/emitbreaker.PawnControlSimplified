@@ -22,7 +22,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval in ticks (180 ticks = 3 seconds)
         /// </summary>
-        protected override int CacheUpdateInterval => 180;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (10, 20, 30 tiles squared)
@@ -51,12 +51,12 @@ namespace emitbreaker.PawnControl
                 return true;
 
             // Check if pawn has required capabilities
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
                 return true;
 
             // Skip if pawn is not a warden
-            if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
+            if (!Utility_TagManager.IsWorkEnabled(pawn, WorkTag))
                 return true;
 
             // Check if Ideology is active

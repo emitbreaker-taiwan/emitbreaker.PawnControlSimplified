@@ -20,7 +20,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// The job to create when a valid target is found
@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 5 seconds - egg boxes don't fill that quickly
         /// </summary>
-        protected override int CacheUpdateInterval => 300;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for egg boxes
@@ -58,6 +58,11 @@ namespace emitbreaker.PawnControl
             if (pawn.Faction != Faction.OfPlayer &&
                 !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return null;
+
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
 
             return base.TryGiveJob(pawn);
         }

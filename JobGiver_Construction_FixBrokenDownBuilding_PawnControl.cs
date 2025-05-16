@@ -28,12 +28,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Whether this job requires a designator (false for repair jobs)
         /// </summary>
-        protected override bool RequiresDesignator => false;
+        public override bool RequiresDesignator => false;
 
         /// <summary>
         /// The designation this job giver targets - null for repair tasks
@@ -43,7 +43,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 5 seconds (broken buildings don't change often)
         /// </summary>
-        protected override int CacheUpdateInterval => 300;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Standard distance thresholds for repair tasks

@@ -34,6 +34,12 @@ namespace emitbreaker.PawnControl
         private static readonly Dictionary<Type, int> _baseIntervals = new Dictionary<Type, int>();
         private static readonly Dictionary<Type, int> _dynamicIntervals = new Dictionary<Type, int>();
 
+        // Number of tick groups to spread pawns across for each JobGiver
+        private static readonly Dictionary<Type, int> _tickGroupsPerJobGiver = new Dictionary<Type, int>();
+
+        // Default number of tick groups for progressive scheduling
+        public const int DEFAULT_TICK_GROUPS = 4;
+
         // Base update interval constants
         public const int HIGH_PRIORITY_INTERVAL = 30;   // Critical tasks like firefighting (0.5 sec)
         public const int MEDIUM_PRIORITY_INTERVAL = 60;  // Important tasks like doctoring (1 sec)
@@ -47,7 +53,8 @@ namespace emitbreaker.PawnControl
         /// <param name="workTypeName">Associated work type for grouping</param>
         /// <param name="priority">Execution priority (higher runs more frequently)</param>
         /// <param name="customInterval">Optional custom update interval</param>
-        public static void RegisterJobGiver(Type jobGiverType, string workTypeName, int priority, int? customInterval = null)
+        /// <param name="tickGroups">Number of groups to distribute pawns across (default: 4)</param>
+        public static void RegisterJobGiver(Type jobGiverType, string workTypeName, int priority, int? customInterval = null, int tickGroups = DEFAULT_TICK_GROUPS)
         {
             if (jobGiverType == null) return;
 
@@ -60,6 +67,9 @@ namespace emitbreaker.PawnControl
 
             // Generate a stable but unique offset for this JobGiver to stagger execution
             _executionOffsets[jobGiverType] = Math.Abs(jobGiverType.GetHashCode() % interval);
+
+            // Set the number of tick groups for progressive scheduling
+            _tickGroupsPerJobGiver[jobGiverType] = Math.Max(1, tickGroups);
 
             // Group by work type
             if (!string.IsNullOrEmpty(workTypeName))
@@ -76,10 +86,48 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            if (Prefs.DevMode)
+            if (Utility_DebugManager.ShouldLogDetailed())
             {
-                Utility_DebugManager.LogNormal($"Registered JobGiver {jobGiverType.Name} (WorkType: {workTypeName}, Priority: {priority}, Interval: {interval} ticks)");
+                Utility_DebugManager.LogNormal($"Registered JobGiver {jobGiverType.Name} (WorkType: {workTypeName}, Priority: {priority}, Interval: {interval} ticks, Tick Groups: {tickGroups})");
             }
+        }
+
+        /// <summary>
+        /// Determines if a JobGiver should execute on the current tick for a specific pawn
+        /// </summary>
+        /// <param name="jobGiverType">Type of JobGiver to check</param>
+        /// <param name="pawn">The pawn requesting a job</param>
+        /// <param name="forceExecute">Force execution regardless of schedule</param>
+        /// <returns>True if JobGiver should execute now for this pawn</returns>
+        public static bool ShouldExecuteForPawn(Type jobGiverType, Pawn pawn, bool forceExecute = false)
+        {
+            if (pawn == null || jobGiverType == null)
+                return false;
+
+            int mapId = pawn.Map?.uniqueID ?? -1;
+            if (mapId < 0)
+                return false;
+
+            // Force execution if requested
+            if (forceExecute)
+                return true;
+
+            // Get the number of tick groups for this JobGiver
+            int tickGroups = _tickGroupsPerJobGiver.GetValueSafe(jobGiverType, DEFAULT_TICK_GROUPS);
+
+            // Get the pawn's tick group based on a hash of its ThingID
+            // This ensures consistent assignment across game sessions
+            int pawnTickGroup = Math.Abs(pawn.thingIDNumber % tickGroups);
+
+            // Get the current tick and see if it's this pawn's turn
+            int currentTick = Find.TickManager.TicksGame;
+            bool isTickForThisPawn = (currentTick % tickGroups) == pawnTickGroup;
+
+            // Check if the base JobGiver should execute this tick
+            bool baseJobGiverShouldExecute = ShouldExecute(jobGiverType, mapId, forceExecute);
+
+            // JobGiver should execute if it's scheduled AND it's this pawn's turn in the rotation
+            return baseJobGiverShouldExecute && isTickForThisPawn;
         }
 
         /// <summary>
@@ -128,6 +176,24 @@ namespace emitbreaker.PawnControl
             }
 
             return shouldExecute;
+        }
+
+        /// <summary>
+        /// Sets the number of tick groups for a JobGiver's progressive scheduling
+        /// </summary>
+        /// <param name="jobGiverType">Type of JobGiver</param>
+        /// <param name="tickGroups">Number of groups to distribute pawns across</param>
+        public static void SetTickGroups(Type jobGiverType, int tickGroups)
+        {
+            if (jobGiverType == null || tickGroups < 1)
+                return;
+
+            _tickGroupsPerJobGiver[jobGiverType] = tickGroups;
+
+            if (Utility_DebugManager.ShouldLogDetailed())
+            {
+                Utility_DebugManager.LogNormal($"Updated tick groups for {jobGiverType.Name}: {tickGroups}");
+            }
         }
 
         /// <summary>
@@ -364,6 +430,14 @@ namespace emitbreaker.PawnControl
                 return priority;
 
             return 5; // Default medium priority
+        }
+
+        /// <summary>
+        /// Gets all work types that have registered JobGivers
+        /// </summary>
+        public static IEnumerable<string> GetAllWorkTypes()
+        {
+            return _jobGiversByWorkType.Keys;
         }
     }
 }

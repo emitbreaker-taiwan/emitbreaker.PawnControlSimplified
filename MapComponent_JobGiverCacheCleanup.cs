@@ -27,11 +27,24 @@ namespace emitbreaker.PawnControl
             // Clear cache for this map
             if (map != null)
             {
-                Utility_MapCacheManager.ClearMapCache(map.uniqueID);
+                Utility_UnifiedCache.InvalidateMap(map.uniqueID);
                 Utility_JobGiverManager.CleanupMapData(map.uniqueID);
             }
 
             Utility_DebugManager.LogNormal($"Cleaned up caches for removed map {map.uniqueID}");
+        }
+
+        // Add this to your MapComponent_JobGiverCacheCleanup class
+        public override void MapComponentTick()
+        {
+            base.MapComponentTick();
+
+            // Every 2000 ticks (about 33 seconds)
+            if (Find.TickManager.TicksGame % 2000 == 0)
+            {
+                // Clean up target prefiltering caches for this map
+                Utility_TargetPrefilteringManager.CleanupInvalidTargetsForMap(map);
+            }
         }
 
         public override void MapGenerated()
@@ -40,7 +53,7 @@ namespace emitbreaker.PawnControl
 
             if (map != null)
             {
-                Utility_MapCacheManager.ClearMapCache(map.uniqueID);
+                Utility_UnifiedCache.InvalidateMap(map.uniqueID);
                 Utility_JobGiverManager.CleanupMapData(map.uniqueID);
             }
             // Initialize any needed caches for the new map

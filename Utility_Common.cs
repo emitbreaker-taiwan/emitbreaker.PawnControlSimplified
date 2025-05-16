@@ -11,7 +11,7 @@ namespace emitbreaker.PawnControl
 {
     public static class Utility_Common
     {
-        public static bool PawnChecker(Pawn pawn)
+        public static bool PawnCompatibilityChecker(Pawn pawn)
         {
             if (pawn == null || pawn.RaceProps.Humanlike || pawn.Dead || !pawn.Spawned || pawn.IsDessicated())
             {
@@ -36,6 +36,16 @@ namespace emitbreaker.PawnControl
             if (pawn.Faction != Faction.OfPlayer && !(pawn.IsSlave && pawn.HostFaction == Faction.OfPlayer))
                 return true;
             return false;
+        }
+
+        public static bool PawnChecker(Pawn pawn)
+        {
+            if (pawn == null || pawn.def == null || pawn.def.race == null)
+            {
+                return false;
+            }
+
+            return true;
         }
 
         public static bool RaceDefChecker(ThingDef def)

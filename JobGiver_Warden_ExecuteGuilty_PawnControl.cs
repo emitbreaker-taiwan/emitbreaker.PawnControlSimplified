@@ -23,7 +23,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval in ticks (300 ticks = 5 seconds)
         /// </summary>
-        protected override int CacheUpdateInterval => 300;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (10, 20, 30 tiles)
@@ -90,6 +90,11 @@ namespace emitbreaker.PawnControl
         {
             // Skip if pawn is incapable of violence
             if (pawn.WorkTagIsDisabled(WorkTags.Violent))
+            {
+                return null;
+            }
+
+            if (ShouldSkip(pawn))
             {
                 return null;
             }

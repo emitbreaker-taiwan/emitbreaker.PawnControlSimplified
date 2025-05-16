@@ -28,18 +28,18 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this job giver requires player faction (always true for designations)
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// Override cache interval
         /// </summary>
-        protected override int CacheUpdateInterval => 120; // Update every 2 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Standard distance thresholds for floor construction bucketing
@@ -120,12 +120,25 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job CreateJobFor(Pawn pawn, bool forced)
         {
-            if (pawn?.Map == null)
-                return null;
-
             int mapId = pawn.Map.uniqueID;
 
             if (!ShouldExecuteNow(mapId))
+                return null;
+
+            // Update cache if needed using the centralized cache system
+            if (ShouldUpdateCache(mapId))
+            {
+                UpdateCache(mapId, pawn.Map);
+            }
+
+            // Get targets from the cache
+            var targets = GetCachedTargets(mapId);
+            if (targets == null || targets.Count == 0)
+                return null;
+
+            // CRUCIAL: Filter out targets that are already reserved by ANY pawn
+            var filteredTargets = FilterOutAlreadyReservedTarget(pawn, targets);
+            if (filteredTargets == null || filteredTargets.Count == 0)
                 return null;
 
             // Create the floor construction job directly

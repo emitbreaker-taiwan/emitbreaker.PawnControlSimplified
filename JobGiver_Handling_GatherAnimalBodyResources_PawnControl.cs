@@ -18,7 +18,7 @@ namespace emitbreaker.PawnControl
 
         public override string WorkTag => "Handling";
 
-        protected override int CacheUpdateInterval => 250;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         // Distance thresholds for bucketing (25, 50, 100 tiles squared)
         protected override float[] DistanceThresholds => new float[] { 625f, 2500f, 10000f };
@@ -313,7 +313,12 @@ namespace emitbreaker.PawnControl
             if (pawn?.Map == null || pawn.Faction != Faction.OfPlayer)
                 return null;
 
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_GatherAnimalBodyResources_PawnControl>(
                 pawn,
                 WorkTag,
                 (p, forced) => base.TryGiveJob(p),

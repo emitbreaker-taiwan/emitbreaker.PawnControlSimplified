@@ -24,7 +24,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval in ticks (120 ticks = 2 seconds)
         /// </summary>
-        protected override int CacheUpdateInterval => 120;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (10, 20, 30 tiles)
@@ -51,6 +51,11 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_TakeToBed_PawnControl>(
                 pawn,
                 WorkTag,
@@ -63,9 +68,11 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job CreateJobFor(Pawn pawn, bool forced)
         {
-            if (pawn?.Map == null) return null;
+            int mapId = pawn.Map.uniqueID;
 
-            // Process cached targets to create job
+            if (!ShouldExecuteNow(mapId))
+                return null;
+
             return base.CreateJobFor(pawn, forced);
         }
 

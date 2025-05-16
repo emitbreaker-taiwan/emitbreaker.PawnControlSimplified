@@ -28,7 +28,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 5 seconds - cremation bills don't change often
         /// </summary>
-        protected override int CacheUpdateInterval => 300;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for crematoriums (10, 20, 40 tiles)
@@ -38,7 +38,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cremation strictly requires player faction
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Fixed bill giver definitions for crematoriums

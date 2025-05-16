@@ -101,7 +101,7 @@ namespace emitbreaker.PawnControl
             if (pawn == null || pawn.skills == null || pawn.def == null)
                 return result;
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
                 return result;
 
@@ -136,7 +136,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void InjectConsolidatedStatHediff(Pawn pawn)
         {
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
 
             if (HasAlreadyInjected(pawn))
             {
@@ -144,7 +144,8 @@ namespace emitbreaker.PawnControl
                 return;
             }
 
-            Utility_DebugManager.LogNormal($"Stat consolidation attempt for {pawn.LabelShort} ({pawn.def?.defName ?? "null"})");
+            if (Utility_DebugManager.ShouldLogDetailed())
+                Utility_DebugManager.LogNormal($"Stat consolidation attempt for {pawn.LabelShort} ({pawn.def?.defName ?? "null"})");
 
             if (pawn == null)
             {
@@ -173,7 +174,8 @@ namespace emitbreaker.PawnControl
             var skillsToCheck = GetSkillsNeedingStatSupport(pawn);
             if (skillsToCheck.Count == 0)
             {
-                Utility_DebugManager.LogNormal($"No skills need stat support for {pawn.LabelShort}");
+                if (Utility_DebugManager.ShouldLogDetailed())
+                    Utility_DebugManager.LogNormal($"No skills need stat support for {pawn.LabelShort}");
                 return;
             }
 

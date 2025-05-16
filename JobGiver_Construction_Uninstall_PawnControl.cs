@@ -30,7 +30,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval - slightly less often for uninstall tasks
         /// </summary>
-        protected override int CacheUpdateInterval => 180; // 3 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 

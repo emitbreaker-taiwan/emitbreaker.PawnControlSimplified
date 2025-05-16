@@ -18,7 +18,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Human-readable name for debug logging 
@@ -28,7 +28,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 2 seconds
         /// </summary>
-        protected override int CacheUpdateInterval => 120;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (10, 20, 30 tiles)

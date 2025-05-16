@@ -47,37 +47,30 @@ namespace emitbreaker.PawnControl
 
         public static bool PawnCanUseWorkGiver(Pawn pawn, WorkGiver giver)
         {
-            if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def) && !giver.def.nonColonistsCanDo && !pawn.IsColonist && !pawn.IsColonyMech && !pawn.IsMutant)
+            if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn) && !giver.def.nonColonistsCanDo && !pawn.IsColonist && !pawn.IsColonyMech && !pawn.IsMutant)
             {
                 return false;
             }
 
-            if (Utility_TagManager.WorkDisabled(pawn.def, giver.def.workType.workTags.ToString()))
+            if (giver.def.workType != null
+                && !Utility_WorkPermissionManager.CanDoWorkType(
+                       pawn,
+                       giver.def.workType.workTags.ToString()))  // UPDATE: replaced race-level tag checks
             {
                 return false;
             }
 
-            if (giver.def.workType != null && !Utility_TagManager.WorkEnabled(pawn.def, giver.def.workType.workTags.ToString()))
+            if (Utility_UnifiedCache.GetModExtension(pawn.def) == null && giver.MissingRequiredCapacity(pawn) != null)
             {
                 return false;
             }
 
-            if (giver.ShouldSkip(pawn))
+            if (Utility_UnifiedCache.GetModExtension(pawn.def) == null && pawn.RaceProps.IsMechanoid && !giver.def.canBeDoneByMechs)
             {
                 return false;
             }
 
-            if (Utility_CacheManager.GetModExtension(pawn.def) == null && giver.MissingRequiredCapacity(pawn) != null)
-            {
-                return false;
-            }
-
-            if (Utility_CacheManager.GetModExtension(pawn.def) == null && pawn.RaceProps.IsMechanoid && !giver.def.canBeDoneByMechs)
-            {
-                return false;
-            }
-
-            if (Utility_CacheManager.GetModExtension(pawn.def) == null && pawn.IsMutant && !giver.def.canBeDoneByMutants)
+            if (Utility_UnifiedCache.GetModExtension(pawn.def) == null && pawn.IsMutant && !giver.def.canBeDoneByMutants)
             {
                 return false;
             }

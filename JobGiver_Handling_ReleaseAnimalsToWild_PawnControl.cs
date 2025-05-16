@@ -23,7 +23,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Human-readable name for debug logging 
@@ -33,7 +33,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every ~4 seconds
         /// </summary>
-        protected override int CacheUpdateInterval => 250;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (15, 25, 40 tiles)
@@ -60,6 +60,11 @@ namespace emitbreaker.PawnControl
             // Quick early exit if no animals are marked for release
             if (pawn?.Map == null || !pawn.Map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.ReleaseAnimalToWild))
                 return null;
+
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
 
             // Use the parent class job creation logic
             return base.TryGiveJob(pawn);

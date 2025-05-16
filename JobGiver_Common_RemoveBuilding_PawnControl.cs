@@ -24,23 +24,23 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresDesignator => true;
+        public override bool RequiresDesignator => true;
 
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// Whether this job giver requires player faction (always true for designations)
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Override cache interval - slightly longer than default since designations don't change as frequently
         /// </summary>
-        protected override int CacheUpdateInterval => 180; // 3 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Override debug name for better logging

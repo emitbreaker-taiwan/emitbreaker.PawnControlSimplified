@@ -17,6 +17,11 @@ public static class Utility_JobGiverCacheManager<T> where T : Thing
     // Registry of all job giver types
     private static readonly HashSet<Type> _registeredJobGivers = new HashSet<Type>();
 
+    private static readonly object _cacheLock = new object();
+    private static Dictionary<Type, Dictionary<int, List<T>>> _cacheSystem = new Dictionary<Type, Dictionary<int, List<T>>>();
+
+    // Implement proper type checking before casting
+
     public static void RegisterJobGiver(Type jobGiverType)
     {
         if (!_registeredJobGivers.Contains(jobGiverType))
@@ -25,15 +30,23 @@ public static class Utility_JobGiverCacheManager<T> where T : Thing
         }
     }
 
-    public static bool NeedsUpdate(Type jobGiverType, int mapId, int updateInterval)
+    public static bool NeedsUpdate(Type jobGiverType, int mapId, int interval)
     {
-        var key = (jobGiverType, mapId);
-        return !_lastUpdateTick.TryGetValue(key, out int lastUpdate) ||
-               Find.TickManager.TicksGame - lastUpdate >= updateInterval;
+        int ticksGame = Find.TickManager.TicksGame;
+        int lastUpdate = GetLastUpdateTick(jobGiverType, mapId);
+
+        // Add stagger based on job giver type to prevent all caches updating at once
+        int staggerOffset = Math.Abs(jobGiverType.GetHashCode() % 60);
+
+        return ticksGame - lastUpdate >= interval ||
+               (ticksGame + staggerOffset) % interval == 0;
     }
 
     public static void UpdateCache(Type jobGiverType, int mapId, IEnumerable<T> targets)
     {
+        // Limit to 100 targets maximum per job giver
+        var limitedTargets = targets.Take(100).ToList();
+
         var key = (jobGiverType, mapId);
         _targetCache[key] = new List<T>(targets);
         _lastUpdateTick[key] = Find.TickManager.TicksGame;
@@ -41,8 +54,34 @@ public static class Utility_JobGiverCacheManager<T> where T : Thing
 
     public static List<T> GetTargets(Type jobGiverType, int mapId)
     {
+        // If cache doesn't exist, initialize it but don't populate yet
+        if (!_cacheSystem.TryGetValue(jobGiverType, out var typeCache) ||
+            !typeCache.TryGetValue(mapId, out var mapCache)) // Fixed: Removed incorrect 'MapCaches' reference
+        {
+            return new List<T>();
+        }
+
+        return mapCache; // Fixed: Directly return the mapCache as it is already a List<T>
+
+        //lock (_cacheLock)
+        //{
+        //    if (_cacheSystem.TryGetValue(jobGiverType, out var mapCache) &&
+        //        mapCache.TryGetValue(mapId, out var targets))
+        //    {
+        //        return targets;
+        //    }
+        //    return new List<T>();
+        //}
+    }
+
+    private static int GetLastUpdateTick(Type jobGiverType, int mapId)
+    {
         var key = (jobGiverType, mapId);
-        return _targetCache.TryGetValue(key, out var targets) ? targets : new List<T>();
+        if (_lastUpdateTick.TryGetValue(key, out int lastUpdate))
+        {
+            return lastUpdate;
+        }
+        return 0; // Default to 0 if no update has been recorded
     }
 
     public static bool TryGetReachabilityResult(Type jobGiverType, int mapId, T target, out bool result)

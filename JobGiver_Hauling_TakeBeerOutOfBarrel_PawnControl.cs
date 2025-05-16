@@ -19,7 +19,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// The designation type this job giver handles
@@ -39,7 +39,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 5 seconds - barrels don't change state quickly
         /// </summary>
-        protected override int CacheUpdateInterval => 300;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for brewery areas

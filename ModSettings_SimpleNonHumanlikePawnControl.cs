@@ -11,11 +11,13 @@ namespace emitbreaker.PawnControl
     public class ModSettings_SimpleNonHumanlikePawnControl : ModSettings
     {
         public bool debugMode = false; // ✅ New setting
+        public bool detailedDebugMode = false; // ✅ New setting
 
         public override void ExposeData()
         {
             base.ExposeData();
             Scribe_Values.Look(ref debugMode, "debugMode", false);
+            Scribe_Values.Look(ref detailedDebugMode, "detailedDebugMode", false);
         }
         //// Store applied presets by race defName
         //public Dictionary<string, string> appliedPresets = new Dictionary<string, string>();

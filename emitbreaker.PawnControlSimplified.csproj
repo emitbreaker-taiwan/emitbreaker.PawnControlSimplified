@@ -66,6 +66,10 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Utility_ReservationManager.cs" />
+    <Compile Include="PawnTagFlags.cs" />
+    <Compile Include="Utility_UnifiedCache.cs" />
+    <Compile Include="Utility_JobGiverRegistry.cs" />
     <Compile Include="JobGiver_Crafting_PawnControl.cs" />
     <Compile Include="JobGiver_Doctor_PawnControl.cs" />
     <Compile Include="IResettableCache.cs" />
@@ -101,10 +105,12 @@
     <Compile Include="MapComponent_JobGiverCacheCleanup.cs" />
     <Compile Include="Utility_AdaptiveProfilingManager.cs" />
     <Compile Include="Utility_GlobalStateManager.cs" />
+    <Compile Include="Utility_JobGiverSchedulingManager.cs" />
     <Compile Include="Utility_MapCacheManager.cs" />
     <Compile Include="Utility_PathfindingManager.cs" />
     <Compile Include="Utility_TargetPrefilteringManager.cs" />
     <Compile Include="Utility_ThinkTreeOptimizationManager.cs" />
+    <Compile Include="Utility_WorkPermissionManager.cs" />
     <Compile Include="Utility_WorkTypeManager.cs" />
     <Compile Include="JobGiver_Scan_PawnControl.cs" />
     <Compile Include="MainTabWindow_PawnControl.cs" />
@@ -211,7 +217,6 @@
     <Compile Include="GameComponent_LateInjection.cs" />
     <Compile Include="LordDutyMapping.cs" />
     <Compile Include="Mod_SimpleNonHumanlikePawnControl.cs" />
-    <Compile Include="Utility_CacheManager.cs" />
     <Compile Include="Utility_TagManager.cs" />
     <Compile Include="Utility_Common.cs" />
     <Compile Include="HarmonyInitializer.cs" />

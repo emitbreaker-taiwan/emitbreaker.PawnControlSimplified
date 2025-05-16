@@ -18,7 +18,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// The job to create when a valid target is found
@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update every 10 seconds (snow changes slowly)
         /// </summary>
-        protected override int CacheUpdateInterval => 600;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Snow clearing is lowest priority cleaning task
@@ -48,7 +48,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Snow clearing uses designated zone
         /// </summary>
-        protected override bool RequiresDesignator => true;
+        public override bool RequiresDesignator => true;
 
         #endregion
 

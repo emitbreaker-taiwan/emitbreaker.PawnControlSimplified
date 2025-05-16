@@ -23,17 +23,17 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this job giver requires a designator to operate
         /// </summary>
-        protected override bool RequiresDesignator => false;
+        public override bool RequiresDesignator => false;
 
         /// <summary>
         /// Whether this job giver requires map zone or area
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Whether non-player pawns can feed patients (always within their own faction)
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
@@ -43,7 +43,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 3 seconds for feeding jobs
         /// </summary>
-        protected override int CacheUpdateInterval => 180; // 3 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing

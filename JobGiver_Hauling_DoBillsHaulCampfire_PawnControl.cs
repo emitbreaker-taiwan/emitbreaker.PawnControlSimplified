@@ -28,7 +28,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 5 seconds - campfire bills don't change often
         /// </summary>
-        protected override int CacheUpdateInterval => 300;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Campfires are usually in more centralized areas, use smaller distance thresholds
@@ -38,7 +38,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Campfire cooking requires player faction
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Fixed bill giver definitions for campfires

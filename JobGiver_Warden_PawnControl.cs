@@ -18,7 +18,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Warden jobs typically don't require zone designations
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Required tag for non-humanlike pawns
@@ -38,7 +38,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval (in ticks)
         /// </summary>
-        protected override int CacheUpdateInterval => 300; // Update every 5 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Cache key suffix for prisoners

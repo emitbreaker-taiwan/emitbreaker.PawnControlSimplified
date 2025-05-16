@@ -34,17 +34,17 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// Replanting is strictly a player faction activity
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Cache update interval - update slightly less often for replanting
         /// </summary>
-        protected override int CacheUpdateInterval => 250; // ~4.2 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         // Additional translation strings specific to replanting
         private static string BlockedByRoofTranslated;

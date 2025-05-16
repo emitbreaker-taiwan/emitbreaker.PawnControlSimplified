@@ -41,7 +41,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval - plants change less often
         /// </summary>
-        protected override int CacheUpdateInterval => 300; // 5 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 

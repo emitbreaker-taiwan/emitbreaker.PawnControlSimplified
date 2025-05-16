@@ -26,7 +26,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval in ticks (180 ticks = 3 seconds)
         /// </summary>
-        protected override int CacheUpdateInterval => 180;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (10, 15, 25 tiles)
@@ -94,6 +94,11 @@ namespace emitbreaker.PawnControl
             // Check if anomaly mod is active
             if (!ModsConfig.AnomalyActive)
                 return null;
+
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
 
             // Check if pawn can actually suppress activity
             if (StatDefOf.ActivitySuppressionRate.Worker.IsDisabledFor(pawn) ||

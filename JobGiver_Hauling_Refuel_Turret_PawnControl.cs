@@ -23,7 +23,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache more frequently for turrets - they're critical defense structures
         /// </summary>
-        protected override int CacheUpdateInterval => 150; // Every 2.5 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Same distance thresholds as regular refueling

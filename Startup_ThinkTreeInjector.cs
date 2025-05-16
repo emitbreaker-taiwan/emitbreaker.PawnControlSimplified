@@ -5,7 +5,6 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
-using static emitbreaker.PawnControl.Utility_ThinkTreeManager;
 using Verse;
 using Verse.AI;
 
@@ -16,7 +15,15 @@ namespace emitbreaker.PawnControl
     {
         static Startup_ThinkTreeInjector()
         {
-            LongEventHandler.ExecuteWhenFinished(InjectPawnControlThinkTreesStaticRaceLevel);
+            try
+            {
+                // Call ApplyThinkTreeToRaceDefs directly since it doesn't require game state
+                Utility_ThinkTreeManager.ApplyThinkTreeToRaceDefs();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[PawnControl] Error in ThinkTree initialization: {ex}");
+            }
         }
     }
 }

@@ -79,24 +79,43 @@ namespace emitbreaker.PawnControl
             
             // Maximum number of items to store in the spatial index
             private readonly int _maxItems;
-            
+
+            private readonly QuadTree _quadTree;
+            private readonly bool _useQuadTree = true;
+
             /// <summary>
             /// Creates a new spatial index
             /// </summary>
-            public SpatialIndex(int cellSize = 12, int maxItems = 5000)
+            public SpatialIndex(Map map, int cellSize = 12, int maxItems = 5000)
             {
                 _cellSize = cellSize;
                 _maxItems = maxItems;
+
+                // Initialize quad tree with the map
+                if (map != null)
+                {
+                    _quadTree = new QuadTree(map, maxItems);
+                    _useQuadTree = true;
+                }
+                else
+                {
+                    _useQuadTree = false;
+                }
             }
-            
+
             /// <summary>
             /// Clear the spatial index
             /// </summary>
             public void Clear()
             {
                 _grid.Clear();
+
+                if (_useQuadTree)
+                {
+                    _quadTree.Clear();
+                }
             }
-            
+
             /// <summary>
             /// Add a thing to the spatial index
             /// </summary>
@@ -104,24 +123,31 @@ namespace emitbreaker.PawnControl
             {
                 if (thing == null || !thing.Spawned)
                     return;
-                    
-                // Calculate the cell index for this thing
-                int cellIndex = GetCellIndex(thing.Position);
-                
-                // Get or create the list for this cell
-                if (!_grid.TryGetValue(cellIndex, out var cellItems))
+
+                if (_useQuadTree)
                 {
-                    cellItems = new List<Thing>();
-                    _grid[cellIndex] = cellItems;
+                    _quadTree.Add(thing);
                 }
-                
-                // Add the thing to this cell
-                if (!cellItems.Contains(thing))
+                else
                 {
-                    cellItems.Add(thing);
+                    // Calculate the cell index for this thing
+                    int cellIndex = GetCellIndex(thing.Position);
+
+                    // Get or create the list for this cell
+                    if (!_grid.TryGetValue(cellIndex, out var cellItems))
+                    {
+                        cellItems = new List<Thing>();
+                        _grid[cellIndex] = cellItems;
+                    }
+
+                    // Add the thing to this cell
+                    if (!cellItems.Contains(thing))
+                    {
+                        cellItems.Add(thing);
+                    }
                 }
             }
-            
+
             /// <summary>
             /// Add multiple things to the spatial index
             /// </summary>
@@ -129,37 +155,51 @@ namespace emitbreaker.PawnControl
             {
                 if (things == null)
                     return;
-                    
+
                 // Skip bulk add if we'd exceed max items
-                int count = _grid.Values.Sum(list => list.Count);
-                if (count >= _maxItems)
+                int count = _useQuadTree ? 0 : _grid.Values.Sum(list => list.Count);
+                if (count >= _maxItems && !_useQuadTree)
                     return;
-                    
-                // Add each thing
-                foreach (var thing in things)
+
+                if (_useQuadTree)
                 {
-                    Add(thing);
-                    
-                    // Stop if we've reached the max items
-                    if (++count >= _maxItems)
-                        break;
+                    _quadTree.AddRange(things);
+                }
+                else
+                {
+                    // Add each thing
+                    foreach (var thing in things)
+                    {
+                        Add(thing);
+
+                        // Stop if we've reached the max items
+                        if (++count >= _maxItems)
+                            break;
+                    }
                 }
             }
-            
+
             /// <summary>
             /// Get things within the specified radius of a position
             /// </summary>
             public List<Thing> GetThingsInRadius(IntVec3 center, float radius)
             {
+                if (_useQuadTree)
+                {
+                    // Use quad tree for efficient queries
+                    return _quadTree.QueryRange(center, radius);
+                }
+
+                // Original grid-based implementation
                 // Calculate the range of cells to check
                 int radiusCells = Mathf.CeilToInt(radius / _cellSize);
                 int centerIndex = GetCellIndex(center);
                 int xCenter = centerIndex / 1000000;
                 int zCenter = centerIndex % 1000000;
-                
+
                 List<Thing> results = new List<Thing>();
                 float radiusSq = radius * radius;
-                
+
                 // Check every cell in the radius
                 for (int xOffset = -radiusCells; xOffset <= radiusCells; xOffset++)
                 {
@@ -168,18 +208,18 @@ namespace emitbreaker.PawnControl
                         int cellX = xCenter + xOffset;
                         int cellZ = zCenter + zOffset;
                         int cellIndex = cellX * 1000000 + cellZ;
-                        
+
                         // Skip if this cell has no items
                         if (!_grid.TryGetValue(cellIndex, out var cellItems))
                             continue;
-                            
+
                         // Check each item in this cell
                         foreach (var thing in cellItems)
                         {
                             // Skip if the thing no longer exists
                             if (thing == null || thing.Destroyed || !thing.Spawned)
                                 continue;
-                                
+
                             // Check if the thing is within the radius
                             if ((thing.Position - center).LengthHorizontalSquared <= radiusSq)
                             {
@@ -188,10 +228,10 @@ namespace emitbreaker.PawnControl
                         }
                     }
                 }
-                
+
                 return results;
             }
-            
+
             /// <summary>
             /// Calculate the cell index for a position
             /// </summary>
@@ -202,7 +242,7 @@ namespace emitbreaker.PawnControl
                 return cellX * 1000000 + cellZ; // Large multiplier to avoid collisions
             }
         }
-        
+
         /// <summary>
         /// Gets or creates a spatial index for a specific thing type on a map
         /// </summary>
@@ -210,76 +250,113 @@ namespace emitbreaker.PawnControl
         {
             if (map == null)
                 return null;
-                
+
             int mapId = map.uniqueID;
             Type thingType = typeof(T);
             int currentTick = Find.TickManager.TicksGame;
-            
+
             // Initialize map dictionaries if needed
             if (!_spatialIndices.TryGetValue(mapId, out var mapIndices))
             {
                 mapIndices = new Dictionary<Type, SpatialIndex>();
                 _spatialIndices[mapId] = mapIndices;
-                
+
                 var mapUpdateTicks = new Dictionary<Type, int>();
                 _spatialIndexUpdateTicks[mapId] = mapUpdateTicks;
             }
-            
+
             // Get map update ticks dictionary
             var updateTicks = _spatialIndexUpdateTicks[mapId];
-            
+
             // Get or create the spatial index
             if (!mapIndices.TryGetValue(thingType, out var spatialIndex))
             {
-                spatialIndex = new SpatialIndex();
+                spatialIndex = new SpatialIndex(map); // Pass the map to the constructor
                 mapIndices[thingType] = spatialIndex;
                 updateTicks[thingType] = -updateInterval; // Force update on first access
             }
-            
+
             // Check if we need to update the index
             int lastUpdateTick = updateTicks.GetValueSafe(thingType, -updateInterval);
             if (currentTick - lastUpdateTick >= updateInterval)
             {
                 // Record update time first
                 updateTicks[thingType] = currentTick;
-                
+
                 // Clear the existing index
                 spatialIndex.Clear();
 
                 // Populate with new data
                 var things = map.listerThings.AllThings.Where(t => t is T).Cast<T>().ToList();
                 spatialIndex.AddRange(things);
-                
+
                 if (Prefs.DevMode)
                 {
                     Utility_DebugManager.LogNormal($"Updated spatial index for {typeof(T).Name} on map {mapId} ({things.Count} items)");
                 }
             }
-            
+
             return spatialIndex;
         }
-        
+
         /// <summary>
         /// Gets things of type T within the specified radius around a position
         /// </summary>
         public static List<T> GetNearbyThings<T>(Map map, IntVec3 center, float radius, int updateInterval = TYPE_CACHE_UPDATE_INTERVAL) where T : Thing
         {
+            // Record start time
+            long startTick = DateTime.Now.Ticks;
+
             // Get the spatial index
             var spatialIndex = GetSpatialIndex<T>(map, updateInterval);
             if (spatialIndex == null)
                 return new List<T>();
-                
+
             // Get things in radius
             var things = spatialIndex.GetThingsInRadius(center, radius);
-            
+
             // Convert to the correct type
-            return things.OfType<T>().ToList();
+            var results = things.OfType<T>().ToList();
+
+            // Record operation time
+            RecordOperationTime($"GetNearbyThings<{typeof(T).Name}>", DateTime.Now.Ticks - startTick);
+
+            return results;
         }
-        
+
+        /// <summary>
+        /// Gets the K nearest things of type T around a position
+        /// </summary>
+        public static List<T> GetNearestThings<T>(Map map, IntVec3 center, int count, int updateInterval = TYPE_CACHE_UPDATE_INTERVAL) where T : Thing
+        {
+            // Get the spatial index
+            var spatialIndex = GetSpatialIndex<T>(map, updateInterval);
+            if (spatialIndex == null)
+                return new List<T>();
+
+            // Start with a reasonable radius and expand if needed
+            float radius = 10f;
+            List<Thing> things = new List<Thing>();
+
+            // If we don't get enough things, expand the search radius
+            while (things.Count < count && radius < 100f)
+            {
+                things = spatialIndex.GetThingsInRadius(center, radius);
+                radius *= 1.5f; // Increase radius by 50% each time
+            }
+
+            // Sort by distance and take only what we need
+            return things
+                .OrderBy(t => (t.Position - center).LengthHorizontalSquared)
+                .Take(count)
+                .OfType<T>()
+                .ToList();
+        }
+
         #endregion
-        
+
         #region Zone and Room Grouping
-        
+
         // Cache of zone/area-based thing groups
         private static readonly Dictionary<int, Dictionary<string, List<Thing>>> _zoneGroupCache = new Dictionary<int, Dictionary<string, List<Thing>>>();
             
@@ -977,7 +1054,401 @@ namespace emitbreaker.PawnControl
             _roomGroupCache.Clear();
             _roomUpdateTicks.Clear();
         }
-        
+
+        #endregion
+
+        #region QuadTree Implementation
+
+        /// <summary>
+        /// QuadTree implementation for more efficient spatial queries
+        /// </summary>
+        public class QuadTree
+        {
+            private class QuadNode
+            {
+                public RectInt bounds;
+                public List<Thing> things = new List<Thing>();
+                public QuadNode[] children = null;
+                public const int MAX_THINGS = 16;
+                public const int MAX_DEPTH = 8;
+
+                public QuadNode(RectInt bounds)
+                {
+                    this.bounds = bounds;
+                }
+
+                public bool Insert(Thing thing, int depth)
+                {
+                    // Reject things outside bounds
+                    if (!bounds.Contains(new IntVec2(thing.Position.x, thing.Position.z)))
+                        return false;
+
+                    // If we're not at leaf and have children, insert into children
+                    if (children != null)
+                    {
+                        bool inserted = false;
+                        for (int i = 0; i < 4; i++)
+                        {
+                            if (children[i].Insert(thing, depth + 1))
+                            {
+                                inserted = true;
+                                break;
+                            }
+                        }
+
+                        // If couldn't insert into any child (at edge cases), insert here
+                        if (!inserted)
+                        {
+                            things.Add(thing);
+                        }
+                        return true;
+                    }
+
+                    // Add to this node if we're at max depth or have space
+                    if (depth >= MAX_DEPTH || things.Count < MAX_THINGS)
+                    {
+                        things.Add(thing);
+                        return true;
+                    }
+
+                    // Otherwise split and redistribute
+                    Split();
+
+                    // Move existing things into children
+                    var existingThings = things.ToList();
+                    things.Clear();
+
+                    foreach (var existingThing in existingThings)
+                    {
+                        bool inserted = false;
+                        for (int i = 0; i < 4; i++)
+                        {
+                            if (children[i].Insert(existingThing, depth + 1))
+                            {
+                                inserted = true;
+                                break;
+                            }
+                        }
+
+                        // If couldn't insert into any child, keep in this node
+                        if (!inserted)
+                        {
+                            things.Add(existingThing);
+                        }
+                    }
+
+                    // Try to insert the new thing
+                    return Insert(thing, depth);
+                }
+
+                private void Split()
+                {
+                    int subWidth = bounds.Width / 2;
+                    int subHeight = bounds.Height / 2;
+                    int x = bounds.minX;
+                    int y = bounds.minZ;
+
+                    children = new QuadNode[4];
+
+                    // top left
+                    children[0] = new QuadNode(new RectInt(x, y, subWidth, subHeight));
+                    // top right
+                    children[1] = new QuadNode(new RectInt(x + subWidth, y, subWidth, subHeight));
+                    // bottom left
+                    children[2] = new QuadNode(new RectInt(x, y + subHeight, subWidth, subHeight));
+                    // bottom right
+                    children[3] = new QuadNode(new RectInt(x + subWidth, y + subHeight, subWidth, subHeight));
+                }
+
+                public void Query(IntVec3 center, float radius, List<Thing> results)
+                {
+                    // Skip if bounds don't intersect query circle
+                    if (!IntersectsCircle(bounds, center.x, center.z, radius))
+                        return;
+
+                    // Add things from this node
+                    float radiusSq = radius * radius;
+                    foreach (var thing in things)
+                    {
+                        if (thing == null || thing.Destroyed || !thing.Spawned)
+                            continue;
+
+                        // Check actual distance
+                        if ((thing.Position - center).LengthHorizontalSquared <= radiusSq)
+                        {
+                            results.Add(thing);
+                        }
+                    }
+
+                    // Query children if they exist
+                    if (children != null)
+                    {
+                        for (int i = 0; i < 4; i++)
+                        {
+                            children[i].Query(center, radius, results);
+                        }
+                    }
+                }
+
+                private bool IntersectsCircle(RectInt rect, int circleX, int circleZ, float radius)
+                {
+                    // Find closest point on rectangle to circle center
+                    float closestX = Math.Max(rect.minX, Math.Min(circleX, rect.maxX));
+                    float closestZ = Math.Max(rect.minZ, Math.Min(circleZ, rect.maxZ));
+
+                    // Calculate distance from closest point to circle center
+                    float distanceX = closestX - circleX;
+                    float distanceZ = closestZ - circleZ;
+
+                    // Return true if distance is less than radius
+                    return (distanceX * distanceX + distanceZ * distanceZ) <= (radius * radius);
+                }
+
+                public void Clear()
+                {
+                    things.Clear();
+                    if (children != null)
+                    {
+                        for (int i = 0; i < 4; i++)
+                        {
+                            children[i].Clear();
+                        }
+                        children = null;
+                    }
+                }
+            }
+
+            private QuadNode root;
+            private readonly int _maxItems;
+
+            /// <summary>
+            /// Creates a new quad tree for a map
+            /// </summary>
+            public QuadTree(Map map, int maxItems = 10000)
+            {
+                // Create a root node with the map bounds
+                root = new QuadNode(new RectInt(0, 0, map.Size.x, map.Size.z));
+                _maxItems = maxItems;
+            }
+
+            /// <summary>
+            /// Add a thing to the quad tree
+            /// </summary>
+            public void Add(Thing thing)
+            {
+                if (thing == null || !thing.Spawned)
+                    return;
+
+                root.Insert(thing, 0);
+            }
+
+            /// <summary>
+            /// Add multiple things to the quad tree
+            /// </summary>
+            public void AddRange<T>(IEnumerable<T> things) where T : Thing
+            {
+                if (things == null)
+                    return;
+
+                int count = 0;
+                foreach (var thing in things)
+                {
+                    Add(thing);
+                    if (++count >= _maxItems)
+                        break;
+                }
+            }
+
+            /// <summary>
+            /// Query for things within radius of a point
+            /// </summary>
+            public List<Thing> QueryRange(IntVec3 center, float radius)
+            {
+                List<Thing> results = new List<Thing>();
+                root.Query(center, radius, results);
+                return results;
+            }
+
+            /// <summary>
+            /// Clear the quad tree
+            /// </summary>
+            public void Clear()
+            {
+                root.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Simple rectangle structure for quad tree
+        /// </summary>
+        public struct RectInt
+        {
+            public int minX;
+            public int minZ;
+            public int Width;
+            public int Height;
+
+            public int maxX => minX + Width;
+            public int maxZ => minZ + Height;
+
+            public RectInt(int minX, int minZ, int width, int height)
+            {
+                this.minX = minX;
+                this.minZ = minZ;
+                this.Width = width;
+                this.Height = height;
+            }
+
+            public bool Contains(IntVec2 point)
+            {
+                return point.x >= minX && point.x < maxX &&
+                       point.z >= minZ && point.z < maxZ;
+            }
+        }
+
+        public struct IntVec2
+        {
+            public int x;
+            public int z;
+
+            public IntVec2(int x, int z)
+            {
+                this.x = x;
+                this.z = z;
+            }
+        }
+
+        #endregion
+
+        #region Performance Metrics
+
+        private static readonly Dictionary<string, long> _operationTimes = new Dictionary<string, long>();
+        private static readonly Dictionary<string, int> _operationCounts = new Dictionary<string, int>();
+
+        /// <summary>
+        /// Records the time taken for an operation
+        /// </summary>
+        public static void RecordOperationTime(string operation, long ticks)
+        {
+            if (!Prefs.DevMode)
+                return;
+
+            if (!_operationTimes.ContainsKey(operation))
+            {
+                _operationTimes[operation] = 0;
+                _operationCounts[operation] = 0;
+            }
+
+            _operationTimes[operation] += ticks;
+            _operationCounts[operation]++;
+        }
+
+        /// <summary>
+        /// Gets performance metrics for logging or debugging
+        /// </summary>
+        public static Dictionary<string, string> GetPerformanceMetrics()
+        {
+            var results = new Dictionary<string, string>();
+
+            foreach (var kvp in _operationTimes)
+            {
+                string operation = kvp.Key;
+                long totalTicks = kvp.Value;
+                int count = _operationCounts[operation];
+
+                if (count == 0)
+                    continue;
+
+                double avgMs = (double)totalTicks / count / TimeSpan.TicksPerMillisecond;
+                results[operation] = $"Count: {count}, Avg: {avgMs:F3}ms";
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Reset performance metrics
+        /// </summary>
+        public static void ResetPerformanceMetrics()
+        {
+            _operationTimes.Clear();
+            _operationCounts.Clear();
+        }
+
+        #endregion
+
+        #region Job-Specific Query Methods
+
+        /// <summary>
+        /// Gets the closest refuelable building that needs fuel
+        /// </summary>
+        public static Building GetClosestRefuelableBuilding(Map map, IntVec3 position, Pawn worker)
+        {
+            // Get buildings needing fuel near the position
+            var buildings = GetNearbyThings<Building>(map, position, 30f);
+
+            // Filter and sort by distance
+            return buildings
+                .Where(b => BuildingFilters.NeedsRefueling(b, worker))
+                .OrderBy(b => (b.Position - position).LengthHorizontalSquared)
+                .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Gets the closest item that needs hauling within the specified radius
+        /// </summary>
+        public static Thing GetClosestHaulableItem(Map map, IntVec3 position, Pawn hauler, float radius = 25f)
+        {
+            // Use our optimized spatial query
+            var items = GetNearbyThings<Thing>(map, position, radius);
+
+            // Filter and sort by distance
+            return items
+                .Where(t => ItemFilters.NeedsHauling(t, hauler))
+                .OrderBy(t => (t.Position - position).LengthHorizontalSquared)
+                .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Gets items needed for active bills on workbenches in room or nearby
+        /// </summary>
+        public static List<Thing> GetItemsForActiveBills(Map map, IntVec3 position, Pawn worker, float radius = 40f)
+        {
+            // First get all workbenches with active bills
+            var workbenches = GetNearbyThings<Building>(map, position, radius)
+                .Where(b => BuildingFilters.HasActiveBills(b, worker))
+                .ToList();
+
+            if (workbenches.Count == 0)
+                return new List<Thing>();
+
+            // Now find ingredients for those bills
+            var items = GetNearbyThings<Thing>(map, position, radius)
+                .Where(t => ItemFilters.IsValidIngredient(t, worker))
+                .ToList();
+
+            return items;
+        }
+
+        #endregion
+
+        #region Debug Visualization
+
+        /// <summary>
+        /// Draws debug visualization of the spatial partitioning
+        /// </summary>
+        public static void DrawSpatialDebug<T>(Map map) where T : Thing
+        {
+            if (!Prefs.DevMode)
+                return;
+
+            // Get the spatial index
+            var spatialIndex = GetSpatialIndex<T>(map);
+
+            // Draw grid cells or quad tree nodes
+            // (Implementation depends on whether you want to visualize quad tree or grid cells)
+        }
+
         #endregion
     }
 }

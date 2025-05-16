@@ -22,7 +22,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval in ticks (150 ticks = 2.5 seconds)
         /// </summary>
-        protected override int CacheUpdateInterval => 150;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (10, 20, 30 tiles squared)
@@ -47,6 +47,11 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_DeliverHemogen_PawnControl>(
                 pawn,
                 WorkTag,
@@ -82,12 +87,12 @@ namespace emitbreaker.PawnControl
             if (pawn == null || pawn.Dead || pawn.InMentalState)
                 return true;
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
                 return true;
 
             // Skip if pawn is not a warden
-            if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
+            if (!Utility_TagManager.IsWorkEnabled(pawn, WorkTag))
                 return true;
 
             return false;

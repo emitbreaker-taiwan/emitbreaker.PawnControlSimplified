@@ -24,12 +24,12 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Whether this job giver requires player faction (default true for designation-based jobs)
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
@@ -39,7 +39,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 5 seconds by default
         /// </summary>
-        protected override int CacheUpdateInterval => 300;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Default distance thresholds for bucketing (20, 40, 50 tiles)
@@ -100,6 +100,11 @@ namespace emitbreaker.PawnControl
             // Skip if map doesn't meet the requirements for this job type
             if (pawn?.Map == null || !AreMapRequirementsMet(pawn))
                 return null;
+
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
 
             // Proceed with standard job creation flow from parent
             return base.TryGiveJob(pawn);

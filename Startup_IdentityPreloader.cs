@@ -18,10 +18,10 @@ namespace emitbreaker.PawnControl
                 ProcessPendingRemovals();
 
                 // ✅ Clear old mod extension cache
-                Utility_CacheManager.ClearModExtensionCache();
+                Utility_UnifiedCache.ClearAllModExtensions();
 
                 // ✅ Preload mod extensions into runtime cache
-                Utility_CacheManager.PreloadModExtensions();
+                Utility_UnifiedCache.PreloadModExtensions();
 
                 // ✅ Build identity flag cache based on injected extensions
                 Utility_IdentityManager.BuildIdentityFlagCache(false);
@@ -40,7 +40,7 @@ namespace emitbreaker.PawnControl
             {
                 if (def?.race != null)
                 {
-                    Utility_CacheManager._forcedAnimalCache[def] = Utility_CacheManager.GetModExtension(def)?.forceIdentity == ForcedIdentityType.ForceAnimal;
+                    Utility_UnifiedCache.ForcedAnimals[def] = Utility_UnifiedCache.GetModExtension(def)?.forceIdentity == ForcedIdentityType.ForceAnimal;
                 }
             }
         }
@@ -55,7 +55,7 @@ namespace emitbreaker.PawnControl
                     new Dictionary<ThingDef, (string, string)>();
 
                 // First pass: Find races with mod extensions marked for removal and store original trees
-                foreach (var cacheEntry in Utility_CacheManager._modExtensionCache.ToList())
+                foreach (var cacheEntry in Utility_UnifiedCache.ModExtensions.ToList())
                 {
                     ThingDef def = cacheEntry.Key;
                     NonHumanlikePawnControlExtension extension = cacheEntry.Value;
@@ -104,7 +104,7 @@ namespace emitbreaker.PawnControl
                     }
 
                     // Clear the cached extension for this def
-                    Utility_CacheManager.ClearModExtensionCachePerInstance(def);
+                    Utility_UnifiedCache.ClearModExtension(def);
 
                     // Clear race-specific tag caches
                     Utility_TagManager.ClearCacheForRace(def);

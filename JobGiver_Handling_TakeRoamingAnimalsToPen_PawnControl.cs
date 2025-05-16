@@ -21,11 +21,6 @@ namespace emitbreaker.PawnControl
         protected override string DebugName => "TakeRoamingToPen";
 
         /// <summary>
-        /// Cache key suffix specifically for roaming animals
-        /// </summary>
-        private const string ROAMING_ANIMALS_CACHE_SUFFIX = "_RoamingAnimals";
-
-        /// <summary>
         /// Constructor to set specialized configuration for roaming animals
         /// </summary>
         public JobGiver_Handling_TakeRoamingAnimalsToPen_PawnControl()
@@ -34,6 +29,11 @@ namespace emitbreaker.PawnControl
             this.allowUnenclosedPens = true;   // Allow taking them to unenclosed pens
             this.ropingPriority = RopingPriority.Closest;  // Use additional priority
         }
+
+        /// <summary>
+        /// Cache key suffix specifically for roaming animals
+        /// </summary>
+        private const string ROAMING_ANIMALS_CACHE_SUFFIX = "_RoamingAnimals";
 
         /// <summary>
         /// Define the base priority for this job - higher than regular animal handling
@@ -61,7 +61,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Pawn>(
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Handling_TakeRoamingAnimalsToPen_PawnControl>(
                 pawn,
                 WorkTag,
                 (p, forced) => {

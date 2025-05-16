@@ -35,7 +35,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval for deconstruct jobs
         /// </summary>
-        protected override int CacheUpdateInterval => 160; // ~2.7 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 

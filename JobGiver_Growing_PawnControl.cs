@@ -19,7 +19,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// Whether to use Growing or PlantCutting work tag
@@ -41,7 +41,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Override cache interval - growing targets don't change as often
         /// </summary>
-        protected override int CacheUpdateInterval => 300; // Update every 5 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing - adjust as needed for growing jobs
@@ -57,6 +57,12 @@ namespace emitbreaker.PawnControl
         /// Maximum number of valid cells to return for specific operations
         /// </summary>
         private const int MAX_VALID_CELLS = 200;
+
+        /// <summary>
+        /// Cache key suffixes for consistent naming
+        /// </summary>
+        private const string CELLS_CACHE_SUFFIX = "_Cells";
+        private const string ZONES_CACHE_SUFFIX = "_Zones";
 
         #endregion
 
@@ -76,12 +82,45 @@ namespace emitbreaker.PawnControl
         #region Core Flow
 
         /// <summary>
+        /// Check if the pawn is allowed to do Growing work based on work settings
+        /// </summary>
+        protected virtual bool IsAllowedGrowingWork(Pawn pawn)
+        {
+            // Skip if no worksettings
+            if (pawn.workSettings == null)
+                return false;
+
+            // Get the Growing work type def
+            WorkTypeDef growingWorkType = DefDatabase<WorkTypeDef>.GetNamed("Growing");
+            if (growingWorkType == null)
+                return false;
+
+            // Check if the pawn is allowed to do Growing work
+            return pawn.workSettings.WorkIsActive(growingWorkType);
+        }
+
+        /// <summary>
         /// Standard TryGiveJob pattern using the JobGiverManager
+        /// </summary>
+        /// <summary>
+        /// Standard TryGiveJob pattern using the Sequential JobGiverManager
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Default implementation calls CreateGrowingJob with the base class type
-            return CreateGrowingJob<JobGiver_Growing_PawnControl>(pawn);
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
+            // Updated implementation uses SequentialTryGiveJob with the base class type
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Growing_PawnControl>(
+                pawn,
+                WorkTag,
+                (p, forced) => CreateGrowingJob<JobGiver_Growing_PawnControl>(p),
+                debugJobDesc: JobDescription,
+                skipEmergencyCheck: false,
+                jobGiverType: GetType()
+            );
         }
 
         #endregion
@@ -194,9 +233,8 @@ namespace emitbreaker.PawnControl
             int mapId = pawn.Map.uniqueID;
             Type jobGiverType = this.GetType();
 
-            // Use a type-keyed dictionary cache to store cell lists
-            // We'll use the specific type of this job giver as the cache key
-            string cacheKey = jobGiverType.FullName + "_GrowCells_" + typeof(IntVec3).FullName;
+            // Use a consistent cache key naming pattern
+            string cacheKey = jobGiverType.Name + CELLS_CACHE_SUFFIX;
 
             // Try to get cached cells from the central cache manager
             var cellCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<IntVec3>>(mapId);
@@ -268,7 +306,7 @@ namespace emitbreaker.PawnControl
                 Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, currentTick);
 
                 // Also store the zones and growers in a separate cache for future reference
-                var zoneCacheKey = cacheKey + "_Zones";
+                var zoneCacheKey = jobGiverType.Name + ZONES_CACHE_SUFFIX;
                 var zoneCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<IPlantToGrowSettable>>(mapId);
                 zoneCache[zoneCacheKey] = zonesAndGrowers;
 
@@ -292,7 +330,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Gets the plant def that should be grown in a particular cell
         /// </summary>
-        protected ThingDef CalculateWantedPlantDef(IntVec3 c, Map map)
+        protected virtual ThingDef CalculateWantedPlantDef(IntVec3 c, Map map)
         {
             return c.GetPlantToGrowSettable(map)?.GetPlantDefToGrow();
         }
@@ -300,7 +338,8 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Find cells suitable for specific growing actions
         /// </summary>
-        protected List<IntVec3> FindTargetCells(Pawn pawn, List<IntVec3> allCells, Func<IntVec3, Pawn, Map, bool> validator)
+        protected List<IntVec3> FindTargetCells(Pawn pawn, List<IntVec3> allCells,
+            Func<IntVec3, Pawn, Map, bool> validator)
         {
             if (pawn?.Map == null || allCells == null || allCells.Count == 0)
                 return new List<IntVec3>();
@@ -381,24 +420,27 @@ namespace emitbreaker.PawnControl
             // Now clear any map-specific caches for growing cells
             foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
             {
-                string cacheKey = this.GetType().Name + "_GrowCells";
+                Type jobGiverType = this.GetType();
+                string cellsCacheKey = jobGiverType.Name + CELLS_CACHE_SUFFIX;
+                string zonesCacheKey = jobGiverType.Name + ZONES_CACHE_SUFFIX;
+
+                // Clear cells cache
                 var cellCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<IntVec3>>(mapId);
-
-                if (cellCache.ContainsKey(cacheKey))
+                if (cellCache.ContainsKey(cellsCacheKey))
                 {
-                    cellCache.Remove(cacheKey);
+                    cellCache.Remove(cellsCacheKey);
                 }
 
-                string zoneCacheKey = cacheKey + "_Zones";
+                // Clear zones cache
                 var zoneCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<IPlantToGrowSettable>>(mapId);
-
-                if (zoneCache.ContainsKey(zoneCacheKey))
+                if (zoneCache.ContainsKey(zonesCacheKey))
                 {
-                    zoneCache.Remove(zoneCacheKey);
+                    zoneCache.Remove(zonesCacheKey);
                 }
 
-                // Clear the update tick record too
-                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+                // Clear the update tick records
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cellsCacheKey, -1);
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, zonesCacheKey, -1);
             }
 
             if (Prefs.DevMode)

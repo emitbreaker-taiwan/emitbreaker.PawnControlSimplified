@@ -33,17 +33,17 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this job giver requires a designator to operate
         /// </summary>
-        protected override bool RequiresDesignator => false;
+        public override bool RequiresDesignator => false;
 
         /// <summary>
         /// Whether this job giver requires map zone or area
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Whether this job giver requires player faction specifically
         /// </summary>
-        protected override bool RequiresPlayerFaction => false;
+        public override bool RequiresPlayerFaction => false;
 
         /// <summary>
         /// Whether this doctor job requires specific tag for non-humanlike pawns
@@ -53,7 +53,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 3 seconds for medical tasks (patients' conditions change rapidly)
         /// </summary>
-        protected override int CacheUpdateInterval => 180;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 
@@ -167,6 +167,9 @@ namespace emitbreaker.PawnControl
             if (pawn?.Map == null)
                 return null;
 
+            if (!NonPlayerFactionCheck(pawn))
+                return null;
+
             int mapId = pawn.Map.uniqueID;
 
             if (!ShouldExecuteNow(mapId))
@@ -180,9 +183,12 @@ namespace emitbreaker.PawnControl
 
             // Get targets from the cache
             var targets = GetCachedTargets(mapId);
+            if (targets == null || targets.Count == 0)
+                return null;
 
-            // Skip if no targets and they're required
-            if ((targets == null || targets.Count == 0) && RequiresPawnTargets())
+            // CRUCIAL: Filter out targets that are already reserved by ANY pawn
+            var filteredTargets = FilterOutAlreadyReservedTarget(pawn, targets);
+            if (filteredTargets == null || filteredTargets.Count == 0)
                 return null;
 
             // Call the specialized medical job creation method

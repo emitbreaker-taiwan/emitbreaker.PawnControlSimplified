@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
 using Verse;
 using Verse.AI;
 
@@ -27,8 +26,8 @@ namespace emitbreaker.PawnControl
         // Maximum plants per job
         private const int MAX_PLANTS_PER_JOB = 40;
 
-        // Cache key for harvestable plants
-        private const string HARVEST_CACHE_KEY_SUFFIX = "_HarvestablePlants";
+        // Cache key suffix for harvestable plants - match parent class pattern
+        private const string HARVEST_CACHE_SUFFIX = "_Harvest";
 
         #endregion
 
@@ -49,21 +48,59 @@ namespace emitbreaker.PawnControl
 
         public override bool ShouldSkip(Pawn pawn)
         {
-            base.ShouldSkip(pawn);
+            // First check base conditions
+            if (base.ShouldSkip(pawn))
+                return true;
 
+            // Skip pawns from wrong factions
             if (Utility_Common.PawnIsNotPlayerFaction(pawn))
                 return true;
+
+            // IMPORTANT: Check if the pawn is allowed to do Growing work
+            if (!IsAllowedGrowingWork(pawn))
+            {
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} is not allowed to do Growing work (work settings)");
+                return true;
+            }
 
             return false;
         }
 
         /// <summary>
-        /// Override TryGiveJob to use the common helper method with a custom processor for harvesting
+        /// Override TryGiveJob to implement a direct approach to creating jobs
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            // Use the CreateGrowingJob helper with a custom processor for harvesting
-            return CreateGrowingJob<JobGiver_Growing_GrowerHarvest_PawnControl>(pawn, ProcessCellsForHarvesting);
+            // Use custom implementation for better control and debugging
+            if (pawn?.Map == null)
+                return null;
+
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
+            // Use the SequentialTryGiveJob method with our custom job creation logic
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Growing_GrowerHarvest_PawnControl>(
+                pawn,
+                WorkTag,
+                (p, forced) => {
+                    // IMPORTANT: Double-check work settings at job creation time
+                    if (!IsAllowedGrowingWork(p))
+                    {
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"{p.LabelShort} is not allowed to do Growing work (work disabled)");
+                        return null;
+                    }
+
+                    // Use the CreateGrowingJob helper with a custom processor for harvesting
+                    return CreateGrowingJob<JobGiver_Growing_GrowerHarvest_PawnControl>(p, ProcessCellsForHarvesting);
+                },
+                debugJobDesc: JobDescription,
+                skipEmergencyCheck: false,
+                jobGiverType: GetType()
+            );
         }
 
         protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
@@ -102,7 +139,7 @@ namespace emitbreaker.PawnControl
                 return new List<Plant>();
 
             int mapId = pawn.Map.uniqueID;
-            string cacheKey = this.GetType().Name + HARVEST_CACHE_KEY_SUFFIX;
+            string cacheKey = this.GetType().Name + HARVEST_CACHE_SUFFIX;
 
             // Try to get cached plants from the central cache manager
             var plantCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Plant>>(mapId);
@@ -276,37 +313,6 @@ namespace emitbreaker.PawnControl
             return job;
         }
 
-        /// <summary>
-        /// Check if a plant is valid for harvesting for a specific pawn
-        /// </summary>
-        private bool IsPlantHarvestable(Plant plant, Pawn pawn, Map map)
-        {
-            if (plant == null || plant.Destroyed || !plant.Spawned)
-                return false;
-
-            if (!plant.HarvestableNow || plant.LifeStage != PlantLifeStage.Mature || !plant.CanYieldNow())
-                return false;
-
-            if (plant.IsForbidden(pawn) || !pawn.CanReserve(plant, 1, -1))
-                return false;
-
-            if (!PlantUtility.PawnWillingToCutPlant_Job(plant, pawn))
-                return false;
-
-            // Check if plant is designated for harvest
-            if (map.designationManager.DesignationOn(plant, DesignationDefOf.HarvestPlant) != null)
-                return true;
-
-            // Check if plant is in a growing zone
-            Zone_Growing zone = plant.Position.GetZone(map) as Zone_Growing;
-            if (zone == null)
-                return plant.def.plant.autoHarvestable; // Only wild plants with autoHarvestable
-
-            // Check if the plant matches what the zone wants to grow
-            ThingDef plantDef = zone.GetPlantDefToGrow();
-            return plantDef != null && plant.def == plantDef;
-        }
-
         #endregion
 
         #region Reset
@@ -322,7 +328,7 @@ namespace emitbreaker.PawnControl
             // Now clear harvesting-specific caches
             foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
             {
-                string cacheKey = this.GetType().Name + HARVEST_CACHE_KEY_SUFFIX;
+                string cacheKey = this.GetType().Name + HARVEST_CACHE_SUFFIX;
                 var plantCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<Plant>>(mapId);
 
                 if (plantCache.ContainsKey(cacheKey))

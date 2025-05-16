@@ -37,7 +37,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// This job requires player faction
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         #endregion
 

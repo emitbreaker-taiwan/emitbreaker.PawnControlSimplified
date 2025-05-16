@@ -18,7 +18,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval - update every ~4 seconds
         /// </summary>
-        protected override int CacheUpdateInterval => 250;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Human-readable name for debug logging
@@ -28,12 +28,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// Whether this job giver requires player faction specifically
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// The designation type this job giver handles - not used for roof building

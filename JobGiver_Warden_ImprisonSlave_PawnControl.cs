@@ -21,7 +21,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval in ticks (180 ticks = 3 seconds)
         /// </summary>
-        protected override int CacheUpdateInterval => 180;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (10, 15, 25 tiles)
@@ -88,6 +88,11 @@ namespace emitbreaker.PawnControl
         {
             // Check if ideology is active
             if (!ModLister.CheckIdeology("Slave imprisonment"))
+            {
+                return null;
+            }
+
+            if (ShouldSkip(pawn))
             {
                 return null;
             }

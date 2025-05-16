@@ -26,7 +26,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void EnsureAllTrackers(Pawn pawn)
         {
-            if (pawn == null) return;
+            if (!Utility_Common.RaceDefChecker(pawn.def)) return;
 
             bool wasTrackerInjected = false;
 
@@ -65,7 +65,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static bool ShouldInjectDrafter(Pawn pawn, NonHumanlikePawnControlExtension modExtension)
         {
-            if (pawn == null || pawn.def == null || pawn.RaceProps == null || pawn.drafter != null)
+            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.drafter != null)
             {
                 return false; // Invalid pawn or missing definitions or already has a drafter
             }
@@ -77,7 +77,7 @@ namespace emitbreaker.PawnControl
 
             // Drafter should be injected if the pawn is valid, has no drafter, and has either
             // the AutoDraftInjection tag or the forceDraftable flag
-            return Utility_TagManager.ForceDraftable(pawn.def);
+            return Utility_TagManager.ForceDraftable(pawn);
         }
 
         /// <summary>
@@ -86,7 +86,7 @@ namespace emitbreaker.PawnControl
         // In Utility_DrafterManager.cs
         public static void EnsureDrafter(Pawn pawn, NonHumanlikePawnControlExtension modExtension, bool isSpawnSetup = false)
         {
-            if (pawn == null || pawn.def == null || pawn.Dead || pawn.Destroyed)
+            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.Dead || pawn.Destroyed)
             {
                 return;
             }
@@ -104,7 +104,8 @@ namespace emitbreaker.PawnControl
 
             // Always add a drafter if forceDraftable is true - log this decision
             bool shouldAddDrafter = modExtension.forceDraftable;
-            Utility_DebugManager.LogNormal($"Should add drafter to {pawn.LabelShort}? {shouldAddDrafter}");
+            if (pawn.Faction == Faction.OfPlayer && Utility_DebugManager.ShouldLogDetailed())
+                Utility_DebugManager.LogNormal($"Should add drafter to {pawn.LabelShort}? {shouldAddDrafter}");
 
             if (!shouldAddDrafter)
             {
@@ -116,7 +117,8 @@ namespace emitbreaker.PawnControl
             {
                 var pawnField = AccessTools.Field(typeof(Pawn_DraftController), "pawn");
                 pawnField?.SetValue(pawn.drafter, pawn);
-                Utility_DebugManager.LogNormal($"Updated existing drafter for {pawn.LabelShort}");
+                if (Utility_DebugManager.ShouldLogDetailed())
+                    Utility_DebugManager.LogNormal($"Updated existing drafter for {pawn.LabelShort}");
                 return;
             }
 
@@ -165,7 +167,7 @@ namespace emitbreaker.PawnControl
                     continue;
                 }
 
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension == null)
                 {
                     continue;
@@ -192,7 +194,7 @@ namespace emitbreaker.PawnControl
         {
             if (Utility_TagManager.HasTag(p.def, "Siege_HoldFire"))
             {
-                var holdFire = Utility_CacheManager.GetDuty("HoldFire");
+                var holdFire = Utility_UnifiedCache.GetDuty("HoldFire");
                 if (holdFire != null)
                 {
                     return holdFire;
@@ -201,7 +203,7 @@ namespace emitbreaker.PawnControl
 
             if (Utility_TagManager.HasTag(p.def, "Siege_ManTurret"))
             {
-                var manTurrets = Utility_CacheManager.GetDuty("ManTurrets");
+                var manTurrets = Utility_UnifiedCache.GetDuty("ManTurrets");
                 if (manTurrets != null)
                 {
                     return manTurrets;

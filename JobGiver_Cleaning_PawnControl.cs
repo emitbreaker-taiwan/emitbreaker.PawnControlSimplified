@@ -29,12 +29,12 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Whether this job giver requires player faction specifically (for jobs like deconstruct)
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
@@ -54,7 +54,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval - update cleaning targets frequently
         /// </summary>
-        protected override int CacheUpdateInterval => 180; // Every 3 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 
@@ -141,9 +141,6 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job CreateJobFor(Pawn pawn, bool forced)
         {
-            if (pawn?.Map == null)
-                return null;
-
             int mapId = pawn.Map.uniqueID;
 
             if (!ShouldExecuteNow(mapId))
@@ -157,6 +154,13 @@ namespace emitbreaker.PawnControl
 
             // Get targets from the cache
             var targets = GetCachedTargets(mapId);
+            if (targets == null || targets.Count == 0)
+                return null;
+
+            // CRUCIAL: Filter out targets that are already reserved by ANY pawn
+            var filteredTargets = FilterOutAlreadyReservedTarget(pawn, targets);
+            if (filteredTargets == null || filteredTargets.Count == 0)
+                return null;
 
             // Call the specialized cleaning job creation method
             return CreateCleaningJob(pawn, forced);

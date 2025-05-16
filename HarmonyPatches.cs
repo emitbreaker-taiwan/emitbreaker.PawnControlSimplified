@@ -57,22 +57,22 @@ namespace emitbreaker.PawnControl
                         return;
                     }
 
-                    var modExtension = Utility_CacheManager.GetModExtension(raceDef);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(raceDef);
                     if (modExtension == null)
                     {
                         return; // ✅ No mod extension, proceed with vanilla logic
                     }
 
                     // ✅ Try fast cache lookup
-                    if (Utility_CacheManager._forcedAnimalCache.TryGetValue(raceDef, out bool isForcedAnimal))
+                    if (Utility_UnifiedCache.ForcedAnimals.TryGetValue(raceDef, out bool isForcedAnimal))
                     {
                         __result = isForcedAnimal;
                         return;
                     }
 
                     // ✅ Cache miss, check mod extension
-                    isForcedAnimal = Utility_CacheManager.GetModExtension(raceDef)?.forceIdentity == ForcedIdentityType.ForceAnimal;
-                    Utility_CacheManager._forcedAnimalCache[raceDef] = isForcedAnimal;
+                    isForcedAnimal = Utility_UnifiedCache.GetModExtension(raceDef)?.forceIdentity == ForcedIdentityType.ForceAnimal;
+                    Utility_UnifiedCache.ForcedAnimals[raceDef] = isForcedAnimal;
 
                     if (isForcedAnimal && modExtension.debugMode)
                     {
@@ -225,11 +225,11 @@ namespace emitbreaker.PawnControl
                 {
                     using (new Utility_IdentityManager_ScopedFlagContext(FlagScopeTarget.IsColonist))
                     {
-                        var taggedPawns = Utility_CacheManager.GetEffectiveColonistLikePawns(Find.CurrentMap);
+                        var taggedPawns = Utility_UnifiedCache.GetColonistLikePawns(Find.CurrentMap);
 
                         // If all are vanilla humanlike without mod extension, fall back to vanilla logic
                         bool isPureVanillaHumanlike = taggedPawns.All(p =>
-                            p.RaceProps.Humanlike && Utility_CacheManager.GetModExtension(p.def) == null);
+                            p.RaceProps.Humanlike && Utility_UnifiedCache.GetModExtension(p.def) == null);
 
                         if (isPureVanillaHumanlike)
                         {
@@ -250,7 +250,7 @@ namespace emitbreaker.PawnControl
                         // Make sure all pawns have proper work settings initialized
                         foreach (var pawn in taggedPawns)
                         {
-                            if (pawn != null && Utility_CacheManager.GetModExtension(pawn.def) != null)
+                            if (pawn != null && Utility_UnifiedCache.GetModExtension(pawn.def) != null)
                             {
                                 Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
                             }
@@ -276,14 +276,14 @@ namespace emitbreaker.PawnControl
                 [HarmonyPrefix]
                 public static bool Prefix(Pawn __instance, WorkTypeDef w, ref bool __result)
                 {
-                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
                     if (modExtension == null)
                     {
                         return true; // No mod extension, proceed with vanilla logic
                     }
 
                     // For modded pawns, use our tag system to determine work capability
-                    bool allowed = Utility_TagManager.WorkEnabled(__instance.def, w.defName.ToString());
+                    bool allowed = Utility_TagManager.IsWorkEnabled(__instance, w.defName.ToString());
                     __result = !allowed;
                     return false; // Skip vanilla logic
                 }
@@ -304,11 +304,11 @@ namespace emitbreaker.PawnControl
                         return true;
 
                     // For modded pawns, check tag system instead of standard capability checks
-                    var modExtension = Utility_CacheManager.GetModExtension(p.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(p.def);
                     if (modExtension != null)
                     {
                         string tag = ManagedTags.AllowWorkPrefix + work.defName;
-                        if (Utility_TagManager.WorkEnabled(p.def, tag))
+                        if (Utility_TagManager.IsWorkEnabled(p, tag))
                         {
                             __result = false; // Not incapable
                             return false; // Skip vanilla checks
@@ -377,8 +377,8 @@ namespace emitbreaker.PawnControl
                     if (a.skills != null && b.skills != null)
                         return true; // Both have normal skills, use vanilla comparison
 
-                    var modExtensionPawnA = Utility_CacheManager.GetModExtension(a.def);
-                    var modExtensionPawnB = Utility_CacheManager.GetModExtension(b.def);
+                    var modExtensionPawnA = Utility_UnifiedCache.GetModExtension(a.def);
+                    var modExtensionPawnB = Utility_UnifiedCache.GetModExtension(b.def);
 
                     if (modExtensionPawnA == null && modExtensionPawnB == null)
                         return true; // Neither are modded pawns
@@ -498,11 +498,11 @@ namespace emitbreaker.PawnControl
                     if (p == null || p.def == null || p.def.race == null)
                         return true; // Allow vanilla drawing for invalid pawns
 
-                    var modExtension = Utility_CacheManager.GetModExtension(p.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(p.def);
                     if (modExtension == null)
                         return true; // Allow vanilla drawing for non-modded pawns
 
-                    if (!Utility_ThinkTreeManager.HasAllowWorkTag(p.def))
+                    if (!Utility_ThinkTreeManager.HasAllowWorkTag(p))
                         return true; // Allow vanilla drawing if not using our work system
 
                     // Ensure work settings are initialized
@@ -708,14 +708,14 @@ namespace emitbreaker.PawnControl
                         if (pawn == null || pawn.def == null)
                             return true;
 
-                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                         if (modExtension == null)
                             return true; // Not our modded pawn
 
                         int pawnId = pawn.thingIDNumber;
 
                         // Check visibility cache
-                        if (Utility_CacheManager._bioTabVisibilityCache.TryGetValue(pawnId, out bool shouldHide))
+                        if (Utility_UnifiedCache.BioTabVisibility.TryGetValue(pawnId, out bool shouldHide))
                         {
                             if (shouldHide)
                             {
@@ -729,7 +729,7 @@ namespace emitbreaker.PawnControl
                         bool hideBioTab = modExtension != null && !pawn.RaceProps.Humanlike;
 
                         // Cache the result
-                        Utility_CacheManager._bioTabVisibilityCache[pawnId] = hideBioTab;
+                        Utility_UnifiedCache.BioTabVisibility[pawnId] = hideBioTab;
 
                         // Log and set result for hidden tabs
                         if (hideBioTab)
@@ -770,20 +770,20 @@ namespace emitbreaker.PawnControl
                         int pawnId = pawn.thingIDNumber;
 
                         // Check cached visibility
-                        if (Utility_CacheManager._bioTabVisibilityCache.TryGetValue(pawnId, out bool shouldHide) && shouldHide)
+                        if (Utility_UnifiedCache.BioTabVisibility.TryGetValue(pawnId, out bool shouldHide) && shouldHide)
                         {
                             __result = false;
                             return;
                         }
 
                         // Focus on non-humanlike modded pawns only
-                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                         if (modExtension == null) return;
 
                         bool hideBioTab = !pawn.RaceProps.Humanlike;
 
                         // Update cache and hide if needed
-                        Utility_CacheManager._bioTabVisibilityCache[pawnId] = hideBioTab;
+                        Utility_UnifiedCache.BioTabVisibility[pawnId] = hideBioTab;
                         if (hideBioTab)
                         {
                             __result = false;
@@ -816,7 +816,7 @@ namespace emitbreaker.PawnControl
                     if (__result == null || __result.def == null || __result.RaceProps.Humanlike)
                         return;
 
-                    var modExtension = Utility_CacheManager.GetModExtension(__result.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__result.def);
                     if (modExtension == null)
                         return;
 
@@ -854,11 +854,11 @@ namespace emitbreaker.PawnControl
                         return;
 
                     // Check for mod extension and work tags
-                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
                     if (modExtension == null)
                         return;
 
-                    bool hasTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def);
+                    bool hasTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance);
                     if (!hasTags)
                         return;
 
@@ -868,7 +868,8 @@ namespace emitbreaker.PawnControl
                         __instance.workSettings.EverWork)
                     {
                         __instance.mindState.Active = true;
-                        Utility_DebugManager.LogNormal($"Activated {__instance.LabelShort}'s mind during SpawnSetup");
+                        if (__instance.Faction == Faction.OfPlayer && Utility_DebugManager.ShouldLogDetailed())
+                            Utility_DebugManager.LogNormal($"Activated {__instance.LabelShort}'s mind during SpawnSetup");
                     }
 
                     // Delayed setup to ensure all components are initialized
@@ -882,7 +883,7 @@ namespace emitbreaker.PawnControl
                         {
                             Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__instance);
 
-                            if (Utility_DebugManager.ShouldLog())
+                            if (Utility_DebugManager.ShouldLogDetailed())
                             {
                                 // Debug info
                                 Utility_DebugManager.DumpThinkerStatus(__instance);
@@ -906,7 +907,7 @@ namespace emitbreaker.PawnControl
                 public static void Prefix()
                 {
                     // Clean up any lingering mod extensions from previous games
-                    Utility_CacheManager.CleanupAllRuntimeModExtensionsForNewGame();
+                    Utility_UnifiedCache.CleanupRuntimeModExtensions();
                 }
             }
 
@@ -928,7 +929,7 @@ namespace emitbreaker.PawnControl
                         return;
 
                     // ✅ Only apply to modded non-humanlike pawns
-                    if (worker.RaceProps.Humanlike || !Utility_TagManager.WorkEnabled(worker.def, "CutPlant"))
+                    if (worker.RaceProps.Humanlike || !Utility_TagManager.IsWorkEnabled(worker, "CutPlant"))
                         return;
 
                     // ✅ Scan for blocking thing and check plant
@@ -973,7 +974,7 @@ namespace emitbreaker.PawnControl
                     JobDef jobForReservation,
                     ref bool __result)
                 {
-                    if (p.RaceProps.Humanlike || Utility_CacheManager.GetModExtension(p.def) == null)
+                    if (p.RaceProps.Humanlike || Utility_UnifiedCache.GetModExtension(p.def) == null)
                         return true; // ✅ Let vanilla run if humanlike or no mod extension
 
                     // ⛔ Skip workSettings requirement check, as modded animals may not have any
@@ -1050,7 +1051,7 @@ namespace emitbreaker.PawnControl
 
                     if (worker.RaceProps.Humanlike) return true; // Let vanilla handle humanlike pawns
 
-                    var modExtension = Utility_CacheManager.GetModExtension(worker.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(worker.def);
                     if (modExtension == null) return true; // Not our modded pawn
 
                     if (!Utility_TagManager.HasTagSet(worker.def)) return true; // Not using our tag system
@@ -1146,7 +1147,7 @@ namespace emitbreaker.PawnControl
                     // only care about non-humanlike
                     if (pawn.RaceProps.Humanlike) return;
 
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                     if (modExtension == null) return; // not our modded pawn
 
                     if (!Utility_TagManager.HasTagSet(pawn.def)) return; // not using our tag system
@@ -1314,13 +1315,13 @@ namespace emitbreaker.PawnControl
                         return;
                     }
 
-                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
                     if (modExtension == null)
                     {
                         return;
                     }
 
-                    if (!Utility_TagManager.ForceDraftable(__instance.def))
+                    if (!Utility_TagManager.ForceDraftable(__instance))
                     {
                         return;
                     }
@@ -1372,7 +1373,7 @@ namespace emitbreaker.PawnControl
                     foreach (var g in __result)
                         yield return g;
 
-                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
                     if (modExtension == null)
                     {
                         yield break; // No mod extension, skip
@@ -1404,11 +1405,11 @@ namespace emitbreaker.PawnControl
                     if (pawn == null || pawn.Dead || pawn.Destroyed)
                         return true;
 
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                     if (modExtension == null)
                         return true; // No mod extension, skip
 
-                    if (!Utility_TagManager.ForceDraftable(pawn.def))
+                    if (!Utility_TagManager.ForceDraftable(pawn))
                         return true; // No draftable tag, skip
 
                     var drafter = pawn?.drafter;
@@ -1446,8 +1447,8 @@ namespace emitbreaker.PawnControl
                         if (pawn == null || pawn.RaceProps.Humanlike || pawn.Map == null)
                             return;
 
-                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                        if (modExtension == null || !Utility_TagManager.ForceEquipWeapon(pawn.def))
+                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                        if (modExtension == null || !Utility_TagManager.ForceEquipWeapon(pawn))
                             return;
 
                         // Alternative approach:
@@ -1509,26 +1510,26 @@ namespace emitbreaker.PawnControl
                     // For non-humanlike modded pawns, allow them to start bills
                     if (p.RaceProps.Humanlike) return true; // Let vanilla handle humanlike pawns
 
-                    var modExtension = Utility_CacheManager.GetModExtension(p.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(p.def);
                     if (modExtension == null) return true; // No mod extension, skip
 
                     if (!Utility_TagManager.HasTagSet(p.def)) return true; // No tag set, skip
 
-                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowAllWork.ToString()))
+                    if (Utility_TagManager.IsWorkEnabled(p, PawnEnumTags.AllowAllWork.ToString()))
                         __result = true;
-                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Hauling.ToString()))
+                    if (Utility_TagManager.IsWorkEnabled(p, PawnEnumTags.AllowWork_Hauling.ToString()))
                         __result = true;
-                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Crafting.ToString()))
+                    if (Utility_TagManager.IsWorkEnabled(p, PawnEnumTags.AllowWork_Crafting.ToString()))
                         __result = true;
-                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Smithing.ToString()))
+                    if (Utility_TagManager.IsWorkEnabled(p, PawnEnumTags.AllowWork_Smithing.ToString()))
                         __result = true;
-                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Tailoring.ToString()))
+                    if (Utility_TagManager.IsWorkEnabled(p, PawnEnumTags.AllowWork_Tailoring.ToString()))
                         __result = true;
-                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Art.ToString()))
+                    if (Utility_TagManager.IsWorkEnabled(p, PawnEnumTags.AllowWork_Art.ToString()))
                         __result = true;
-                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Cooking.ToString()))
+                    if (Utility_TagManager.IsWorkEnabled(p, PawnEnumTags.AllowWork_Cooking.ToString()))
                         __result = true;
-                    if (Utility_TagManager.WorkEnabled(p.def, PawnEnumTags.AllowWork_Doctor.ToString()))
+                    if (Utility_TagManager.IsWorkEnabled(p, PawnEnumTags.AllowWork_Doctor.ToString()))
                         __result = true;
 
                     return false; // Skip original method
@@ -1868,7 +1869,7 @@ namespace emitbreaker.PawnControl
                     if (__instance != null)
                     {
                         // Clear any existing cache for this map ID just to be safe
-                        Utility_MapCacheManager.ClearMapCache(__instance.uniqueID);
+                        Utility_UnifiedCache.InvalidateMap(__instance.uniqueID);
                     }
                 }
             }
@@ -1882,7 +1883,7 @@ namespace emitbreaker.PawnControl
                     if (map != null)
                     {
                         // Clear cache when a map is being removed
-                        Utility_MapCacheManager.ClearMapCache(map.uniqueID);
+                        Utility_UnifiedCache.InvalidateMap(map.uniqueID);
                     }
                 }
             }
@@ -1930,7 +1931,7 @@ namespace emitbreaker.PawnControl
                     if (pawn?.def == null)
                         return true; // Allow vanilla if null
 
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                     if (modExtension == null)
                         return true; // Only for modded pawns
 
@@ -1947,7 +1948,7 @@ namespace emitbreaker.PawnControl
                     if (pawn?.def == null)
                         return; // Allow vanilla if null
 
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                     if (modExtension == null)
                         return; // Only for modded pawns
 
@@ -2012,14 +2013,14 @@ namespace emitbreaker.PawnControl
                     if (_processedPawns.Contains(pawn.thingIDNumber))
                         return;
 
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                     if (modExtension == null)
                         return; // Only for modded pawns
 
                     if (!Utility_DebugManager.ShouldLog() || !modExtension.debugMode)
                         return; // Only in dev mode
 
-                    if (!Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def))
+                    if (!Utility_ThinkTreeManager.HasAllowWorkTag(pawn))
                     {
                         return;
                     }
@@ -2070,7 +2071,7 @@ namespace emitbreaker.PawnControl
                     if (_processedPawns.Contains(__instance.thingIDNumber))
                         return;
 
-                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
                     if (modExtension == null)
                         return; // Only for modded pawns
 
@@ -2078,7 +2079,7 @@ namespace emitbreaker.PawnControl
                         return; // Only in dev mode
 
                     // Only process pawns that have PawnControl tags
-                    if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def))
+                    if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance))
                     {
                         return;
                     }
@@ -2131,7 +2132,7 @@ namespace emitbreaker.PawnControl
                     }
 
                     // ✅ Only show if pawn has mod extension
-                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
                     if (modExtension == null)
                         yield break;
 
@@ -2174,11 +2175,11 @@ namespace emitbreaker.PawnControl
                     if (__instance?.def == null)
                         yield break;
 
-                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
                     if (modExtension == null)
                         yield break;
 
-                    if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance.def))
+                    if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance))
                         yield break;
 
                     yield return new Command_Action
@@ -2202,7 +2203,7 @@ namespace emitbreaker.PawnControl
 
                     if (!Prefs.DevMode) yield break;
 
-                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
                     if (modExtension == null) yield break;
 
                     if (!modExtension.debugMode) yield break;

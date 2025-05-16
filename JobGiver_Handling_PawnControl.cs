@@ -23,7 +23,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval for handling-related caches
         /// </summary>
-        protected override int CacheUpdateInterval => 200; // Update every ~3.3 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Suffix for the animal cache key

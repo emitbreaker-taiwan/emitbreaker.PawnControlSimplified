@@ -29,23 +29,23 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate
         /// Finishing frames doesn't require designations
         /// </summary>
-        protected override bool RequiresDesignator => false;
+        public override bool RequiresDesignator => false;
 
         /// <summary>
         /// Whether this job giver requires map zone or area
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Whether this job requires player faction specifically
         /// Frames can be finished by any faction that owns them
         /// </summary>
-        protected override bool RequiresPlayerFaction => false;
+        public override bool RequiresPlayerFaction => false;
 
         /// <summary>
         /// Update cache every 3 seconds for construction frame jobs
         /// </summary>
-        protected override int CacheUpdateInterval => 180;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Standard distance thresholds for bucketing frames

@@ -68,6 +68,11 @@ namespace emitbreaker.PawnControl
                 return null;
             }
 
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
             return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Warden_EmancipateSlave_PawnControl>(
                 pawn,
                 WorkTag,
@@ -99,12 +104,12 @@ namespace emitbreaker.PawnControl
             if (pawn == null || pawn.Dead || pawn.InMentalState)
                 return true;
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
                 return true;
 
             // Skip if pawn is not a warden
-            if (!Utility_TagManager.WorkEnabled(pawn.def, WorkTag))
+            if (!Utility_TagManager.IsWorkEnabled(pawn, WorkTag))
                 return true;
 
             // Check if Ideology is active

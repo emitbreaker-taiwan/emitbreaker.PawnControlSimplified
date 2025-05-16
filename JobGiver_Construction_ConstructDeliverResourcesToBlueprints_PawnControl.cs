@@ -37,7 +37,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval - blueprints change more frequently
         /// </summary>
-        protected override int CacheUpdateInterval => 200; // ~3.3 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         #endregion
 

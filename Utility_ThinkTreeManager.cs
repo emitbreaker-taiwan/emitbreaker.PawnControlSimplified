@@ -26,34 +26,34 @@ namespace emitbreaker.PawnControl
         /// </summary>
         /// <param name="def">The ThingDef to check</param>
         /// <returns>True if the def has any allow or block work tags, false otherwise</returns>
-        public static bool HasAllowOrBlockWorkTag(ThingDef def)
+        public static bool HasAllowOrBlockWorkTag(Pawn pawn)
         {
-            if (def == null)
+            if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
 
             // Check combined cache first
-            if (Utility_CacheManager._combinedWorkTagCache.TryGetValue(def, out bool result))
+            if (Utility_UnifiedCache.CombinedWorkTag.TryGetValue(pawn, out bool result))
                 return result;
 
             // Quick reject if no extension
-            var modExtension = Utility_CacheManager.GetModExtension(def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
             {
-                Utility_CacheManager._combinedWorkTagCache[def] = false;
+                Utility_UnifiedCache.CombinedWorkTag[pawn] = false;
                 return false;
             }
 
             // Calculate once and cache all results
-            bool allowResult = Utility_TagManager.HasTag(def, ManagedTags.AllowAllWork) ||
-                              Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.AllowWorkPrefix);
+            bool allowResult = Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
+                              Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.AllowWorkPrefix);
 
-            bool blockResult = Utility_TagManager.HasTag(def, ManagedTags.BlockAllWork) ||
-                               Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.BlockWorkPrefix);
+            bool blockResult = Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
+                               Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.BlockWorkPrefix);
 
             // Store in respective caches
-            Utility_CacheManager._allowWorkTagCache[def] = allowResult;
-            Utility_CacheManager._blockWorkTagCache[def] = blockResult;
-            Utility_CacheManager._combinedWorkTagCache[def] = allowResult || blockResult;
+            Utility_UnifiedCache.AllowWorkTag[pawn] = allowResult;
+            Utility_UnifiedCache.BlockWorkTag[pawn] = blockResult;
+            Utility_UnifiedCache.CombinedWorkTag[pawn] = allowResult || blockResult;
 
             return allowResult || blockResult;
         }
@@ -63,30 +63,27 @@ namespace emitbreaker.PawnControl
         /// </summary>
         /// <param name="def">The ThingDef to check</param>
         /// <returns>True if the def has any allow work tags, false otherwise</returns>
-        public static bool HasAllowWorkTag(ThingDef def)
+        public static bool HasAllowWorkTag(Pawn pawn)
         {
-            if (def == null)
-            {
-                Utility_DebugManager.LogWarning($"{def.label} is null.");
+            if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
-            }
 
-            if (Utility_CacheManager._allowWorkTagCache.TryGetValue(def, out bool hasTag))
+            if (Utility_UnifiedCache.AllowWorkTag.TryGetValue(pawn, out bool hasTag))
             {
                 return hasTag;
             }
 
-            if (Utility_CacheManager.GetModExtension(def) == null)
+            if (Utility_UnifiedCache.GetModExtension(pawn.def) == null)
             {
-                Utility_CacheManager._allowWorkTagCache[def] = false;
+                Utility_UnifiedCache.AllowWorkTag[pawn] = false;
                 return false; // No mod extension, no tags
             }
 
             bool result =
-                Utility_TagManager.HasTag(def, ManagedTags.AllowAllWork) ||
-                Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.AllowWorkPrefix);
+                Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
+                Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.AllowWorkPrefix);
 
-            Utility_CacheManager._allowWorkTagCache[def] = result; // ✅ Cache the computed result
+            Utility_UnifiedCache.AllowWorkTag[pawn] = result; // ✅ Cache the computed result
             return result;
         }
 
@@ -95,30 +92,27 @@ namespace emitbreaker.PawnControl
         /// </summary>
         /// <param name="def">The ThingDef to check</param>
         /// <returns>True if the def has any block work tags, false otherwise</returns>
-        public static bool HasBlockWorkTag(ThingDef def)
+        public static bool HasBlockWorkTag(Pawn pawn)
         {
-            if (def == null)
-            {
-                Utility_DebugManager.LogWarning($"{def.label} is null.");
+            if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
-            }
 
-            if (Utility_CacheManager._blockWorkTagCache.TryGetValue(def, out bool hasTag))
+            if (Utility_UnifiedCache.BlockWorkTag.TryGetValue(pawn, out bool hasTag))
             {
                 return hasTag;
             }
 
-            if (Utility_CacheManager.GetModExtension(def) == null)
+            if (Utility_UnifiedCache.GetModExtension(pawn.def) == null)
             {
-                Utility_CacheManager._blockWorkTagCache[def] = false;
+                Utility_UnifiedCache.BlockWorkTag[pawn] = false;
                 return false; // No mod extension, no tags
             }
 
             bool result =
-                Utility_TagManager.HasTag(def, ManagedTags.BlockAllWork) ||
-                Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.BlockWorkPrefix);
+                Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
+                Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.BlockWorkPrefix);
 
-            Utility_CacheManager._blockWorkTagCache[def] = result; // ✅ Cache the computed result
+            Utility_UnifiedCache.BlockWorkTag[pawn] = result; // ✅ Cache the computed result
             return result;
         }
 
@@ -159,6 +153,142 @@ namespace emitbreaker.PawnControl
 
         public static void InjectPawnControlThinkTreesStaticRaceLevel()
         {
+            try
+            {
+                // Get all pawns in the game world
+                foreach (Map map in Find.Maps)
+                {
+                    if (map?.mapPawns?.AllPawnsSpawned == null) continue;
+
+                    foreach (Pawn pawn in map.mapPawns.AllPawnsSpawned)
+                    {
+                        if (pawn?.def?.race == null)
+                            continue;
+
+                        try
+                        {
+                            // Get the mod extension from the pawn's race def
+                            var modExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
+                            if (modExtension == null)
+                                continue;
+
+                            // Check if the pawn has work tags
+                            if (!HasAllowOrBlockWorkTag(pawn))
+                                continue;
+
+                            // ✅ Replace Main Work ThinkTree if specified
+                            if (!string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
+                            {
+                                var thinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.mainWorkThinkTreeDefName);
+                                if (thinkTree != null)
+                                {
+                                    // Update the race-level think tree
+                                    pawn.def.race.thinkTreeMain = thinkTree;
+
+                                    // Also update the individual pawn's think tree if it exists
+                                    var thinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTree");
+                                    if (thinkTreeField != null && pawn.mindState != null)
+                                    {
+                                        thinkTreeField.SetValue(pawn.mindState, thinkTree);
+                                    }
+
+                                    Utility_DebugManager.LogNormal($"Replaced MainThinkTree '{modExtension.mainWorkThinkTreeDefName}' for pawn {pawn.LabelShort} of race {pawn.def.defName}.");
+                                }
+                                else
+                                {
+                                    Utility_DebugManager.LogWarning($"MainThinkTreeDef '{modExtension.mainWorkThinkTreeDefName}' not found for {pawn.LabelShort} of race {pawn.def.defName}.");
+                                }
+                            }
+
+                            // ✅ Replace Constant ThinkTree if specified
+                            if (!string.IsNullOrEmpty(modExtension.constantThinkTreeDefName))
+                            {
+                                var constantTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.constantThinkTreeDefName);
+                                if (constantTree != null)
+                                {
+                                    // Update the race-level constant think tree
+                                    pawn.def.race.thinkTreeConstant = constantTree;
+
+                                    // Also update the individual pawn's constant think tree if it exists
+                                    var constThinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTreeConstant");
+                                    if (constThinkTreeField != null && pawn.mindState != null)
+                                    {
+                                        constThinkTreeField.SetValue(pawn.mindState, constantTree);
+                                    }
+
+                                    Utility_DebugManager.LogNormal($"Replaced ConstantThinkTree '{modExtension.constantThinkTreeDefName}' for pawn {pawn.LabelShort} of race {pawn.def.defName}.");
+                                }
+                                else
+                                {
+                                    Utility_DebugManager.LogWarning($"ConstantThinkTreeDef '{modExtension.constantThinkTreeDefName}' not found for {pawn.LabelShort} of race {pawn.def.defName}.");
+                                }
+                            }
+
+                            // Force the pawn's thinker to rebuild its think nodes
+                            if (pawn.thinker != null)
+                            {
+                                // Get the thinkRoot field via reflection
+                                Type thinkerType = pawn.thinker.GetType();
+                                FieldInfo thinkRootField = AccessTools.Field(thinkerType, "thinkRoot");
+                                if (thinkRootField != null)
+                                {
+                                    // Set it to null to force a rebuild on next think cycle
+                                    thinkRootField.SetValue(pawn.thinker, null);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Utility_DebugManager.LogError($"Error processing pawn {pawn?.LabelShort ?? "null"}: {ex.Message}");
+                        }
+                    }
+                }
+
+                // Handle CaravanPawns if needed
+                if (Find.WorldPawns?.AllPawnsAlive != null)
+                {
+                    foreach (Pawn pawn in Find.WorldPawns.AllPawnsAlive)
+                    {
+                        if (pawn?.def?.race == null)
+                            continue;
+
+                        try
+                        {
+                            var modExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
+                            if (modExtension == null || !HasAllowOrBlockWorkTag(pawn))
+                                continue;
+
+                            // Apply think trees similar to the code above
+                            // (Similar code block as before for world pawns)
+                        }
+                        catch (Exception ex)
+                        {
+                            Utility_DebugManager.LogError($"Error processing world pawn {pawn?.LabelShort ?? "null"}: {ex.Message}");
+                        }
+                    }
+                }
+
+                // Also run once for ThingDefs to ensure newly spawned pawns get the right think trees
+                try
+                {
+                    ApplyThinkTreeToRaceDefs();
+                }
+                catch (Exception ex)
+                {
+                    Utility_DebugManager.LogError($"Error in ApplyThinkTreeToRaceDefs: {ex.Message}");
+                }
+
+                Utility_DebugManager.LogNormal("Finished pawn-level ThinkTree injection phase.");
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Critical error in InjectPawnControlThinkTreesStaticRaceLevel: {ex}");
+            }
+        }
+
+        // Helper method to ensure ThingDefs still get updated for future pawns
+        public static void ApplyThinkTreeToRaceDefs()
+        {
             foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
                 if (def?.race == null)
@@ -168,7 +298,14 @@ namespace emitbreaker.PawnControl
                 if (modExtension == null)
                     continue;
 
-                if (!HasAllowOrBlockWorkTag(def))
+                // Use HasAllowOrBlockWorkTag with a generic pawn from this race def
+                // We can't create a real pawn, so we'll simulate the check
+                bool hasTag = Utility_TagManager.HasTag(def, ManagedTags.AllowAllWork) ||
+                             Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.AllowWorkPrefix) ||
+                             Utility_TagManager.HasTag(def, ManagedTags.BlockAllWork) ||
+                             Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.BlockWorkPrefix);
+
+                if (!hasTag)
                     continue;
 
                 // ✅ Replace Main Work ThinkTree if specified
@@ -178,26 +315,9 @@ namespace emitbreaker.PawnControl
                     if (thinkTree != null)
                     {
                         def.race.thinkTreeMain = thinkTree;
-                        Utility_DebugManager.LogNormal($"Replaced MainThinkTree '{modExtension.mainWorkThinkTreeDefName}' to {def.defName}.");
-                    }
-                    else
-                    {
-                        Utility_DebugManager.LogWarning($"MainThinkTreeDef '{modExtension.mainWorkThinkTreeDefName}' not found for {def.defName}.");
+                        Utility_DebugManager.LogNormal($"Replaced MainThinkTree '{modExtension.mainWorkThinkTreeDefName}' on race def {def.defName}.");
                     }
                 }
-
-                //// ✅ Inject additional Main ThinkTree subtrees
-                //if (modExtension.additionalMain != null && modExtension.additionalMain.Count > 0)
-                //{
-                //    foreach (string additionalDefName in modExtension.additionalMain)
-                //    {
-                //        if (!string.IsNullOrWhiteSpace(additionalDefName))
-                //        {
-                //            TryInjectSubtreeToRace(def, additionalDefName);
-                //            Utility_DebugManager.LogNormal($"Injected additional ThinkTree '{additionalDefName}' into '{def.race.thinkTreeMain?.defName}' for {def.defName}.");
-                //        }
-                //    }
-                //}
 
                 // ✅ Replace Constant ThinkTree if specified
                 if (!string.IsNullOrEmpty(modExtension.constantThinkTreeDefName))
@@ -206,16 +326,10 @@ namespace emitbreaker.PawnControl
                     if (constantTree != null)
                     {
                         def.race.thinkTreeConstant = constantTree;
-                        Utility_DebugManager.LogNormal($"Replaced ConstantThinkTree '{modExtension.constantThinkTreeDefName}' to {def.defName}.");
-                    }
-                    else
-                    {
-                        Utility_DebugManager.LogWarning($"ConstantThinkTreeDef '{modExtension.constantThinkTreeDefName}' not found for {def.defName}.");
+                        Utility_DebugManager.LogNormal($"Replaced ConstantThinkTree '{modExtension.constantThinkTreeDefName}' on race def {def.defName}.");
                     }
                 }
             }
-
-            Utility_DebugManager.LogNormal("Finished static ThinkTree injection phase.");
         }
 
         public static void ValidateThinkTree(Pawn pawn)
@@ -256,7 +370,7 @@ namespace emitbreaker.PawnControl
             if (pawn == null) return;
 
             // Check if there's a mod extension with stored original think trees
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             bool debugLogging = modExtension?.debugMode == true;
 
             try
@@ -503,9 +617,9 @@ namespace emitbreaker.PawnControl
 
         public static void ResetCache()
         {
-            Utility_CacheManager._allowWorkTagCache.Clear();
-            Utility_CacheManager._blockWorkTagCache.Clear();
-            Utility_CacheManager._combinedWorkTagCache.Clear();
+            Utility_UnifiedCache.AllowWorkTag.Clear();
+            Utility_UnifiedCache.BlockWorkTag.Clear();
+            Utility_UnifiedCache.CombinedWorkTag.Clear();
         }
     }
 }

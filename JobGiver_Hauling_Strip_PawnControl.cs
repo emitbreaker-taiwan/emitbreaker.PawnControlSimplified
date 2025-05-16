@@ -18,7 +18,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// The designation type this job giver handles
@@ -38,7 +38,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 1.5 seconds
         /// </summary>
-        protected override int CacheUpdateInterval => 90;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (10, 20, 30 tiles)
@@ -72,6 +72,11 @@ namespace emitbreaker.PawnControl
         {
             // Quick early exit if there are no strip designations
             if (pawn?.Map == null || !pawn.Map.designationManager.AnySpawnedDesignationOfDef(TargetDesignation))
+            {
+                return null;
+            }
+
+            if (ShouldSkip(pawn))
             {
                 return null;
             }

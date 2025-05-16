@@ -20,7 +20,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresDesignator
+        public override bool RequiresDesignator
         {
             get
             {
@@ -38,12 +38,12 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Whether this job giver requires player faction specifically (for jobs like deconstruct)
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Whether this construction job requires specific tag for non-humanlike pawns
@@ -60,7 +60,7 @@ namespace emitbreaker.PawnControl
                 return true;
 
             // For non-humanlike pawns, check for the required mod extension
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
                 return false;
 
@@ -68,7 +68,7 @@ namespace emitbreaker.PawnControl
                 return false;
 
             // Check for work type enablement
-            if (!Utility_TagManager.WorkTypeEnabled(pawn.def, WorkTag))
+            if (!Utility_TagManager.IsWorkEnabled(pawn, WorkTag))
                 return false;
 
             // Allow if pawn has the AllowAllWork tag
@@ -131,6 +131,9 @@ namespace emitbreaker.PawnControl
         protected override Job CreateJobFor(Pawn pawn, bool forced)
         {
             if (pawn?.Map == null)
+                return null;
+
+            if (!NonPlayerFactionCheck(pawn))
                 return null;
 
             int mapId = pawn.Map.uniqueID;

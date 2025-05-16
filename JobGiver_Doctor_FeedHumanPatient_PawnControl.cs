@@ -17,7 +17,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
         protected override bool FeedHumanlikesOnly => true;
         protected override bool FeedAnimalsOnly => false;
         protected override bool FeedPrisonersOnly => false;
@@ -46,6 +46,11 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
             // Use the standard job pipeline from parent class
             return base.TryGiveJob(pawn);
         }

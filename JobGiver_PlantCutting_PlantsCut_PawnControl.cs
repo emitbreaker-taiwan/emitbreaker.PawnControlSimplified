@@ -28,7 +28,12 @@ namespace emitbreaker.PawnControl
         /// </summary>
         protected override Job TryGiveJob(Pawn pawn)
         {
-            return Utility_JobGiverManager.StandardTryGiveJob<Plant>(
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
+
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_PlantCutting_PlantsCut_PawnControl>(
                 pawn,
                 WorkTag,
                 (p, forced) => {
@@ -54,36 +59,6 @@ namespace emitbreaker.PawnControl
         {
             // Use the parent class implementation which has the same logic
             return base.GetPlantsNeedingCutting(map);
-        }
-
-        /// <summary>
-        /// Implement the validation logic specifically for cutting plants
-        /// </summary>
-        protected override bool ValidatePlantTarget(Plant plant, Pawn pawn)
-        {
-            if (plant == null || plant.Destroyed || !plant.Spawned)
-                return false;
-
-            bool isDesignated =
-                pawn.Map.designationManager.DesignationOn(plant, DesignationDefOf.CutPlant) != null
-                || pawn.Map.designationManager.DesignationOn(plant, DesignationDefOf.HarvestPlant) != null;
-
-            if (isDesignated)
-            {
-                if (RequiresPlayerFaction && pawn.Faction != Faction.OfPlayer)
-                    return false;
-            }
-            else
-            {
-                var zone = pawn.Map.zoneManager.ZoneAt(plant.Position) as Zone_Growing;
-                if (zone == null || !zone.allowCut || (RequiresPlayerFaction && pawn.Faction != Faction.OfPlayer))
-                    return false;
-            }
-
-            if (plant.IsForbidden(pawn) || !PlantUtility.PawnWillingToCutPlant_Job(plant, pawn))
-                return false;
-
-            return pawn.CanReserve((LocalTargetInfo)plant, 1, -1);
         }
 
         #endregion

@@ -29,22 +29,22 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate
         /// Repairs don't require specific designations
         /// </summary>
-        protected override bool RequiresDesignator => false;
+        public override bool RequiresDesignator => false;
 
         /// <summary>
         /// Whether this job giver requires map zone or area
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Repair requires player faction for home area restrictions
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Update cache every 3 seconds for repair jobs
         /// </summary>
-        protected override int CacheUpdateInterval => 180;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         // Translation strings
         private static string NotInHomeAreaTrans;

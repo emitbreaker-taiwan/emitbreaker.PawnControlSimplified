@@ -35,12 +35,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// This job requires player faction
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Cache update interval - open targets don't change often
         /// </summary>
-        protected override int CacheUpdateInterval => 240; // Every 4 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for open targets - typically indoor objects

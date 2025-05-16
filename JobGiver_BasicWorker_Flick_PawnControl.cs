@@ -36,12 +36,12 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// This job requires player faction
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Cache update interval - flick targets don't change often
         /// </summary>
-        protected override int CacheUpdateInterval => 300; // Every 5 seconds
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for flick targets - typically indoor structures

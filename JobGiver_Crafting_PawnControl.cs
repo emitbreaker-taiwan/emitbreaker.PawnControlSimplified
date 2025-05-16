@@ -12,7 +12,7 @@ namespace emitbreaker.PawnControl
     /// Common base class for all crafting-related job givers.
     /// Handles bill processing at workbenches with efficient caching.
     /// </summary>
-    public abstract class JobGiver_Crafting_PawnControl : JobGiver_PawnControl
+    public abstract class JobGiver_Crafting_PawnControl : JobGiver_Scan_PawnControl
     {
         #region Configuration
 
@@ -29,17 +29,17 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Whether this job giver requires a designator to operate
         /// </summary>
-        protected override bool RequiresDesignator => false;
+        public override bool RequiresDesignator => false;
 
         /// <summary>
         /// Whether this job giver requires zone or area designation
         /// </summary>
-        protected override bool RequiresMapZoneorArea => true;
+        public override bool RequiresMapZoneorArea => true;
 
         /// <summary>
         /// Whether this job giver requires player faction specifically
         /// </summary>
-        protected override bool RequiresPlayerFaction => true;
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// Whether this crafting job requires specific tag for non-humanlike pawns
@@ -59,7 +59,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update interval - bills don't change that often
         /// </summary>
-        protected override int CacheUpdateInterval => 180;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Default distance thresholds for workbenches (15, 30, 60 tiles)
@@ -125,7 +125,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public JobGiver_Crafting_PawnControl() : base()
         {
-            InitializeCache<Thing>();
+            // The base class constructor already initializes the cache
         }
 
         #endregion
@@ -180,73 +180,6 @@ namespace emitbreaker.PawnControl
 
             // Otherwise apply whatever capability checks are needed
             return !HasRequiredCapabilities(pawn);
-        }
-
-        /// <summary>
-        /// Checks if a non-humanlike pawn has the required capabilities for this job giver
-        /// </summary>
-        protected override bool HasRequiredCapabilities(Pawn pawn)
-        {
-            if (pawn == null || pawn.RaceProps.Humanlike)
-                return true;
-
-            // Check for crafting capability tag in mod extension
-            NonHumanlikePawnControlExtension modExtension = 
-                pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
-
-            if (modExtension == null)
-                return false;
-
-            return modExtension.tags.Contains(RequiredTag.ToStringSafe());
-        }
-
-        #endregion
-
-        #region Core flow
-
-        /// <summary>
-        /// Process the cached targets to create a job
-        /// </summary>
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            if (pawn == null || targets == null || targets.Count == 0)
-                return null;
-
-            // Filter bill givers to those that are valid for this pawn
-            var validBillGivers = targets
-                .Where(thing => IsValidBillGiver(thing, pawn, forced))
-                .ToList();
-
-            if (validBillGivers.Count == 0)
-                return null;
-
-            // Find the best bill giver
-            return FindBestBillGiverJob(pawn, validBillGivers, forced);
-        }
-
-        /// <summary>
-        /// Finds the best bill giver and creates a job
-        /// </summary>
-        protected virtual Job FindBestBillGiverJob(Pawn pawn, List<Thing> validBillGivers, bool forced)
-        {
-            // Use distance bucketing to find the closest valid bill giver
-            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
-                pawn,
-                validBillGivers,
-                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
-                DistanceThresholds);
-
-            // Find bill giver with work
-            Thing targetBillGiver = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
-                buckets,
-                pawn,
-                (thing, worker) => HasWorkForPawn(thing, worker, forced));
-
-            if (targetBillGiver == null)
-                return null;
-
-            // Create and return a job for the bill giver
-            return StartOrResumeBillJob(pawn, targetBillGiver as IBillGiver, forced);
         }
 
         #endregion
@@ -393,6 +326,55 @@ namespace emitbreaker.PawnControl
 
             // Check if there's a valid job to do
             return StartOrResumeBillJob(pawn, billGiver, forced) != null;
+        }
+
+        #endregion
+
+        #region Core flow
+
+        /// <summary>
+        /// Process the cached targets to create a job
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            if (pawn == null || targets == null || targets.Count == 0)
+                return null;
+
+            // Filter bill givers to those that are valid for this pawn
+            var validBillGivers = targets
+                .Where(thing => IsValidBillGiver(thing, pawn, forced))
+                .ToList();
+
+            if (validBillGivers.Count == 0)
+                return null;
+
+            // Find the best bill giver
+            return FindBestBillGiverJob(pawn, validBillGivers, forced);
+        }
+
+        /// <summary>
+        /// Finds the best bill giver and creates a job
+        /// </summary>
+        protected virtual Job FindBestBillGiverJob(Pawn pawn, List<Thing> validBillGivers, bool forced)
+        {
+            // Use distance bucketing to find the closest valid bill giver
+            var buckets = Utility_JobGiverManager.CreateDistanceBuckets(
+                pawn,
+                validBillGivers,
+                (thing) => (thing.Position - pawn.Position).LengthHorizontalSquared,
+                DistanceThresholds);
+
+            // Find bill giver with work
+            Thing targetBillGiver = Utility_JobGiverManager.FindFirstValidTargetInBuckets(
+                buckets,
+                pawn,
+                (thing, worker) => HasWorkForPawn(thing, worker, forced));
+
+            if (targetBillGiver == null)
+                return null;
+
+            // Create and return a job for the bill giver
+            return StartOrResumeBillJob(pawn, targetBillGiver as IBillGiver, forced);
         }
 
         #endregion

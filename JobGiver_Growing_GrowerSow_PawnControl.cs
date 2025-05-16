@@ -20,8 +20,15 @@ namespace emitbreaker.PawnControl
         private static string CantSowCavePlantBecauseOfLightTrans;
         private static string CantSowCavePlantBecauseUnroofedTrans;
 
-        // Cache key for sowable cells
-        private const string SOW_CACHE_KEY_SUFFIX = "_SowableCells";
+        // Cache key suffix for sowable cells - follow same pattern as parent class
+        private const string SOW_CACHE_SUFFIX = "_Sow";
+
+        // Extra tracking to avoid recalculating every cell every time
+        private Dictionary<int, Dictionary<IntVec3, int>> _cellValidationCache =
+            new Dictionary<int, Dictionary<IntVec3, int>>();
+
+        // Track the last tick we purged the validation cache
+        private int _lastCachePurgeTick = -1;
 
         #endregion
 
@@ -45,40 +52,39 @@ namespace emitbreaker.PawnControl
             return 5.7f;
         }
 
-        public override bool ShouldSkip(Pawn pawn)
+        /// <summary>
+        /// Constructor to initialize cache
+        /// </summary>
+        public JobGiver_Growing_GrowerSow_PawnControl() : base()
         {
-            if (base.ShouldSkip(pawn))
-                return true;
-
-            if (Utility_Common.PawnIsNotPlayerFaction(pawn))
-                return true;
-
-            return false;
+            // Initialize cache
         }
 
         /// <summary>
-        /// Override TryGiveJob to use the common helper method with a custom processor for sowing
+        /// Determines whether to skip this job giver for the pawn
         /// </summary>
-        protected override Job TryGiveJob(Pawn pawn)
+        public override bool ShouldSkip(Pawn pawn)
         {
-            // Use the CreateGrowingJob helper with a custom processor for sowing
-            return CreateGrowingJob<JobGiver_Growing_GrowerSow_PawnControl>(pawn, ProcessCellsForSowing);
-        }
+            // First check base conditions efficiently 
+            if (base.ShouldSkip(pawn))
+                return true;
 
-        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
-        {
-            // Implement logic to process cached targets for sowing jobs
-            if (targets == null || targets.Count == 0)
-                return null;
+            // Skip pawns from wrong factions
+            if (RequiresPlayerFaction && Utility_Common.PawnIsNotPlayerFaction(pawn))
+                return true;
 
-            // Use the sowable cells cache instead of filtering targets directly
-            List<IntVec3> sowableCells = GetSowableCells(pawn);
+            // IMPORTANT: Check if the pawn is allowed to do Growing work
+            if (!IsAllowedGrowingWork(pawn))
+            {
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} is not allowed to do Growing work (work settings)");
+                return true;
+            }
 
-            if (sowableCells.Count == 0)
-                return null;
+            // Occasionally purge cell validation cache to prevent memory growth over time
+            PurgeCellValidationCacheIfNeeded();
 
-            // Use the existing sowing logic to create a job
-            return ProcessCellsForSowing(pawn, sowableCells);
+            return false;
         }
 
         /// <summary>
@@ -87,12 +93,211 @@ namespace emitbreaker.PawnControl
         protected override bool ExtraRequirements(IPlantToGrowSettable settable, Pawn pawn)
         {
             if (settable is Zone_Growing zone)
-                return zone.allowSow && zone.GetPlantDefToGrow() != null;
+            {
+                // IMPORTANT: Check if sowing is allowed in this zone
+                bool zoneSowingAllowed = zone.allowSow && zone.GetPlantDefToGrow() != null;
+
+                if (!zoneSowingAllowed && Prefs.DevMode)
+                {
+                    Utility_DebugManager.LogNormal($"Zone {zone.label} does not allow sowing or has no plant def");
+                }
+
+                return zoneSowingAllowed;
+            }
 
             if (settable is Building_PlantGrower grower)
-                return grower.GetPlantDefToGrow() != null && grower.CanAcceptSowNow();
+            {
+                // IMPORTANT: Check if the grower can accept sowing now
+                bool growerAllowsSowing = grower.GetPlantDefToGrow() != null && grower.CanAcceptSowNow();
+
+                if (!growerAllowsSowing && Prefs.DevMode)
+                {
+                    Utility_DebugManager.LogNormal($"Grower {grower.Label} does not accept sowing now");
+                }
+
+                return growerAllowsSowing;
+            }
 
             return false;
+        }
+
+        /// <summary>
+        /// Override TryGiveJob to implement a sequential approach to creating jobs
+        /// </summary>
+        protected override Job TryGiveJob(Pawn pawn)
+        {
+            if (pawn?.Map == null || ShouldSkip(pawn))
+            {
+                return null;
+            }
+
+            // Use the SequentialTryGiveJob method with our custom job creation logic
+            return Utility_JobGiverManager.StandardTryGiveJob<JobGiver_Growing_GrowerSow_PawnControl>(
+                pawn,
+                WorkTag,
+                (p, forced) => {
+                    // IMPORTANT: Double-check work settings at job creation time
+                    if (!IsAllowedGrowingWork(p))
+                    {
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"{p.LabelShort} is not allowed to do Growing work (work disabled)");
+                        return null;
+                    }
+
+                    // First get growing cells from the base method
+                    List<IntVec3> growingCells = GetGrowingWorkCells(p);
+                    if (growingCells.Count == 0)
+                    {
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"{p.LabelShort}: No growing cells found");
+                        return null;
+                    }
+
+                    if (Prefs.DevMode)
+                        Utility_DebugManager.LogNormal($"{p.LabelShort}: Found {growingCells.Count} growing cells");
+
+                    // Filter for sowable cells
+                    List<IntVec3> sowableCells = FilterSowableCells(p, growingCells);
+                    if (sowableCells.Count == 0)
+                    {
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"{p.LabelShort}: No sowable cells found");
+                        return null;
+                    }
+
+                    if (Prefs.DevMode)
+                        Utility_DebugManager.LogNormal($"{p.LabelShort}: Found {sowableCells.Count} sowable cells");
+
+                    // Create sowing job
+                    Job job = CreateSowingJob(p, sowableCells);
+                    if (job == null)
+                    {
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"{p.LabelShort}: Failed to create sowing job");
+                        return null;
+                    }
+
+                    // IMPORTANT: Final verification of zone/cell to make sure sowing is allowed
+                    if (!VerifySowingAllowed(job.targetA.Cell, p))
+                    {
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"{p.LabelShort}: Sowing not allowed at {job.targetA.Cell}");
+                        return null;
+                    }
+
+                    if (Prefs.DevMode)
+                        Utility_DebugManager.LogNormal($"{p.LabelShort}: Created sowing job at {job.targetA.Cell}");
+
+                    return job;
+                },
+                skipEmergencyCheck: false,
+                jobGiverType: GetType()
+            );
+        }
+
+        /// <summary>
+        /// Final verification that sowing is allowed at the target cell
+        /// </summary>
+        private bool VerifySowingAllowed(IntVec3 cell, Pawn pawn)
+        {
+            Map map = pawn.Map;
+            if (map == null)
+                return false;
+
+            // Check zone settings
+            Zone_Growing zone = cell.GetZone(map) as Zone_Growing;
+            if (zone != null)
+            {
+                // Verify zone allows sowing
+                if (!zone.allowSow)
+                {
+                    if (Prefs.DevMode)
+                        Utility_DebugManager.LogNormal($"Zone {zone.label} does not allow sowing");
+                    return false;
+                }
+
+                // Verify zone has a plant def
+                ThingDef plantDefToGrow = zone.GetPlantDefToGrow();
+                if (plantDefToGrow == null)
+                {
+                    if (Prefs.DevMode)
+                        Utility_DebugManager.LogNormal($"Zone {zone.label} has no plant def to grow");
+                    return false;
+                }
+            }
+            else
+            {
+                // Check if there's a plant grower at this location
+                Building_PlantGrower grower = map.thingGrid.ThingAt<Building_PlantGrower>(cell);
+                if (grower != null)
+                {
+                    // Verify the grower allows sowing
+                    if (!grower.CanAcceptSowNow())
+                    {
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"Plant grower {grower.Label} cannot accept sowing now");
+                        return false;
+                    }
+
+                    // Verify the grower has a plant def
+                    ThingDef plantDefToGrow = grower.GetPlantDefToGrow();
+                    if (plantDefToGrow == null)
+                    {
+                        if (Prefs.DevMode)
+                            Utility_DebugManager.LogNormal($"Plant grower {grower.Label} has no plant def to grow");
+                        return false;
+                    }
+                }
+                else
+                {
+                    // No zone or grower found
+                    if (Prefs.DevMode)
+                        Utility_DebugManager.LogNormal($"No growing zone or plant grower found at {cell}");
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Process the cached targets efficiently
+        /// </summary>
+        protected override Job ProcessCachedTargets(Pawn pawn, List<Thing> targets, bool forced)
+        {
+            // IMPORTANT: Double-check work settings at job creation time
+            if (!IsAllowedGrowingWork(pawn))
+            {
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} is not allowed to do Growing work (work disabled)");
+                return null;
+            }
+
+            if (pawn?.Map == null || targets == null || targets.Count == 0)
+                return null;
+
+            // Get valid growing cells from parent method
+            List<IntVec3> growingCells = GetGrowingWorkCells(pawn);
+            if (growingCells.Count == 0)
+                return null;
+
+            // Find sowable cells efficiently
+            List<IntVec3> sowableCells = FilterSowableCells(pawn, growingCells);
+            if (sowableCells.Count == 0)
+                return null;
+
+            // Create sowing job by finding the best cell
+            Job job = CreateSowingJob(pawn, sowableCells);
+
+            // IMPORTANT: Final verification of zone/cell to make sure sowing is allowed
+            if (job != null && !VerifySowingAllowed(job.targetA.Cell, pawn))
+            {
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort}: Sowing not allowed at {job.targetA.Cell}");
+                return null;
+            }
+
+            return job;
         }
 
         #endregion
@@ -100,49 +305,75 @@ namespace emitbreaker.PawnControl
         #region Sowing-specific implementation
 
         /// <summary>
-        /// Gets or creates a cache of cells that can be sown
+        /// Filters cells that can be sown from all growing cells
+        /// Uses a two-level cache system for better performance
         /// </summary>
-        private List<IntVec3> GetSowableCells(Pawn pawn)
+        private List<IntVec3> FilterSowableCells(Pawn pawn, List<IntVec3> growingCells)
         {
-            if (pawn?.Map == null)
+            if (pawn?.Map == null || growingCells == null || growingCells.Count == 0)
                 return new List<IntVec3>();
 
             int mapId = pawn.Map.uniqueID;
-            string cacheKey = this.GetType().Name + SOW_CACHE_KEY_SUFFIX;
-
-            // Try to get sowable cells from the map cache manager
-            var cellCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<IntVec3>>(mapId);
-
-            // Check if we need to update the cache
             int currentTick = Find.TickManager.TicksGame;
-            int lastUpdateTick = Utility_MapCacheManager.GetLastCacheUpdateTick(mapId, cacheKey);
+            Map map = pawn.Map;
 
-            if (currentTick - lastUpdateTick > CacheUpdateInterval ||
-                !cellCache.TryGetValue(cacheKey, out List<IntVec3> sowableCells) ||
-                sowableCells == null)
+            // Create a result list with a reasonable capacity
+            List<IntVec3> result = new List<IntVec3>(Math.Min(growingCells.Count, 200));
+
+            // Get or create the cell validation cache for this map
+            if (!_cellValidationCache.TryGetValue(mapId, out var validationCache))
             {
-                // Cache is invalid or expired, rebuild it
-                List<IntVec3> growingCells = GetGrowingWorkCells(pawn);
-                Map map = pawn.Map;
+                validationCache = new Dictionary<IntVec3, int>(1000);
+                _cellValidationCache[mapId] = validationCache;
+            }
 
-                // Pre-filter cells that can be sown in general (not pawn-specific yet)
-                sowableCells = FindTargetCells(
-                    pawn,
-                    growingCells,
-                    (cell, p, m) => CanSowAtCellGeneric(cell, m)
-                );
+            // Process cells in batches for better performance
+            int cellsChecked = 0;
+            int cellsValid = 0;
+            foreach (IntVec3 cell in growingCells)
+            {
+                // Limit processing to avoid excessive CPU usage
+                if (cellsChecked++ > 1000)
+                    break;
 
-                // Store in the central cache
-                cellCache[cacheKey] = sowableCells;
-                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, currentTick);
-
-                if (Prefs.DevMode)
+                // IMPORTANT: Check zone settings for this cell
+                Zone_Growing zone = cell.GetZone(map) as Zone_Growing;
+                if (zone != null && (!zone.allowSow || zone.GetPlantDefToGrow() == null))
                 {
-                    Utility_DebugManager.LogNormal($"Updated sowable cells cache for {this.GetType().Name}, found {sowableCells.Count} cells");
+                    // Skip cells in zones that don't allow sowing or have no plant def
+                    continue;
+                }
+
+                // Check if cell was recently validated and is still valid
+                if (validationCache.TryGetValue(cell, out int lastValidatedTick) &&
+                    currentTick - lastValidatedTick < 600) // Valid for 10 seconds
+                {
+                    // Cell was recently validated, add it to results
+                    result.Add(cell);
+                    cellsValid++;
+                    continue;
+                }
+
+                // Cell needs validation, check if it can be sown
+                if (CanSowAtCellGeneric(cell, map))
+                {
+                    // Update validation cache and add to results
+                    validationCache[cell] = currentTick;
+                    result.Add(cell);
+                    cellsValid++;
+
+                    // Limit number of valid cells to prevent performance issues
+                    if (result.Count >= 200)
+                        break;
                 }
             }
 
-            return sowableCells;
+            if (Prefs.DevMode && cellsChecked > 0)
+            {
+                Utility_DebugManager.LogNormal($"Checked {cellsChecked} cells, found {cellsValid} valid sowable cells");
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -150,43 +381,87 @@ namespace emitbreaker.PawnControl
         /// </summary>
         private bool CanSowAtCellGeneric(IntVec3 cell, Map map)
         {
-            if (!PlantUtility.GrowthSeasonNow(cell, map, true))
-                return false;
-
-            // Get plant def to grow
-            ThingDef plantDef = CalculateWantedPlantDef(cell, map);
-            if (plantDef == null)
-                return false;
-
-            List<Thing> thingList = cell.GetThingList(map);
-
-            // Check if the cell already has the desired plant
-            for (int i = 0; i < thingList.Count; i++)
+            // IMPORTANT: First check zone settings
+            Zone_Growing zone = cell.GetZone(map) as Zone_Growing;
+            if (zone != null)
             {
-                Thing thing = thingList[i];
-                if (thing.def == plantDef)
+                if (!zone.allowSow)
+                    return false;
+
+                if (zone.GetPlantDefToGrow() == null)
                     return false;
             }
-
-            // Check for blueprints or frames
-            bool hasStructure = false;
-            for (int i = 0; i < thingList.Count; i++)
+            else
             {
-                Thing thing = thingList[i];
-                if ((thing is Blueprint || thing is Frame))
+                // Check for plant grower
+                Building_PlantGrower grower = map.thingGrid.ThingAt<Building_PlantGrower>(cell);
+                if (grower != null)
                 {
-                    hasStructure = true;
-                    break;
+                    if (!grower.CanAcceptSowNow())
+                        return false;
+
+                    if (grower.GetPlantDefToGrow() == null)
+                        return false;
+                }
+                else
+                {
+                    // No zone or grower found
+                    return false;
                 }
             }
 
-            // If there's a structure, ensure fertility
-            if (hasStructure)
+            // Check if the cell is in the growing season
+            if (!PlantUtility.GrowthSeasonNow(cell, map, true))
+                return false;
+
+            // Get plant def to grow - CRITICAL CHECK
+            ThingDef plantDef = CalculateWantedPlantDef(cell, map);
+            if (plantDef == null)
             {
-                Thing edifice = cell.GetEdifice(map);
-                if (edifice == null || edifice.def.fertility < 0.0f)
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"Can't sow at {cell}: No plant def to grow");
+                return false;
+            }
+
+            // Check for existing plants
+            Plant existingPlant = map.thingGrid.ThingAt<Plant>(cell);
+            if (existingPlant != null)
+            {
+                if (existingPlant.def == plantDef && !existingPlant.IsDessicated())
+                    return false;
+
+                // If there's already a different plant, we might be able to sow after it's cleared
+                if (!existingPlant.IsDessicated() && map.designationManager.DesignationOn(existingPlant, DesignationDefOf.CutPlant) == null)
                     return false;
             }
+
+            List<Thing> thingList = cell.GetThingList(map);
+
+            // Check for things blocking planting
+            for (int i = 0; i < thingList.Count; i++)
+            {
+                Thing thing = thingList[i];
+
+                // Check if the cell already has the desired plant
+                if (thing.def == plantDef)
+                    return false;
+
+                // Check for blueprints, frames, or other blockers
+                if (thing.def.BlocksPlanting())
+                    return false;
+
+                if (thing is Blueprint || thing is Frame)
+                {
+                    // Additional check for non-fertile blueprints/frames
+                    Thing edifice = cell.GetEdifice(map);
+                    if (edifice == null || edifice.def.fertility < 0.0f)
+                        return false;
+                }
+            }
+
+            // Check if the cell is fertile for the plant
+            if (!plantDef.CanEverPlantAt(cell, map))
+                return false;
 
             // Check cave plant requirements
             if (plantDef.plant.cavePlant)
@@ -202,50 +477,100 @@ namespace emitbreaker.PawnControl
             if (plantDef.plant.interferesWithRoof && cell.Roofed(map))
                 return false;
 
-            // Check for things blocking planting
-            for (int i = 0; i < thingList.Count; i++)
-            {
-                Thing thing = thingList[i];
-                if (thing.def.BlocksPlanting())
-                    return false;
-            }
-
-            // Final checks for sowing
+            // Final check for immediate plantability
             return plantDef.CanNowPlantAt(cell, map);
         }
 
         /// <summary>
-        /// Custom processor for sowing jobs
+        /// Calculates what plant should be grown in a specific cell
         /// </summary>
-        private Job ProcessCellsForSowing(Pawn pawn, List<IntVec3> cells)
+        /// <param name="c">The cell to check</param>
+        /// <param name="map">The map</param>
+        /// <returns>The PlantDef to grow, or null if none</returns>
+        protected override ThingDef CalculateWantedPlantDef(IntVec3 c, Map map)
         {
-            if (pawn?.Map == null || cells == null || cells.Count == 0)
+            Zone_Growing zone = c.GetZone(map) as Zone_Growing;
+            if (zone != null)
+            {
+                return zone.GetPlantDefToGrow();
+            }
+
+            Building_PlantGrower plantGrower = map.thingGrid.ThingAt<Building_PlantGrower>(c);
+            if (plantGrower != null)
+            {
+                return plantGrower.GetPlantDefToGrow();
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Creates a sowing job for the pawn at the best available cell
+        /// </summary>
+        private Job CreateSowingJob(Pawn pawn, List<IntVec3> sowableCells)
+        {
+            if (pawn?.Map == null || sowableCells == null || sowableCells.Count == 0)
                 return null;
 
-            // Filter out cells that don't pass pawn-specific checks
-            List<IntVec3> validCells = cells.Where(cell => CanSowAtCellForPawn(cell, pawn)).ToList();
+            // Filter cells for this specific pawn
+            List<IntVec3> validCells = new List<IntVec3>(sowableCells.Count);
+            Map map = pawn.Map;
+
+            // Pre-filter a reasonable number of cells
+            int cellsChecked = 0;
+            int cellsValid = 0;
+
+            foreach (IntVec3 cell in sowableCells)
+            {
+                if (cellsChecked++ > 200) // Limit checking to first 200 cells
+                    break;
+
+                if (CanSowAtCellForPawn(cell, pawn))
+                {
+                    validCells.Add(cell);
+                    cellsValid++;
+                }
+
+                // Early out if we found enough valid cells
+                if (validCells.Count >= 50)
+                    break;
+            }
 
             if (validCells.Count == 0)
+            {
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"No valid cells for {pawn.LabelShort} after pawn-specific filtering");
                 return null;
+            }
 
             // Find best cell using distance bucketing
             IntVec3 targetCell = FindBestCell(pawn, validCells);
             if (!targetCell.IsValid)
+            {
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"Failed to find best cell for {pawn.LabelShort}");
                 return null;
+            }
 
             // Determine what to plant
-            ThingDef plantDefToSow = CalculateWantedPlantDef(targetCell, pawn.Map);
+            ThingDef plantDefToSow = CalculateWantedPlantDef(targetCell, map);
             if (plantDefToSow == null)
+            {
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"No plant def to sow at {targetCell} for {pawn.LabelShort}");
                 return null;
+            }
 
             // Skill check
             if (plantDefToSow.plant.sowMinSkill > 0)
             {
                 int skillLevel = pawn.skills?.GetSkill(SkillDefOf.Plants).Level
-                                 ?? pawn.RaceProps.mechFixedSkillLevel;
+                               ?? pawn.RaceProps.mechFixedSkillLevel;
+
                 if (skillLevel < plantDefToSow.plant.sowMinSkill)
                 {
-                    JobFailReason.Is("UnderAllowedSkill".Translate(plantDefToSow.plant.sowMinSkill));
+                    if (Prefs.DevMode)
+                        Utility_DebugManager.LogNormal($"{pawn.LabelShort} lacks skill to plant {plantDefToSow} (needs {plantDefToSow.plant.sowMinSkill}, has {skillLevel})");
                     return null;
                 }
             }
@@ -254,9 +579,12 @@ namespace emitbreaker.PawnControl
             var job = JobMaker.MakeJob(WorkJobDef, targetCell);
             job.plantDefToSow = plantDefToSow;
 
-            if (Prefs.DevMode)
+            // Double-check that the job can be performed
+            if (!job.TryMakePreToilReservations(pawn, false))
             {
-                Utility_DebugManager.LogNormal($"{pawn.LabelShort} created sow job for {plantDefToSow.label} at {targetCell}");
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"{pawn.LabelShort} couldn't reserve cell {targetCell} for sowing");
+                return null;
             }
 
             return job;
@@ -273,109 +601,65 @@ namespace emitbreaker.PawnControl
             if (!pawn.CanReserve(cell, 1, -1))
                 return false;
 
+            // Check if pawn can reach the cell
+            if (!pawn.CanReach(cell, PathEndMode.Touch, Danger.Deadly))
+                return false;
+
             // Get plant def to grow
             ThingDef plantDef = CalculateWantedPlantDef(cell, pawn.Map);
             if (plantDef == null)
                 return false;
 
-            // Check cave plant requirements - add specific error messages
+            // Check cave plant requirements
             if (plantDef.plant.cavePlant)
             {
                 if (!cell.Roofed(pawn.Map))
-                {
-                    JobFailReason.Is(CantSowCavePlantBecauseUnroofedTrans);
                     return false;
-                }
 
                 if (pawn.Map.glowGrid.GroundGlowAt(cell, true) > 0.0f)
-                {
-                    JobFailReason.Is(CantSowCavePlantBecauseOfLightTrans);
                     return false;
-                }
+            }
+
+            // Check if the cell needs to be cleared first
+            Plant existingPlant = pawn.Map.thingGrid.ThingAt<Plant>(cell);
+            if (existingPlant != null && existingPlant.def != plantDef)
+            {
+                // Plant must have cut designation to be valid for sowing
+                if (pawn.Map.designationManager.DesignationOn(existingPlant, DesignationDefOf.CutPlant) == null)
+                    return false;
             }
 
             return true;
         }
 
         /// <summary>
-        /// Full check if a cell can be sown (for backwards compatibility)
+        /// Periodically purge the cell validation cache to prevent memory build-up
         /// </summary>
-        private bool CanSowAtCell(IntVec3 cell, Pawn pawn, Map map)
+        private void PurgeCellValidationCacheIfNeeded()
         {
-            if (cell.IsForbidden(pawn))
-                return false;
+            int currentTick = Find.TickManager.TicksGame;
 
-            if (!pawn.CanReserve(cell, 1, -1))
-                return false;
+            // Purge every 2000 ticks (33 seconds)
+            if (currentTick - _lastCachePurgeTick < 2000)
+                return;
 
-            if (!PlantUtility.GrowthSeasonNow(cell, map, true))
-                return false;
+            _lastCachePurgeTick = currentTick;
 
-            // Get plant def to grow
-            ThingDef plantDef = CalculateWantedPlantDef(cell, map);
-            if (plantDef == null)
-                return false;
-
-            List<Thing> thingList = cell.GetThingList(map);
-
-            // Check if the cell already has the desired plant
-            for (int i = 0; i < thingList.Count; i++)
+            // Purge old entries from the cache
+            foreach (var mapCache in _cellValidationCache.Values)
             {
-                Thing thing = thingList[i];
-                if (thing.def == plantDef)
-                    return false;
-            }
-
-            // Check for blueprints or frames
-            bool hasStructure = false;
-            for (int i = 0; i < thingList.Count; i++)
-            {
-                Thing thing = thingList[i];
-                if ((thing is Blueprint || thing is Frame) && thing.Faction == pawn.Faction)
+                // Remove entries older than 600 ticks (10 seconds)
+                List<IntVec3> keysToRemove = new List<IntVec3>();
+                foreach (var pair in mapCache)
                 {
-                    hasStructure = true;
-                    break;
-                }
-            }
-
-            // If there's a structure, ensure fertility
-            if (hasStructure)
-            {
-                Thing edifice = cell.GetEdifice(map);
-                if (edifice == null || edifice.def.fertility < 0.0f)
-                    return false;
-            }
-
-            // Check cave plant requirements
-            if (plantDef.plant.cavePlant)
-            {
-                if (!cell.Roofed(map))
-                {
-                    JobFailReason.Is(CantSowCavePlantBecauseUnroofedTrans);
-                    return false;
+                    if (currentTick - pair.Value > 600)
+                        keysToRemove.Add(pair.Key);
                 }
 
-                if (map.glowGrid.GroundGlowAt(cell, true) > 0.0f)
-                {
-                    JobFailReason.Is(CantSowCavePlantBecauseOfLightTrans);
-                    return false;
-                }
+                // Remove old keys
+                foreach (var key in keysToRemove)
+                    mapCache.Remove(key);
             }
-
-            // Check if plant interferes with roof
-            if (plantDef.plant.interferesWithRoof && cell.Roofed(map))
-                return false;
-
-            // Check for things blocking planting
-            for (int i = 0; i < thingList.Count; i++)
-            {
-                Thing thing = thingList[i];
-                if (thing.def.BlocksPlanting())
-                    return false;
-            }
-
-            // Final checks for sowing
-            return plantDef.CanNowPlantAt(cell, map);
         }
 
         #endregion
@@ -390,19 +674,22 @@ namespace emitbreaker.PawnControl
             // Call base reset first to handle growing cell caches
             base.Reset();
 
-            // Now clear sowing-specific caches
+            // Clear sowing-specific caches
+            _cellValidationCache.Clear();
+            _lastCachePurgeTick = -1;
+
+            // Also clear any map-specific sowable caches using the centralized system
             foreach (int mapId in Find.Maps.Select(map => map.uniqueID))
             {
-                string cacheKey = this.GetType().Name + SOW_CACHE_KEY_SUFFIX;
-                var cellCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<IntVec3>>(mapId);
+                string sowCacheKey = this.GetType().Name + SOW_CACHE_SUFFIX;
+                var sowCache = Utility_MapCacheManager.GetOrCreateMapCache<string, List<IntVec3>>(mapId);
 
-                if (cellCache.ContainsKey(cacheKey))
+                if (sowCache.ContainsKey(sowCacheKey))
                 {
-                    cellCache.Remove(cacheKey);
+                    sowCache.Remove(sowCacheKey);
                 }
 
-                // Clear the update tick record too
-                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, cacheKey, -1);
+                Utility_MapCacheManager.SetLastCacheUpdateTick(mapId, sowCacheKey, -1);
             }
 
             if (Prefs.DevMode)

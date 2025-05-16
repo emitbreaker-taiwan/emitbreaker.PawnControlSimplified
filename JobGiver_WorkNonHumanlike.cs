@@ -41,7 +41,7 @@ namespace emitbreaker.PawnControl
                     return ThinkResult.NoJob;
                 }
 
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension == null)
                 {
                     return ThinkResult.NoJob;
@@ -68,7 +68,7 @@ namespace emitbreaker.PawnControl
                 }
 
                 // FIXED: Check if this pawn should be handled by PawnControl
-                bool hasPawnControlTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def);
+                bool hasPawnControlTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn);
 
                 // Only continue if pawn has tags OR is an animal
                 if (!hasPawnControlTags)
@@ -262,7 +262,7 @@ namespace emitbreaker.PawnControl
                                         Job cachedJob = scanner.JobOnThing(pawn, thing);
                                         if (cachedJob != null)
                                         {
-                                            Utility_CacheManager._jobCache[thing] = cachedJob;
+                                            Utility_UnifiedCache.JobCache[thing] = cachedJob;
                                             Utility_DebugManager.LogNormal($"Cached job {cachedJob.def.defName} for {thing.Label}");
                                         }
                                     }
@@ -376,10 +376,10 @@ namespace emitbreaker.PawnControl
                         Utility_DebugManager.LogNormal($"Attempting final job creation for {pawn.LabelShort} with {(bestTargetOfLastPriority.HasThing ? bestTargetOfLastPriority.Thing.Label : "cell")}");
 
                         // Check for cached job first before calling JobOnThing again
-                        if (bestTargetOfLastPriority.HasThing && Utility_CacheManager._jobCache.TryGetValue(bestTargetOfLastPriority.Thing, out Job cachedJob))
+                        if (bestTargetOfLastPriority.HasThing && Utility_UnifiedCache.JobCache.TryGetValue(bestTargetOfLastPriority.Thing, out Job cachedJob))
                         {
                             job3 = cachedJob;
-                            Utility_CacheManager._jobCache.Remove(bestTargetOfLastPriority.Thing); // Use it once then remove
+                            Utility_UnifiedCache.JobCache.Remove(bestTargetOfLastPriority.Thing); // Use it once then remove
                             Utility_DebugManager.LogNormal($"Using cached job {job3.def.defName} for {bestTargetOfLastPriority.Thing.Label}");
                         }
                         else
@@ -520,7 +520,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void ResetCache()
         {
-            Utility_CacheManager._jobCache.Clear();
+            Utility_UnifiedCache.JobCache.Clear();
         }
     }
 }

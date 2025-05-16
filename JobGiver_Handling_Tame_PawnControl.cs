@@ -24,7 +24,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Human-readable name for debug logging
@@ -39,7 +39,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Cache update interval in ticks (180 ticks = 3 seconds)
         /// </summary>
-        protected override int CacheUpdateInterval => 180;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Distance thresholds for bucketing (25, 50, 100 tiles squared)
@@ -86,6 +86,11 @@ namespace emitbreaker.PawnControl
             // Skip if no tame designations exist on map
             if (pawn?.Map == null || !pawn.Map.designationManager.AnySpawnedDesignationOfDef(DesignationDefOf.Tame))
                 return null;
+
+            if (ShouldSkip(pawn))
+            {
+                return null;
+            }
 
             // IMPORTANT: Only player faction pawns or pawns slaved to player faction can perform designation jobs
             if (pawn.Faction != Faction.OfPlayer &&

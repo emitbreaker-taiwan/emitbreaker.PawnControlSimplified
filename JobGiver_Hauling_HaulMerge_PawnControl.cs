@@ -19,7 +19,12 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
+
+        /// <summary>
+        /// Whether this job giver requires player faction specifically (for jobs like deconstruct)
+        /// </summary>
+        public override bool RequiresPlayerFaction => true;
 
         /// <summary>
         /// The job to create when a valid target is found
@@ -34,7 +39,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every ~6.6 seconds
         /// </summary>
-        protected override int CacheUpdateInterval => 400;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Standard distance thresholds for bucketing (15, 25, 50 tiles)

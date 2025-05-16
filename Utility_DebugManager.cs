@@ -21,6 +21,13 @@ namespace emitbreaker.PawnControl
             return Prefs.DevMode && settings.debugMode;
         }
 
+        public static bool ShouldLogDetailed()
+        {
+            // Only log if both RimWorld DevMode AND our mod's detailed debug mode are enabled
+            var settings = LoadedModManager.GetMod<Mod_SimpleNonHumanlikePawnControl>().GetSettings<ModSettings_SimpleNonHumanlikePawnControl>();
+            return Prefs.DevMode && settings.debugMode && settings.detailedDebugMode;
+        }
+
         // Helper method for consistent logging
         public static void LogNormal(string message)
         {
@@ -307,7 +314,7 @@ namespace emitbreaker.PawnControl
             // Dump basic pawn information
             builder.AppendLine($"Pawn Type: {pawn.def.defName}");
             builder.AppendLine($"Race: {(pawn.RaceProps.Humanlike ? "Humanlike" : pawn.RaceProps.Animal ? "Animal" : "Other")}");
-            builder.AppendLine($"Has PawnControl Tags: {Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def)}");
+            builder.AppendLine($"Has PawnControl Tags: {Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn)}");
 
             // Dump main ThinkTree information
             builder.AppendLine("\nMAIN THINK TREE:");
@@ -441,14 +448,6 @@ namespace emitbreaker.PawnControl
             LogNormal($"- pawn.IsWildMan? {pawn.IsWildMan()}");
             LogNormal($"- pawn.jobs.curDriver? {(pawn.jobs?.curDriver != null ? pawn.jobs.curDriver.ToString() : "null")}");
             LogNormal($"- pawn.jobs.curJob? {(pawn.jobs?.curJob != null ? pawn.jobs.curJob.def.defName : "null")}");
-        }
-
-        /// <summary>
-        /// Debug messages for Utility_TagManager.HasTag
-        /// </summary>
-        public static void TagManager_HasTag_HasTag(ThingDef def, string tag, bool hasTag)
-        {
-            LogNormal($"Checking tag '{tag}' for def={def.defName}: {hasTag}");
         }
 
         /// <summary>
@@ -618,14 +617,14 @@ namespace emitbreaker.PawnControl
                 LogNormal($"- Emergency list count: {emergencyList?.Count ?? 0}");
 
                 // Check if the pawn has valid mod extension
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 LogNormal($"- Has mod extension: {modExtension != null}");
 
                 // Check if ThinkTree is properly configured
                 LogNormal($"- Main ThinkTree: {pawn.def.race?.thinkTreeMain?.defName}");
 
                 // Verify if HasAllowWorkTag returns the expected value
-                LogNormal($"- HasAllowWorkTag: {Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def)}");
+                LogNormal($"- HasAllowWorkTag: {Utility_ThinkTreeManager.HasAllowWorkTag(pawn)}");
 
                 // Check think tree status
                 LogNormal($"- Pawn thinker: {pawn.thinker != null}");
@@ -647,8 +646,8 @@ namespace emitbreaker.PawnControl
 
             // Log basic pawn info
             LogNormal($"- Race: {pawn.def.defName}");
-            LogNormal($"- Mod extension: {(Utility_CacheManager.GetModExtension(pawn.def) != null ? "Present" : "Missing")}");
-            LogNormal($"- Work tags: AllowWork={Utility_ThinkTreeManager.HasAllowWorkTag(pawn.def)}, HasBlock={Utility_ThinkTreeManager.HasBlockWorkTag(pawn.def)}");
+            LogNormal($"- Mod extension: {(Utility_UnifiedCache.GetModExtension(pawn.def) != null ? "Present" : "Missing")}");
+            LogNormal($"- Work tags: AllowWork={Utility_ThinkTreeManager.HasAllowWorkTag(pawn)}, HasBlock={Utility_ThinkTreeManager.HasBlockWorkTag(pawn)}");
 
             // Check WorkSettings
             if (pawn.workSettings != null)

@@ -19,7 +19,7 @@ namespace emitbreaker.PawnControl
         /// Whether this job giver requires a designator to operate (zone designation, etc.)
         /// Most cleaning jobs require designators so default is true
         /// </summary>
-        protected override bool RequiresMapZoneorArea => false;
+        public override bool RequiresMapZoneorArea => false;
 
         /// <summary>
         /// Human-readable name for debug logging
@@ -29,7 +29,7 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Update cache every 4 seconds
         /// </summary>
-        protected override int CacheUpdateInterval => 240;
+        protected override int CacheUpdateInterval => base.CacheUpdateInterval;
 
         /// <summary>
         /// Smaller distance thresholds for corpses - prioritize closer ones
