@@ -101,6 +101,8 @@ namespace emitbreaker.PawnControl
         public bool fromXML = false;
         public bool toBeRemoved = false;
 
+        public bool ignoreCapability = true;
+
         // Implementation of IExposable for saving/loading
         public void ExposeData()
         {
@@ -168,6 +170,7 @@ namespace emitbreaker.PawnControl
             Scribe_Values.Look(ref debugMode, "debugMode", false);
             Scribe_Values.Look(ref fromXML, "fromXML", true);
             Scribe_Values.Look(ref toBeRemoved, "toBeRemoved", false);
+            Scribe_Values.Look(ref ignoreCapability, "ignoreCapability", true);
         }
 
         public Dictionary<SkillDef, Passion> SkillPassionDict

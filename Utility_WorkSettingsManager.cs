@@ -2,11 +2,7 @@
 using RimWorld;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
 using Verse;
 
 namespace emitbreaker.PawnControl
@@ -22,29 +18,29 @@ namespace emitbreaker.PawnControl
         /// - Replaces WorkGivers with modded versions, optionally locking the cache.
         /// - Logs detailed debug information in developer mode.
         /// </summary>
-        // Fully initialize a pawn without destroying existing priorities
-        public static void FullInitializePawn(Pawn pawn, bool forceLock = true, string prefix = "PawnControl_", string subtreeDefName = null)
+        public static void InitializePawnWorksetting(Pawn pawn, bool forceLock = true, string subtreeDefName = null)
         {
-            if (pawn == null || pawn.def == null || pawn.def.race == null)
+            if (!Utility_Common.PawnChecker(pawn))
             {
                 return;
             }
 
             // ✅ New Safe Check: Only inject subtree if mainWorkThinkTreeDefName was NOT injected statically
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
 
             if (modExtension == null)
             {
                 return;
             }
 
-            if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def))
+            if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn))
             {
                 return;
             }
 
             // ✅ Ensure WorkSettings exist
             EnsureWorkSettingsInitialized(pawn);
+            EnsureWorkGiversPopulated(pawn);
 
             Utility_DebugManager.LogNormal($"Completed FullInitializePawn for {pawn.LabelShortCap} (forceLock={forceLock})");
 
@@ -74,10 +70,10 @@ namespace emitbreaker.PawnControl
                 if (pawn == null || pawn.def == null || pawn.def.race == null)
                     continue;
 
-                if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def))
+                if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn))
                     continue;
 
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
 
                 if (modExtension == null)
                     continue; // No mod extension found, nothing to do
@@ -85,17 +81,18 @@ namespace emitbreaker.PawnControl
                 // ✅ Skip full reinitialization if pawn already has static ThinkTree assigned
                 if (modExtension != null && !string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
                 {
-                    Utility_DebugManager.LogNormal($"Skipping FullInitialize for {pawn.LabelShortCap} (static ThinkTree '{modExtension.mainWorkThinkTreeDefName}' already assigned).");
+                    if (Utility_DebugManager.ShouldLogDetailed())
+                        Utility_DebugManager.LogNormal($"Skipping InitializePawnWorksetting for {pawn.LabelShortCap} (static ThinkTree '{modExtension.mainWorkThinkTreeDefName}' already assigned).");
                     continue;
                 }
 
                 try
                 {
-                    FullInitializePawn(pawn, forceLock, "PawnControl_", subtreeDefName);
+                    InitializePawnWorksetting(pawn, forceLock, subtreeDefName);
                 }
                 catch (Exception ex)
                 {
-                    Utility_DebugManager.LogWarning($"FullInitializePawn failed for {pawn?.LabelShortCap ?? "unknown pawn"}: {ex.Message}");
+                    Utility_DebugManager.LogWarning($"InitializePawnWorksetting failed for {pawn?.LabelShortCap ?? "unknown pawn"}: {ex.Message}");
                 }
             }
 
@@ -110,7 +107,7 @@ namespace emitbreaker.PawnControl
         {
             if (pawn == null || pawn.workSettings == null)
             {
-                var modExtension = Utility_CacheManager.GetModExtension(pawn?.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn?.def);
                 if (modExtension == null)
                 {
                     return; // No mod extension found, nothing to do
@@ -141,13 +138,13 @@ namespace emitbreaker.PawnControl
                 return;
             }
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return; // No mod extension found, nothing to do
             }
 
-            if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn.def))
+            if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn))
             {
                 return;
             }
@@ -181,7 +178,7 @@ namespace emitbreaker.PawnControl
             {
                 return;
             }
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return; // No mod extension found, nothing to do

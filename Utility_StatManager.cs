@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using RimWorld;
 using Verse;
 
@@ -102,7 +101,7 @@ namespace emitbreaker.PawnControl
             if (pawn == null || pawn.skills == null || pawn.def == null)
                 return result;
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
             if (modExtension == null)
                 return result;
 
@@ -137,7 +136,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void InjectConsolidatedStatHediff(Pawn pawn)
         {
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
 
             if (HasAlreadyInjected(pawn))
             {
@@ -145,7 +144,8 @@ namespace emitbreaker.PawnControl
                 return;
             }
 
-            Utility_DebugManager.LogNormal($"Stat consolidation attempt for {pawn.LabelShort} ({pawn.def?.defName ?? "null"})");
+            if (Utility_DebugManager.ShouldLogDetailed())
+                Utility_DebugManager.LogNormal($"Stat consolidation attempt for {pawn.LabelShort} ({pawn.def?.defName ?? "null"})");
 
             if (pawn == null)
             {
@@ -174,7 +174,8 @@ namespace emitbreaker.PawnControl
             var skillsToCheck = GetSkillsNeedingStatSupport(pawn);
             if (skillsToCheck.Count == 0)
             {
-                Utility_DebugManager.LogNormal($"No skills need stat support for {pawn.LabelShort}");
+                if (Utility_DebugManager.ShouldLogDetailed())
+                    Utility_DebugManager.LogNormal($"No skills need stat support for {pawn.LabelShort}");
                 return;
             }
 
@@ -226,26 +227,43 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void CheckStatHediffDefExists()
         {
-            var hediffDef = DefDatabase<HediffDef>.GetNamed("PawnControl_StatStub", false);
-
+            // Look up the HediffDef by name
+            HediffDef hediffDef = DefDatabase<HediffDef>.GetNamed("PawnControl_StatStub", false);
             if (hediffDef == null)
             {
-                Utility_DebugManager.LogError("CRITICAL ERROR: PawnControl_StatStub HediffDef not found in DefDatabase!");
+                Utility_DebugManager.LogError(
+                    "CRITICAL ERROR: PawnControl_StatStub HediffDef not found in DefDatabase!");
+                return;
             }
-            else
+            Utility_DebugManager.LogNormal(
+                $"PawnControl_StatStub HediffDef found in DefDatabase: {hediffDef.defName}");
+
+            // Manually check for the StatBridge comp
+            bool hasStatBridge = false;
+            List<HediffCompProperties> comps = hediffDef.comps;
+            if (comps != null)
             {
-                Utility_DebugManager.LogNormal($"PawnControl_StatStub HediffDef found in DefDatabase: {hediffDef.defName}");
-
-                // Check if it has the required components
-                if (hediffDef.comps == null || !hediffDef.comps.Any(c => c is HediffCompProperties_StatBridge))
+                for (int i = 0, c = comps.Count; i < c; i++)
                 {
-                    Utility_DebugManager.LogError("PawnControl_StatStub HediffDef is missing HediffCompProperties_StatBridge!");
+                    if (comps[i] is HediffCompProperties_StatBridge)
+                    {
+                        hasStatBridge = true;
+                        break;
+                    }
                 }
+            }
+            if (!hasStatBridge)
+            {
+                Utility_DebugManager.LogError(
+                    "PawnControl_StatStub HediffDef is missing HediffCompProperties_StatBridge!");
+            }
 
-                if (hediffDef.stages == null || hediffDef.stages.Count == 0 || hediffDef.stages[0].statOffsets == null)
-                {
-                    Utility_DebugManager.LogError("PawnControl_StatStub HediffDef has no stages or statOffsets!");
-                }
+            // Existing null/count checks for stages and statOffsets
+            if (hediffDef.stages == null || hediffDef.stages.Count == 0 ||
+                hediffDef.stages[0].statOffsets == null)
+            {
+                Utility_DebugManager.LogError(
+                    "PawnControl_StatStub HediffDef has no stages or statOffsets!");
             }
         }
     }

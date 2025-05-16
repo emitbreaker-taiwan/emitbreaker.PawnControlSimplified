@@ -26,12 +26,17 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void EnsureAllTrackers(Pawn pawn)
         {
+            if (!Utility_Common.RaceDefChecker(pawn.def)) return;
+
+            bool wasTrackerInjected = false;
+
             // equipment
             if (EquipmentField.GetValue(pawn) == null)
             {
                 var eq = new Pawn_EquipmentTracker(pawn);
                 EquipmentField.SetValue(pawn, eq);
                 eq.Notify_PawnSpawned();
+                wasTrackerInjected = true;
             }
 
             // apparel
@@ -39,6 +44,7 @@ namespace emitbreaker.PawnControl
             {
                 var ap = new Pawn_ApparelTracker(pawn);
                 ApparelField.SetValue(pawn, ap);
+                wasTrackerInjected = true;
             }
 
             // inventory
@@ -46,7 +52,12 @@ namespace emitbreaker.PawnControl
             {
                 var inv = new Pawn_InventoryTracker(pawn);
                 InventoryField.SetValue(pawn, inv);
+                wasTrackerInjected = true;
             }
+
+            // Record that this pawn had trackers injected
+            if (wasTrackerInjected)
+                _pawnsWithInjectedTrackers.Add(pawn.thingIDNumber);
         }
 
         /// <summary>
@@ -54,7 +65,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static bool ShouldInjectDrafter(Pawn pawn, NonHumanlikePawnControlExtension modExtension)
         {
-            if (pawn == null || pawn.def == null || pawn.RaceProps == null || pawn.drafter != null)
+            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.drafter != null)
             {
                 return false; // Invalid pawn or missing definitions or already has a drafter
             }
@@ -66,7 +77,7 @@ namespace emitbreaker.PawnControl
 
             // Drafter should be injected if the pawn is valid, has no drafter, and has either
             // the AutoDraftInjection tag or the forceDraftable flag
-            return Utility_TagManager.ForceDraftable(pawn.def);
+            return Utility_TagManager.ForceDraftable(pawn);
         }
 
         /// <summary>
@@ -75,7 +86,7 @@ namespace emitbreaker.PawnControl
         // In Utility_DrafterManager.cs
         public static void EnsureDrafter(Pawn pawn, NonHumanlikePawnControlExtension modExtension, bool isSpawnSetup = false)
         {
-            if (pawn == null || pawn.def == null || pawn.Dead || pawn.Destroyed)
+            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.Dead || pawn.Destroyed)
             {
                 return;
             }
@@ -93,7 +104,8 @@ namespace emitbreaker.PawnControl
 
             // Always add a drafter if forceDraftable is true - log this decision
             bool shouldAddDrafter = modExtension.forceDraftable;
-            Utility_DebugManager.LogNormal($"Should add drafter to {pawn.LabelShort}? {shouldAddDrafter}");
+            if (pawn.Faction == Faction.OfPlayer && Utility_DebugManager.ShouldLogDetailed())
+                Utility_DebugManager.LogNormal($"Should add drafter to {pawn.LabelShort}? {shouldAddDrafter}");
 
             if (!shouldAddDrafter)
             {
@@ -105,7 +117,8 @@ namespace emitbreaker.PawnControl
             {
                 var pawnField = AccessTools.Field(typeof(Pawn_DraftController), "pawn");
                 pawnField?.SetValue(pawn.drafter, pawn);
-                Utility_DebugManager.LogNormal($"Updated existing drafter for {pawn.LabelShort}");
+                if (Utility_DebugManager.ShouldLogDetailed())
+                    Utility_DebugManager.LogNormal($"Updated existing drafter for {pawn.LabelShort}");
                 return;
             }
 
@@ -154,7 +167,7 @@ namespace emitbreaker.PawnControl
                     continue;
                 }
 
-                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                 if (modExtension == null)
                 {
                     continue;
@@ -181,7 +194,7 @@ namespace emitbreaker.PawnControl
         {
             if (Utility_TagManager.HasTag(p.def, "Siege_HoldFire"))
             {
-                var holdFire = Utility_CacheManager.GetDuty("HoldFire");
+                var holdFire = Utility_UnifiedCache.GetDuty("HoldFire");
                 if (holdFire != null)
                 {
                     return holdFire;
@@ -190,7 +203,7 @@ namespace emitbreaker.PawnControl
 
             if (Utility_TagManager.HasTag(p.def, "Siege_ManTurret"))
             {
-                var manTurrets = Utility_CacheManager.GetDuty("ManTurrets");
+                var manTurrets = Utility_UnifiedCache.GetDuty("ManTurrets");
                 if (manTurrets != null)
                 {
                     return manTurrets;
@@ -218,19 +231,13 @@ namespace emitbreaker.PawnControl
             }
 
             bool cleanedAny = false;
-
-            // Get a reference to the tracker fields using reflection
-            var drafterField = AccessTools.Field(typeof(Pawn), "drafter");
-            var equipmentField = AccessTools.Field(typeof(Pawn), "equipment");
-            var apparelField = AccessTools.Field(typeof(Pawn), "apparel");
-            var inventoryField = AccessTools.Field(typeof(Pawn), "inventory");
+            int totalItemsDropped = 0;
 
             // Part 1: Clean up pawns in loaded maps
             if (Find.Maps != null)
             {
                 foreach (Map map in Find.Maps)
                 {
-                    // Safety check for mapPawns
                     if (map?.mapPawns?.AllPawnsSpawned == null) continue;
 
                     foreach (Pawn pawn in map.mapPawns.AllPawnsSpawned)
@@ -242,79 +249,15 @@ namespace emitbreaker.PawnControl
 
                             cleanedAny = true;
 
-                            // 1. Reset think trees back to vanilla for this pawn
+                            // 1. First force drop all items - this ensures items get dropped even if there's an error later
+                            int dropped = ForceDropAllItems(pawn);
+                            totalItemsDropped += dropped;
+
+                            // 2. Reset think trees back to vanilla for this pawn
                             Utility_ThinkTreeManager.ResetThinkTreeToVanilla(pawn);
 
-                            // 2. Remove drafter if present
-                            if (pawn.drafter != null)
-                            {
-                                // Force undraft first to prevent issues
-                                if (pawn.drafter.Drafted)
-                                    pawn.drafter.Drafted = false;
-
-                                // Null out the drafter field
-                                drafterField?.SetValue(pawn, null);
-                            }
-
-                            // Safety check before handling equipment
-                            if (pawn.Map == null) continue;
-
-                            // 3. Handle equipment - drop on ground
-                            if (pawn.equipment != null)
-                            {
-                                List<ThingWithComps> equipmentToMove = pawn.equipment.AllEquipmentListForReading?.ToList() ?? new List<ThingWithComps>();
-                                foreach (ThingWithComps eq in equipmentToMove)
-                                {
-                                    if (eq == null) continue;
-
-                                    pawn.equipment.Remove(eq);
-                                    if (!eq.Destroyed && pawn.Map != null)
-                                    {
-                                        GenDrop.TryDropSpawn(eq, pawn.Position, pawn.Map, ThingPlaceMode.Near, out _);
-                                    }
-                                }
-
-                                // Now null out the equipment field
-                                equipmentField?.SetValue(pawn, null);
-                            }
-
-                            // 4. Handle apparel - drop on ground
-                            if (pawn.apparel != null)
-                            {
-                                List<Apparel> apparelToMove = pawn.apparel.WornApparel?.ToList() ?? new List<Apparel>();
-                                foreach (Apparel ap in apparelToMove)
-                                {
-                                    if (ap == null) continue;
-
-                                    pawn.apparel.Remove(ap);
-                                    if (!ap.Destroyed && pawn.Map != null)
-                                    {
-                                        GenDrop.TryDropSpawn(ap, pawn.Position, pawn.Map, ThingPlaceMode.Near, out _);
-                                    }
-                                }
-
-                                // Now null out the apparel field
-                                apparelField?.SetValue(pawn, null);
-                            }
-
-                            // 5. Handle inventory - drop on ground
-                            if (pawn.inventory != null && pawn.inventory.innerContainer != null)
-                            {
-                                List<Thing> itemsToMove = pawn.inventory.innerContainer.ToList();
-                                foreach (Thing item in itemsToMove)
-                                {
-                                    if (item == null) continue;
-
-                                    pawn.inventory.innerContainer.Remove(item);
-                                    if (!item.Destroyed && pawn.Map != null)
-                                    {
-                                        GenDrop.TryDropSpawn(item, pawn.Position, pawn.Map, ThingPlaceMode.Near, out _);
-                                    }
-                                }
-
-                                // Now null out the inventory field
-                                inventoryField?.SetValue(pawn, null);
-                            }
+                            // 3. Clean up and remove trackers
+                            SafeCleanupTrackers(pawn);
                         }
                         catch (Exception ex)
                         {
@@ -324,7 +267,7 @@ namespace emitbreaker.PawnControl
                 }
             }
 
-            // Part 2: Clean up world pawns (important for main menu and non-spawned pawns)
+            // Part 2: Clean up world pawns (similar pattern)
             if (Find.World?.worldPawns != null)
             {
                 // Get all world pawns of the specified race that are alive
@@ -337,84 +280,19 @@ namespace emitbreaker.PawnControl
                     try
                     {
                         cleanedAny = true;
-                        
-                        // 1. Reset think trees back to vanilla for this pawn
+
+                        // 1. First force drop all items
+                        if (pawn.Spawned && pawn.Map != null)
+                        {
+                            int dropped = ForceDropAllItems(pawn);
+                            totalItemsDropped += dropped;
+                        }
+
+                        // 2. Reset think trees back to vanilla for this pawn
                         Utility_ThinkTreeManager.ResetThinkTreeToVanilla(pawn);
 
-                        // 2. Remove drafter if present
-                        if (pawn.drafter != null)
-                        {
-                            // Force undraft first to prevent issues
-                            if (pawn.drafter.Drafted)
-                                pawn.drafter.Drafted = false;
-
-                            // Null out the drafter field
-                            drafterField?.SetValue(pawn, null);
-                        }
-
-                        // For world pawns not on a map, we just null the trackers
-                        // since we can't drop items on the ground
-                        // Items will stay in the containers until they're properly nulled
-
-                        // Clear equipment tracker
-                        if (pawn.equipment != null)
-                        {
-                            if (pawn.Spawned && pawn.Map != null)
-                            {
-                                // If spawned, move items to the map
-                                List<ThingWithComps> equipmentToMove = pawn.equipment.AllEquipmentListForReading?.ToList() ?? new List<ThingWithComps>();
-                                foreach (ThingWithComps eq in equipmentToMove)
-                                {
-                                    if (eq == null) continue;
-                                    pawn.equipment.Remove(eq);
-
-                                    if (!eq.Destroyed && pawn.Map != null)
-                                        GenDrop.TryDropSpawn(eq, pawn.Position, pawn.Map, ThingPlaceMode.Near, out _);
-                                }
-                            }
-
-                            equipmentField?.SetValue(pawn, null);
-                        }
-
-                        // Clear apparel tracker
-                        if (pawn.apparel != null)
-                        {
-                            if (pawn.Spawned && pawn.Map != null)
-                            {
-                                // If spawned, move items to the map
-                                List<Apparel> apparelToMove = pawn.apparel.WornApparel?.ToList() ?? new List<Apparel>();
-                                foreach (Apparel ap in apparelToMove)
-                                {
-                                    if (ap == null) continue;
-                                    pawn.apparel.Remove(ap);
-
-                                    if (!ap.Destroyed && pawn.Map != null)
-                                        GenDrop.TryDropSpawn(ap, pawn.Position, pawn.Map, ThingPlaceMode.Near, out _);
-                                }
-                            }
-
-                            apparelField?.SetValue(pawn, null);
-                        }
-
-                        // Clear inventory tracker
-                        if (pawn.inventory != null && pawn.inventory.innerContainer != null)
-                        {
-                            if (pawn.Spawned && pawn.Map != null)
-                            {
-                                // If spawned, move items to the map
-                                List<Thing> itemsToMove = pawn.inventory.innerContainer.ToList();
-                                foreach (Thing item in itemsToMove)
-                                {
-                                    if (item == null) continue;
-                                    pawn.inventory.innerContainer.Remove(item);
-
-                                    if (!item.Destroyed && pawn.Map != null)
-                                        GenDrop.TryDropSpawn(item, pawn.Position, pawn.Map, ThingPlaceMode.Near, out _);
-                                }
-                            }
-
-                            inventoryField?.SetValue(pawn, null);
-                        }
+                        // 3. Clean up and remove trackers
+                        SafeCleanupTrackers(pawn);
                     }
                     catch (Exception ex)
                     {
@@ -425,8 +303,295 @@ namespace emitbreaker.PawnControl
 
             if (cleanedAny)
             {
-                Utility_DebugManager.LogNormal($"Cleaned up trackers for race: {raceDef.defName}");
+                Utility_DebugManager.LogNormal($"Cleaned up trackers for race: {raceDef.defName}, dropped {totalItemsDropped} items");
             }
+        }
+
+        // Track which pawns have had trackers injected
+        private static readonly HashSet<int> _pawnsWithInjectedTrackers = new HashSet<int>();
+
+        /// <summary>
+        /// Checks if trackers were previously injected for this pawn
+        /// </summary>
+        public static bool WasTrackerInjected(Pawn pawn)
+        {
+            return pawn != null && _pawnsWithInjectedTrackers.Contains(pawn.thingIDNumber);
+        }
+
+        /// <summary>
+        /// Safely cleans up trackers for a specific pawn, ensuring all inventory is forcibly dropped
+        /// </summary>
+        public static void SafeCleanupTrackers(Pawn pawn)
+        {
+            if (pawn == null) return;
+
+            try
+            {
+                // Track if this pawn had trackers that were injected
+                if (pawn.equipment != null || pawn.apparel != null || pawn.inventory != null)
+                    _pawnsWithInjectedTrackers.Add(pawn.thingIDNumber);
+
+                // Keep track of total items dropped for logging
+                int itemsDropped = 0;
+                Map dropMap = pawn.Map;
+
+                // 1. Handle equipment safely
+                if (pawn.equipment != null)
+                {
+                    List<ThingWithComps> equipmentToMove = pawn.equipment.AllEquipmentListForReading?.ToList() ?? new List<ThingWithComps>();
+
+                    foreach (ThingWithComps eq in equipmentToMove)
+                    {
+                        try
+                        {
+                            if (eq == null) continue;
+
+                            // Remove from equipment tracker
+                            pawn.equipment.Remove(eq);
+
+                            // Drop on ground if possible
+                            if (!eq.Destroyed && dropMap != null)
+                            {
+                                if (GenDrop.TryDropSpawn(eq, pawn.Position, dropMap, ThingPlaceMode.Near, out Thing droppedThing))
+                                {
+                                    itemsDropped++;
+                                    if (Prefs.DevMode)
+                                        Utility_DebugManager.LogNormal($"Dropped equipment {eq.LabelCap} from {pawn.LabelShort}");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Utility_DebugManager.LogError($"Error removing equipment {eq?.LabelCap ?? "unknown"}: {ex}");
+                        }
+                    }
+
+                    // Null out the equipment field
+                    EquipmentField.SetValue(pawn, null);
+                }
+
+                // 2. Handle apparel safely
+                if (pawn.apparel != null)
+                {
+                    List<Apparel> apparelToMove = pawn.apparel.WornApparel?.ToList() ?? new List<Apparel>();
+
+                    foreach (Apparel ap in apparelToMove)
+                    {
+                        try
+                        {
+                            if (ap == null) continue;
+
+                            // Remove from apparel tracker
+                            pawn.apparel.Remove(ap);
+
+                            // Drop on ground if possible
+                            if (!ap.Destroyed && dropMap != null)
+                            {
+                                if (GenDrop.TryDropSpawn(ap, pawn.Position, dropMap, ThingPlaceMode.Near, out Thing droppedThing))
+                                {
+                                    itemsDropped++;
+                                    if (Prefs.DevMode)
+                                        Utility_DebugManager.LogNormal($"Dropped apparel {ap.LabelCap} from {pawn.LabelShort}");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Utility_DebugManager.LogError($"Error removing apparel {ap?.LabelCap ?? "unknown"}: {ex}");
+                        }
+                    }
+
+                    // Null out the apparel field
+                    ApparelField.SetValue(pawn, null);
+                }
+
+                // 3. Handle inventory safely - ensure all items are dropped
+                if (pawn.inventory != null && pawn.inventory.innerContainer != null)
+                {
+                    List<Thing> itemsToMove = pawn.inventory.innerContainer.ToList();
+
+                    foreach (Thing item in itemsToMove)
+                    {
+                        try
+                        {
+                            if (item == null) continue;
+
+                            // Remove from inventory
+                            pawn.inventory.innerContainer.Remove(item);
+
+                            // Drop on ground if possible
+                            if (!item.Destroyed && dropMap != null)
+                            {
+                                if (GenDrop.TryDropSpawn(item, pawn.Position, dropMap, ThingPlaceMode.Near, out Thing droppedThing))
+                                {
+                                    itemsDropped++;
+                                    if (Prefs.DevMode)
+                                        Utility_DebugManager.LogNormal($"Dropped inventory item {item.LabelCap} from {pawn.LabelShort}");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Utility_DebugManager.LogError($"Error removing inventory item {item?.LabelCap ?? "unknown"}: {ex}");
+                        }
+                    }
+
+                    // Null out the inventory field
+                    InventoryField.SetValue(pawn, null);
+                }
+
+                // 4. If we also need to remove the drafter
+                if (pawn.drafter != null)
+                {
+                    // Force undraft first to prevent issues
+                    try
+                    {
+                        if (pawn.drafter.Drafted)
+                            pawn.drafter.Drafted = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        Utility_DebugManager.LogError($"Error unforcing draft state: {ex}");
+                    }
+
+                    // Get the drafter field via reflection
+                    try
+                    {
+                        var drafterField = AccessTools.Field(typeof(Pawn), "drafter");
+                        drafterField?.SetValue(pawn, null);
+                    }
+                    catch (Exception ex)
+                    {
+                        Utility_DebugManager.LogError($"Error removing drafter: {ex}");
+                    }
+                }
+
+                // Log total items dropped
+                if (itemsDropped > 0)
+                {
+                    Utility_DebugManager.LogNormal($"Successfully dropped {itemsDropped} items from {pawn.LabelShort} during tracker cleanup");
+                }
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error in SafeCleanupTrackers for {pawn.LabelShort}: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Forcibly drops all carried items from a pawn onto the ground, regardless of tracker state
+        /// </summary>
+        public static int ForceDropAllItems(Pawn pawn)
+        {
+            if (pawn == null || pawn.Dead || pawn.Destroyed)
+                return 0;
+
+            int itemsDropped = 0;
+            Map dropMap = pawn.Map;
+
+            // Can't drop items if not on a map
+            if (dropMap == null)
+                return 0;
+
+            try
+            {
+                // 1. Drop equipment first
+                if (pawn.equipment != null)
+                {
+                    List<ThingWithComps> equipment = pawn.equipment.AllEquipmentListForReading?.ToList() ?? new List<ThingWithComps>();
+                    foreach (ThingWithComps eq in equipment)
+                    {
+                        if (eq == null) continue;
+
+                        try
+                        {
+                            pawn.equipment.Remove(eq);
+                            if (!eq.Destroyed && GenDrop.TryDropSpawn(eq, pawn.Position, dropMap, ThingPlaceMode.Near, out _))
+                                itemsDropped++;
+                        }
+                        catch { }  // Silently continue on individual item errors
+                    }
+                }
+
+                // 2. Drop apparel 
+                if (pawn.apparel != null)
+                {
+                    List<Apparel> apparel = pawn.apparel.WornApparel?.ToList() ?? new List<Apparel>();
+                    foreach (Apparel ap in apparel)
+                    {
+                        if (ap == null) continue;
+
+                        try
+                        {
+                            pawn.apparel.Remove(ap);
+                            if (!ap.Destroyed && GenDrop.TryDropSpawn(ap, pawn.Position, dropMap, ThingPlaceMode.Near, out _))
+                                itemsDropped++;
+                        }
+                        catch { }  // Silently continue on individual item errors
+                    }
+                }
+
+                // 3. Drop inventory items
+                if (pawn.inventory?.innerContainer != null)
+                {
+                    List<Thing> items = pawn.inventory.innerContainer.ToList();
+                    foreach (Thing item in items)
+                    {
+                        if (item == null) continue;
+
+                        try
+                        {
+                            pawn.inventory.innerContainer.Remove(item);
+                            if (!item.Destroyed && GenDrop.TryDropSpawn(item, pawn.Position, dropMap, ThingPlaceMode.Near, out _))
+                                itemsDropped++;
+                        }
+                        catch { }  // Silently continue on individual item errors
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error in ForceDropAllItems for {pawn.LabelShort}: {ex}");
+            }
+
+            return itemsDropped;
+        }
+
+        /// <summary>
+        /// Forces a specific pawn to drop all items and removes all trackers
+        /// For just in case.
+        /// </summary>
+        public static void PurgeAllTrackersAndDropItems(Pawn pawn)
+        {
+            if (pawn == null || pawn.Dead || pawn.Destroyed)
+                return;
+
+            try
+            {
+                // 1. Force drop all items first
+                int itemsDropped = ForceDropAllItems(pawn);
+
+                // 2. Reset think tree if needed
+                Utility_ThinkTreeManager.ResetThinkTreeToVanilla(pawn);
+
+                // 3. Clean up trackers
+                SafeCleanupTrackers(pawn);
+
+                // Log result
+                Utility_DebugManager.LogNormal($"Purged all trackers and dropped {itemsDropped} items from {pawn.LabelShort}");
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error in PurgeAllTrackersAndDropItems for {pawn.LabelShort}: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Reset tracker tracking data
+        /// </summary>
+        public static void ResetTrackerTracking()
+        {
+            _pawnsWithInjectedTrackers.Clear();
         }
     }
 }

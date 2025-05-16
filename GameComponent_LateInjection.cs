@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using UnityEngine;
 using Verse;
 using Verse.Noise;
 using static emitbreaker.PawnControl.HarmonyPatches;
@@ -17,17 +18,51 @@ namespace emitbreaker.PawnControl
     {
         private bool drafterAlreadyInjected = false;
         private bool cleanupDone = false;
+        private int lastCacheMaintenanceTick = 0;
+        private const int cacheMaintenanceInterval = 2000; // Every 2000 ticks (~33 seconds)
 
-        public GameComponent_LateInjection(Game game) 
+        public GameComponent_LateInjection(Game game)
         {
+        }
+
+        public override void StartedNewGame()
+        {
+            base.StartedNewGame();
+
+            // Clear all caches when starting a new game
+            Utility_MapCacheManager.ClearAllCaches();
+            Utility_UnifiedCache.Clear(); // Use the unified cache
+            ResetAllCaches(resetMode: "NewGame");
+
+            // Clean up any runtime mod extensions to start fresh
+            Utility_UnifiedCache.CleanupRuntimeModExtensions(); // Use the unified cache method
+        }
+
+        public override void LoadedGame()
+        {
+            base.LoadedGame();
+            Utility_JobGiverRegistry.RegisterAllJobGivers();
+
+            // Initial calculation of tick groups based on colony size
+            Utility_JobGiverSchedulingManager.RecalculateTickGroups();
+
+            // Clear all caches when loading a saved game
+            Utility_MapCacheManager.ClearAllCaches();
+            Utility_UnifiedCache.Clear(); // Use the unified cache
+            ResetAllCaches(resetMode: "LoadedGame");
         }
 
         public override void GameComponentTick()
         {
             if (drafterAlreadyInjected && Utility_IdentityManager.identityFlagsPreloaded && cleanupDone)
             {
+                // Perform periodic cache maintenance to prevent memory leaks
+                PerformPeriodicCacheMaintenance();
                 return;
             }
+
+            // Recalculate periodically - the manager handles frequency internally
+            Utility_JobGiverSchedulingManager.RecalculateTickGroups();
 
             if (Find.TickManager.TicksGame < 200)
             {
@@ -36,8 +71,9 @@ namespace emitbreaker.PawnControl
 
             if (!Utility_IdentityManager.identityFlagsPreloaded)
             {
-
+                // Identity flags will be loaded elsewhere
             }
+
             if (!drafterAlreadyInjected)
             {
                 InjectDraftersSafely();
@@ -45,14 +81,137 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Called when game is being saved.
+        /// Performs periodic maintenance on caches to ensure they don't grow too large
         /// </summary>
-        public override void GameComponentOnGUI()
+        private void PerformPeriodicCacheMaintenance()
         {
-            base.GameComponentOnGUI();
+            int currentTick = Find.TickManager.TicksGame;
 
-            // This is a good spot to ensure cache is clean before saving
-            JobGiver_WorkNonHumanlike.ResetCache();
+            // Only run maintenance on a fixed interval to avoid performance impact
+            if (currentTick - lastCacheMaintenanceTick < cacheMaintenanceInterval)
+                return;
+
+            lastCacheMaintenanceTick = currentTick;
+
+            try
+            {
+                // Clean up any invalid entries in the reachability cache
+                CleanupInvalidReachabilityCacheEntries();
+
+                // The unified cache system handles its own maintenance
+                // but we can still clean up specific things that need game logic
+
+                // Clean job caches for non-existent things
+                CleanupStaleJobCaches();
+
+                // Prune extension caches for races no longer in use
+                CleanupUnusedRaceExtensionCaches();
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error during cache maintenance: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Clean up any invalid cached reachability results
+        /// </summary>
+        private void CleanupInvalidReachabilityCacheEntries()
+        {
+            // We don't have direct access to the internal dictionary in the generic class
+            // Instead we'll provide a utility method that each job giver can call
+
+            // Signal to all maps that they should check for cleanup
+            if (Find.Maps != null)
+            {
+                foreach (var map in Find.Maps)
+                {
+                    // Invalidate any reachability results for despawned things
+                    Utility_TargetPrefilteringManager.CleanupInvalidTargetsForMap(map);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Clean up any stale job caches for things that no longer exist
+        /// </summary>
+        private void CleanupStaleJobCaches()
+        {
+            // Clean cached jobs for things that are no longer valid
+            var invalidEntries = Utility_UnifiedCache.JobCache
+                .Where(kvp => kvp.Key == null || !kvp.Key.Spawned || kvp.Key.Destroyed)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in invalidEntries)
+            {
+                Utility_UnifiedCache.JobCache.Remove(key);
+            }
+
+            if (invalidEntries.Count > 0 && Prefs.DevMode)
+            {
+                Utility_DebugManager.LogNormal($"Cleaned up {invalidEntries.Count} stale job cache entries");
+            }
+        }
+
+        /// <summary>
+        /// Clean up extension caches for races that are no longer in use
+        /// </summary>
+        private void CleanupUnusedRaceExtensionCaches()
+        {
+            // This is mostly a memory optimization
+            // Only perform if we have a lot of cached extensions
+            if (Utility_UnifiedCache.ModExtensions.Count > 50)
+            {
+                // Find races that aren't currently spawned on any map
+                var usedRaces = new HashSet<ThingDef>();
+
+                // Get all currently spawned pawn races
+                if (Find.Maps != null)
+                {
+                    foreach (var map in Find.Maps)
+                    {
+                        foreach (var pawn in map.mapPawns.AllPawnsSpawned)
+                        {
+                            if (pawn?.def != null)
+                                usedRaces.Add(pawn.def);
+                        }
+                    }
+                }
+
+                // Also check world pawns
+                if (Find.World?.worldPawns?.AllPawnsAliveOrDead != null)
+                {
+                    foreach (var pawn in Find.World.worldPawns.AllPawnsAliveOrDead)
+                    {
+                        if (pawn?.def != null)
+                            usedRaces.Add(pawn.def);
+                    }
+                }
+
+                // Find extension cache entries for races not currently in use
+                var unusedExtensionDefs = Utility_UnifiedCache.ModExtensions.Keys
+                    .Where(def => !usedRaces.Contains(def))
+                    .ToList();
+
+                // Only clean up if we have a significant number of unused entries
+                if (unusedExtensionDefs.Count > 20)
+                {
+                    int removed = 0;
+
+                    // Remove a portion of the unused entries (not all, in case they're needed soon)
+                    foreach (var def in unusedExtensionDefs.Take(unusedExtensionDefs.Count / 2))
+                    {
+                        Utility_UnifiedCache.ModExtensions.Remove(def);
+                        removed++;
+                    }
+
+                    if (Prefs.DevMode)
+                    {
+                        Utility_DebugManager.LogNormal($"Cleaned up {removed} unused mod extension caches");
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -68,6 +227,8 @@ namespace emitbreaker.PawnControl
             // Restore runtime mod extensions from this save file
             RestoreRuntimeModExtensions();
 
+            Utility_JobGiverManager.ResetRegistry();
+
             // Ensure all modded pawns have their stat injections applied
             Utility_StatManager.CheckStatHediffDefExists();
 
@@ -75,17 +236,49 @@ namespace emitbreaker.PawnControl
             HarmonyPatches.Patch_Debuggers.Patch_ThinkNode_PrioritySorter_DebugJobs.ResetCache();
             HarmonyPatches.Patch_Debuggers.Patch_Pawn_SpawnSetup_DumpThinkTree.ResetCache();
 
-            // Reset caches to ensure no stale data is present
-            ResetAllCache();
+            // Reset all caches to ensure no stale data is present
+            ResetAllCaches(resetMode: "FinalizeInit");
 
             // Explicitly invalidate the colonist-like cache for all maps
             if (Find.Maps != null)
             {
                 foreach (Map map in Find.Maps)
                 {
-                    Utility_CacheManager.InvalidateColonistLikeCache(map);
+                    Utility_UnifiedCache.InvalidateColonistCache(map); // Use the unified cache
                 }
             }
+        }
+
+        /// <summary>
+        /// Resets all caches with optional diagnostics based on reset mode
+        /// </summary>
+        /// <param name="resetMode">When the reset is happening (FinalizeInit, NewGame, LoadedGame)</param>
+        private void ResetAllCaches(string resetMode)
+        {
+            // Core reset using the unified cache
+            Utility_UnifiedCache.Clear();
+
+            // Reset other specialized subsystems
+            Utility_DrafterManager.ResetTrackerTracking();
+            Utility_ThinkTreeManager.ResetCache();
+
+            // Reset global system caches that aren't part of the unified system
+            Utility_JobGiverTickManager.ResetAll();
+            Utility_TargetPrefilteringManager.ResetAllCaches();
+            Utility_PathfindingManager.ResetAllCaches();
+            Utility_GlobalStateManager.ResetAllData();
+            Utility_JobGiverCacheManager<Thing>.Reset();
+
+            // Initialize work settings for all maps
+            if (Find.Maps != null)
+            {
+                foreach (var map in Find.Maps)
+                {
+                    Utility_WorkSettingsManager.FullInitializeAllEligiblePawns(map, forceLock: true);
+                }
+            }
+
+            Utility_DebugManager.LogNormal($"Reset all job caches for {resetMode}");
         }
 
         private void ProcessPendingRemovals()
@@ -96,7 +289,7 @@ namespace emitbreaker.PawnControl
                 List<ThingDef> defsToProcess = new List<ThingDef>();
 
                 // Find races with mod extensions marked for removal from the cache
-                foreach (var cacheEntry in Utility_CacheManager._modExtensionCache.ToList())
+                foreach (var cacheEntry in Utility_UnifiedCache.ModExtensions.ToList())
                 {
                     ThingDef def = cacheEntry.Key;
                     NonHumanlikePawnControlExtension modExtension = cacheEntry.Value;
@@ -146,7 +339,7 @@ namespace emitbreaker.PawnControl
                     }
 
                     // Clear the cached extension for this def
-                    Utility_CacheManager.ClearModExtensionCachePerInstance(def);
+                    Utility_UnifiedCache.ClearModExtension(def);
 
                     // Clear race-specific tag caches
                     Utility_TagManager.ClearCacheForRace(def);
@@ -207,106 +400,16 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        private void ResetAllCache()
-        {            
-            // Clear work status caches on initialization
-            Utility_TagManager.ResetCache();
-            Utility_ThinkTreeManager.ResetCache();
-
-            Utility_CacheManager._bioTabVisibilityCache.Clear();
-
-            // General job giver caches
-            JobGiver_WorkNonHumanlike.ResetCache();
-
-            // Plant cutting job givers
-            JobGiver_PlantsCut_PawnControl.ResetCache();
-            JobGiver_ExtractTree_PawnControl.ResetCache();
-
-            // Growing job givers
-            JobGiver_GrowerHarvest_PawnControl.ResetCache();
-            JobGiver_GrowerSow_PawnControl.ResetCache();
-            JobGiver_Replant_PawnControl.ResetCache();
-
-            // Fire Fighting job givers
-            JobGiver_FightFires_PawnControl.ResetCache();
-
-            // Doctor job givers
-            JobGiver_FeedPatient_PawnControl.ResetCache();
-
-            // Construction job givers
-            JobGiver_Deconstruct_PawnControl.ResetCache();
-            JobGiver_Uninstall_PawnControl.ResetCache();
-            JobGiver_FixBrokenDownBuilding_PawnControl.ResetCache();
-            JobGiver_ConstructDeliverResourcesToBlueprints_Construction_PawnControl.ResetCache();
-            JobGiver_ConstructDeliverResourcesToFrames_Construction_PawnControl.ResetCache();
-            JobGiver_BuildRoof_PawnControl.ResetCache();
-            JobGiver_RemoveRoof_PawnControl.ResetCache();
-            JobGiver_ConstructFinishFrames_PawnControl.ResetCache();
-            JobGiver_Repair_PawnControl.ResetCache();
-            JobGiver_SmoothFloor_PawnControl.ResetCache();
-            JobGiver_RemoveFloor_PawnControl.ResetCache();
-            JobGiver_SmoothWall_PawnControl.ResetCache();
-
-            // Cleaning job givers
-            JobGiver_CleanFilth_PawnControl.ResetCache();
-            JobGiver_ClearSnow_PawnControl.ResetCache();
-
-            // Basic worker job givers
-            JobGiver_Flick_PawnControl.ResetCache();
-            JobGiver_Open_PawnControl.ResetCache();
-            JobGiver_ExtractSkull_PawnControl.ResetCache();
-
-            // Warden job givers
-            JobGiver_Warden_DoExecution_PawnControl.ResetCache();
-            JobGiver_Warden_ExecuteGuilty_PawnControl.ResetCache();
-            JobGiver_Warden_ReleasePrisoner_PawnControl.ResetCache();
-            JobGiver_Warden_TakeToBed_PawnControl.ResetCache();
-            JobGiver_Warden_Feed_PawnControl.ResetCache();
-            JobGiver_Warden_DeliverFood_PawnControl.ResetCache();
-            JobGiver_Warden_Chat_PawnControl.ResetCache();
-
-            // Handling job givers
-            JobGiver_Tame_PawnControl.ResetCache();
-            JobGiver_Train_PawnControl.ResetCache();
-            JobGiver_TakeRoamingToPen_PawnControl.ResetCache();
-            JobGiver_RebalanceAnimalsInPens_PawnControl.ResetCache();
-            JobGiver_Slaughter_PawnControl.ResetCache();
-            JobGiver_ReleaseAnimalToWild_PawnControl.ResetCache();
-            JobGiver_Milk_PawnControl.ResetCache();
-            JobGiver_Shear_PawnControl.ResetCache();
-
-            // Hauling job givers
-            JobGiver_EmptyEggBox_PawnControl.ResetCache();
-            JobGiver_Merge_PawnControl.ResetCache();
-            JobGiver_ConstructDeliverResourcesToBlueprints_Hauling_PawnControl.ResetCache();
-            JobGiver_ConstructDeliverResourcesToFrames_Hauling_PawnControl.ResetCache();
-            JobGiver_HaulGeneral_PawnControl.ResetCache();
-            JobGiver_FillFermentingBarrel_PawnControl.ResetCache();
-            JobGiver_TakeBeerOutOfBarrel_PawnControl.ResetCache();
-            JobGiver_HaulCampfire_PawnControl.ResetCache();
-            JobGiver_Cremate_PawnControl.ResetCache();
-            JobGiver_HaulCorpses_PawnControl.ResetCache();
-            JobGiver_Strip_PawnControl.ResetCache();
-            JobGiver_HaulToPortal_PawnControl.ResetCache();
-            JobGiver_LoadTransporters_PawnControl.ResetCache();
-            JobGiver_GatherItemsForCaravan_PawnControl.ResetCache();
-            JobGiver_UnloadCarriers_PawnControl.ResetCache();
-            JobGiver_Refuel_PawnControl.ResetCache();
-            JobGiver_Refuel_Turret_PawnControl.ResetCache();
-
-            Utility_DebugManager.LogNormal("Cleared job cache on game load");
-        }
-
         private void InjectDraftersSafely()
         {
             foreach (var map in Find.Maps)
             {
                 Utility_DrafterManager.InjectDraftersIntoMapPawns(map);
-                
+
                 // Now give every non-human pawn its equipment/apparel/inventory
                 foreach (var pawn in map.mapPawns.AllPawnsSpawned)
                 {
-                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
                     if (modExtension == null || pawn.RaceProps.Humanlike)
                     {
                         continue;
@@ -317,7 +420,7 @@ namespace emitbreaker.PawnControl
                         continue;
                     }
 
-                    Utility_DrafterManager.EnsureAllTrackers(pawn); 
+                    Utility_DrafterManager.EnsureAllTrackers(pawn);
                 }
             }
 
@@ -332,8 +435,15 @@ namespace emitbreaker.PawnControl
         {
             base.ExposeData();
 
+            // Reset tracker data after loading
+            if (Scribe.mode == LoadSaveMode.LoadingVars)
+            {
+                Utility_DrafterManager.ResetTrackerTracking();
+            }
+
             Scribe_Values.Look(ref drafterAlreadyInjected, "drafterAlreadyInjected", false);
             Scribe_Values.Look(ref cleanupDone, "cleanupDone", false);
+            Scribe_Values.Look(ref lastCacheMaintenanceTick, "lastCacheMaintenanceTick", 0);
 
             // Save/load the runtime mod extensions with this save file
             Scribe_Collections.Look(ref runtimeModExtensions, "runtimeModExtensions", LookMode.Deep);
@@ -414,8 +524,8 @@ namespace emitbreaker.PawnControl
                     record.extension.CacheSkillPassions();
 
                     // Update the cache for this def
-                    Utility_CacheManager.ClearModExtensionCachePerInstance(def);
-                    Utility_CacheManager.PreloadModExtensionForRace(def);
+                    Utility_UnifiedCache.ClearModExtension(def);
+                    Utility_UnifiedCache.PreloadModExtensionForRace(def);
 
                     // Apply to existing pawns
                     ApplyExtensionToExistingPawns(def, record.extension);
@@ -551,443 +661,3 @@ namespace emitbreaker.PawnControl
         }
     }
 }
-//using HarmonyLib;
-//using RimWorld;
-//using System;
-//using System.Collections.Generic;
-//using System.Linq;
-//using System.Reflection;
-//using System.Text;
-//using System.Threading.Tasks;
-//using Verse;
-//using Verse.Noise;
-//using static emitbreaker.PawnControl.HarmonyPatches;
-//using static System.Net.Mime.MediaTypeNames;
-
-//namespace emitbreaker.PawnControl
-//{
-//    public class GameComponent_LateInjection : GameComponent
-//    {
-//        private bool drafterAlreadyInjected = false;
-//        private bool cleanupDone = false;
-
-//        public GameComponent_LateInjection(Game game)
-//        {
-//        }
-
-//        public override void GameComponentTick()
-//        {
-//            if (drafterAlreadyInjected && Utility_IdentityManager.identityFlagsPreloaded && cleanupDone)
-//            {
-//                return;
-//            }
-
-//            if (Find.TickManager.TicksGame < 200)
-//            {
-//                return;
-//            }
-
-//            if (!Utility_IdentityManager.identityFlagsPreloaded)
-//            {
-
-//            }
-//            if (!drafterAlreadyInjected)
-//            {
-//                InjectDraftersSafely();
-//            }
-//        }
-
-//        /// <summary>
-//        /// Called when game is being saved.
-//        /// </summary>
-//        public override void GameComponentOnGUI()
-//        {
-//            base.GameComponentOnGUI();
-
-//            // This is a good spot to ensure cache is clean before saving
-//            JobGiver_WorkNonHumanlike.ResetCache();
-//        }
-
-//        /// <summary>
-//        /// Called when a game is loaded.
-//        /// </summary>
-//        public override void FinalizeInit()
-//        {
-//            base.FinalizeInit();
-
-//            // Process any pending removals first
-//            ProcessPendingRemovals();
-
-//            // Ensure all modded pawns have their stat injections applied
-//            Utility_StatManager.CheckStatHediffDefExists();
-
-//            // Clear debug patch caches
-//            HarmonyPatches.Patch_Debuggers.Patch_ThinkNode_PrioritySorter_DebugJobs.ResetCache();
-//            HarmonyPatches.Patch_Debuggers.Patch_Pawn_SpawnSetup_DumpThinkTree.ResetCache();
-
-//            // Reset caches to ensure no stale data is present
-//            ResetAllCache();
-
-//            // Explicitly invalidate the colonist-like cache for all maps
-//            if (Find.Maps != null)
-//            {
-//                foreach (Map map in Find.Maps)
-//                {
-//                    Utility_CacheManager.InvalidateColonistLikeCache(map);
-//                }
-//            }
-//        }
-
-//        private void ProcessPendingRemovals()
-//        {
-//            try
-//            {
-//                int removed = 0;
-//                List<ThingDef> defsToProcess = new List<ThingDef>();
-
-//                // Find races with mod extensions marked for removal from the cache
-//                foreach (var cacheEntry in Utility_CacheManager._modExtensionCache.ToList())
-//                {
-//                    ThingDef def = cacheEntry.Key;
-//                    NonHumanlikePawnControlExtension modExtension = cacheEntry.Value;
-
-//                    // Skip null defs or extensions
-//                    if (def == null || modExtension == null) continue;
-
-//                    // Check if the extension is marked for removal
-//                    if (modExtension.toBeRemoved)
-//                    {
-//                        // Add to the processing list
-//                        defsToProcess.Add(def);
-//                    }
-//                }
-
-//                // Process each def with pending removals
-//                foreach (ThingDef def in defsToProcess)
-//                {
-//                    if (def?.modExtensions == null) continue;
-
-//                    // Clean up trackers before removing the extension
-//                    Utility_DrafterManager.CleanupTrackersForRace(def);
-
-//                    // Find the extension to get original think trees before removal
-//                    NonHumanlikePawnControlExtension extToRemove = null;
-//                    for (int i = def.modExtensions.Count - 1; i >= 0; i--)
-//                    {
-//                        if (def.modExtensions[i] is NonHumanlikePawnControlExtension ext && ext.toBeRemoved)
-//                        {
-//                            extToRemove = ext;
-//                            break;
-//                        }
-//                    }
-
-//                    // Store original think tree info before removal
-//                    string originalMainTree = extToRemove?.originalMainWorkThinkTreeDefName;
-//                    string originalConstTree = extToRemove?.originalConstantThinkTreeDefName;
-
-//                    // Remove the extensions marked for removal
-//                    for (int i = def.modExtensions.Count - 1; i >= 0; i--)
-//                    {
-//                        if (def.modExtensions[i] is NonHumanlikePawnControlExtension ext && ext.toBeRemoved)
-//                        {
-//                            def.modExtensions.RemoveAt(i);
-//                            removed++;
-//                        }
-//                    }
-
-//                    // Clear the cached extension for this def
-//                    Utility_CacheManager.ClearModExtensionCachePerInstance(def);
-
-//                    // Clear race-specific tag caches
-//                    Utility_TagManager.ClearCacheForRace(def);
-
-//                    // Use existing method to restore think trees for all pawns of this race
-//                    RestoreThinkTreesForAllPawns(def, originalMainTree, originalConstTree);
-//                }
-
-//                if (removed > 0)
-//                {
-//                    Utility_DebugManager.LogNormal($"Removed {removed} mod extensions that were marked for removal");
-//                }
-//            }
-//            catch (Exception ex)
-//            {
-//                Utility_DebugManager.LogError($"Error processing mod extension removals: {ex}");
-//            }
-//        }
-
-//        private void RestoreThinkTreesForAllPawns(ThingDef raceDef, string originalMainTree, string originalConstTree)
-//        {
-//            if (raceDef == null || Find.Maps == null) return;
-
-//            int updated = 0;
-
-//            // Process all maps
-//            foreach (Map map in Find.Maps)
-//            {
-//                if (map?.mapPawns?.AllPawnsSpawned == null) continue;
-
-//                foreach (Pawn pawn in map.mapPawns.AllPawnsSpawned)
-//                {
-//                    if (pawn?.def != raceDef || pawn.Dead || pawn.Destroyed) continue;
-
-//                    // Use the existing utility method to restore think trees
-//                    Utility_ThinkTreeManager.ResetThinkTreeToVanilla(pawn, originalMainTree, originalConstTree);
-//                    updated++;
-//                }
-//            }
-
-//            // Also process world pawns
-//            if (Find.World?.worldPawns?.AllPawnsAliveOrDead != null)
-//            {
-//                List<Pawn> worldPawns = Find.World.worldPawns.AllPawnsAliveOrDead
-//                    .Where(p => p != null && !p.Dead && p.def == raceDef)
-//                    .ToList();
-
-//                foreach (Pawn pawn in worldPawns)
-//                {
-//                    Utility_ThinkTreeManager.ResetThinkTreeToVanilla(pawn, originalMainTree, originalConstTree);
-//                    updated++;
-//                }
-//            }
-
-//            if (updated > 0)
-//            {
-//                Utility_DebugManager.LogNormal($"Reset think trees for {updated} pawns of race {raceDef.defName}");
-//            }
-//        }
-
-//        private void ResetAllCache()
-//        {
-//            // Clear work status caches on initialization
-//            Utility_TagManager.ResetCache();
-//            Utility_ThinkTreeManager.ResetCache();
-
-//            Utility_CacheManager._bioTabVisibilityCache.Clear();
-
-//            // General job giver caches
-//            JobGiver_WorkNonHumanlike.ResetCache();
-
-//            // Plant cutting job givers
-//            JobGiver_PlantsCut_PawnControl.ResetCache();
-//            JobGiver_ExtractTree_PawnControl.ResetCache();
-
-//            // Growing job givers
-//            JobGiver_GrowerHarvest_PawnControl.ResetCache();
-//            JobGiver_GrowerSow_PawnControl.ResetCache();
-//            JobGiver_Replant_PawnControl.ResetCache();
-
-//            // Fire Fighting job givers
-//            JobGiver_FightFires_PawnControl.ResetCache();
-
-//            // Doctor job givers
-//            JobGiver_FeedPatient_PawnControl.ResetCache();
-
-//            // Construction job givers
-//            JobGiver_Deconstruct_PawnControl.ResetCache();
-//            JobGiver_Uninstall_PawnControl.ResetCache();
-//            JobGiver_FixBrokenDownBuilding_PawnControl.ResetCache();
-//            JobGiver_ConstructDeliverResourcesToBlueprints_Construction_PawnControl.ResetCache();
-//            JobGiver_ConstructDeliverResourcesToFrames_Construction_PawnControl.ResetCache();
-//            JobGiver_BuildRoof_PawnControl.ResetCache();
-//            JobGiver_RemoveRoof_PawnControl.ResetCache();
-//            JobGiver_ConstructFinishFrames_PawnControl.ResetCache();
-//            JobGiver_Repair_PawnControl.ResetCache();
-//            JobGiver_SmoothFloor_PawnControl.ResetCache();
-//            JobGiver_RemoveFloor_PawnControl.ResetCache();
-//            JobGiver_SmoothWall_PawnControl.ResetCache();
-
-//            // Cleaning job givers
-//            JobGiver_CleanFilth_PawnControl.ResetCache();
-//            JobGiver_ClearSnow_PawnControl.ResetCache();
-
-//            // Basic worker job givers
-//            JobGiver_Flick_PawnControl.ResetCache();
-//            JobGiver_Open_PawnControl.ResetCache();
-//            JobGiver_ExtractSkull_PawnControl.ResetCache();
-
-//            // Warden job givers
-//            JobGiver_Warden_DoExecution_PawnControl.ResetCache();
-//            JobGiver_Warden_ExecuteGuilty_PawnControl.ResetCache();
-//            JobGiver_Warden_ReleasePrisoner_PawnControl.ResetCache();
-//            JobGiver_Warden_TakeToBed_PawnControl.ResetCache();
-//            JobGiver_Warden_Feed_PawnControl.ResetCache();
-//            JobGiver_Warden_DeliverFood_PawnControl.ResetCache();
-//            JobGiver_Warden_Chat_PawnControl.ResetCache();
-
-//            // Handling job givers
-//            JobGiver_Tame_PawnControl.ResetCache();
-//            JobGiver_Train_PawnControl.ResetCache();
-//            JobGiver_TakeRoamingToPen_PawnControl.ResetCache();
-//            JobGiver_RebalanceAnimalsInPens_PawnControl.ResetCache();
-//            JobGiver_Slaughter_PawnControl.ResetCache();
-//            JobGiver_ReleaseAnimalToWild_PawnControl.ResetCache();
-//            JobGiver_Milk_PawnControl.ResetCache();
-//            JobGiver_Shear_PawnControl.ResetCache();
-
-//            // Hauling job givers
-//            JobGiver_EmptyEggBox_PawnControl.ResetCache();
-//            JobGiver_Merge_PawnControl.ResetCache();
-//            JobGiver_ConstructDeliverResourcesToBlueprints_Hauling_PawnControl.ResetCache();
-//            JobGiver_ConstructDeliverResourcesToFrames_Hauling_PawnControl.ResetCache();
-//            JobGiver_HaulGeneral_PawnControl.ResetCache();
-//            JobGiver_FillFermentingBarrel_PawnControl.ResetCache();
-//            JobGiver_TakeBeerOutOfBarrel_PawnControl.ResetCache();
-//            JobGiver_HaulCampfire_PawnControl.ResetCache();
-//            JobGiver_Cremate_PawnControl.ResetCache();
-//            JobGiver_HaulCorpses_PawnControl.ResetCache();
-//            JobGiver_Strip_PawnControl.ResetCache();
-//            JobGiver_HaulToPortal_PawnControl.ResetCache();
-//            JobGiver_LoadTransporters_PawnControl.ResetCache();
-//            JobGiver_GatherItemsForCaravan_PawnControl.ResetCache();
-//            JobGiver_UnloadCarriers_PawnControl.ResetCache();
-//            JobGiver_Refuel_PawnControl.ResetCache();
-//            JobGiver_Refuel_Turret_PawnControl.ResetCache();
-
-//            Utility_DebugManager.LogNormal("Cleared job cache on game load");
-//        }
-
-//        private void InjectDraftersSafely()
-//        {
-//            foreach (var map in Find.Maps)
-//            {
-//                Utility_DrafterManager.InjectDraftersIntoMapPawns(map);
-
-//                // Now give every non-human pawn its equipment/apparel/inventory
-//                foreach (var pawn in map.mapPawns.AllPawnsSpawned)
-//                {
-//                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-//                    if (modExtension == null || pawn.RaceProps.Humanlike)
-//                    {
-//                        continue;
-//                    }
-
-//                    if (pawn.drafter == null)
-//                    {
-//                        continue;
-//                    }
-
-//                    Utility_DrafterManager.EnsureAllTrackers(pawn);
-//                }
-//            }
-
-//            drafterAlreadyInjected = true; // Set after all maps processed
-//        }
-
-//        // Add this field to GameComponent_LateInjection
-//        private List<RuntimeModExtensionRecord> runtimeModExtensions = new List<RuntimeModExtensionRecord>();
-
-//        // Add this method to save runtime extensions before saving
-//        public override void ExposeData()
-//        {
-//            base.ExposeData();
-
-//            // When saving, collect all runtime mod extensions
-//            if (Scribe.mode == LoadSaveMode.Saving)
-//            {
-//                CollectRuntimeModExtensions();
-//            }
-
-//            // Save/load the runtime extensions
-//            Scribe_Collections.Look(ref runtimeModExtensions, "runtimeModExtensions", LookMode.Deep);
-
-//            // When loading, apply the saved extensions
-//            if (Scribe.mode == LoadSaveMode.PostLoadInit)
-//            {
-//                RestoreRuntimeModExtensions();
-//            }
-//        }
-
-//        // Collect all runtime-added mod extensions for saving
-//        private void CollectRuntimeModExtensions()
-//        {
-//            runtimeModExtensions = new List<RuntimeModExtensionRecord>();
-
-//            foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
-//            {
-//                if (def?.modExtensions == null) continue;
-
-//                foreach (DefModExtension extension in def.modExtensions)
-//                {
-//                    if (extension is NonHumanlikePawnControlExtension modExt && !modExt.fromXML)
-//                    {
-//                        // Create a record for each runtime-added extension
-//                        runtimeModExtensions.Add(new RuntimeModExtensionRecord(def.defName, modExt));
-//                        Utility_DebugManager.LogNormal($"Saving runtime mod extension for {def.defName}");
-//                    }
-//                }
-//            }
-
-//            Utility_DebugManager.LogNormal($"Collected {runtimeModExtensions.Count} runtime mod extensions for saving");
-//        }
-
-//        // Restore runtime-added mod extensions when loading a game
-//        private void RestoreRuntimeModExtensions()
-//        {
-//            if (runtimeModExtensions == null || runtimeModExtensions.Count == 0) return;
-
-//            int restored = 0;
-
-//            foreach (RuntimeModExtensionRecord record in runtimeModExtensions)
-//            {
-//                try
-//                {
-//                    if (string.IsNullOrEmpty(record.targetDefName)) continue;
-
-//                    // Find the target ThingDef
-//                    ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(record.targetDefName);
-//                    if (def == null)
-//                    {
-//                        Utility_DebugManager.LogWarning($"Could not find ThingDef {record.targetDefName} to restore mod extension");
-//                        continue;
-//                    }
-
-//                    // Check if extension already exists (from a previous load or XML)
-//                    bool alreadyExists = false;
-//                    if (def.modExtensions != null)
-//                    {
-//                        foreach (DefModExtension ext in def.modExtensions)
-//                        {
-//                            if (ext is NonHumanlikePawnControlExtension)
-//                            {
-//                                alreadyExists = true;
-//                                break;
-//                            }
-//                        }
-//                    }
-
-//                    if (alreadyExists)
-//                    {
-//                        Utility_DebugManager.LogNormal($"Mod extension already exists for {def.defName}, skipping");
-//                        continue;
-//                    }
-
-//                    // Ensure modExtensions list exists
-//                    if (def.modExtensions == null)
-//                        def.modExtensions = new List<DefModExtension>();
-
-//                    // Add the saved extension
-//                    def.modExtensions.Add(record.extension);
-
-//                    // Mark as loaded from save, not XML
-//                    record.extension.fromXML = false;
-
-//                    // Refresh caches
-//                    Utility_CacheManager.ClearModExtensionCachePerInstance(def);
-//                    Utility_CacheManager.GetModExtension(def); // Force re-cache
-//                    record.extension.CacheSimulatedSkillLevels();
-//                    record.extension.CacheSkillPassions();
-
-//                    restored++;
-//                    Utility_DebugManager.LogNormal($"Restored runtime mod extension for {def.defName}");
-//                }
-//                catch (Exception ex)
-//                {
-//                    Utility_DebugManager.LogError($"Error restoring mod extension for {record.targetDefName}: {ex.Message}");
-//                }
-//            }
-
-//            Utility_DebugManager.LogNormal($"Restored {restored} runtime mod extensions");
-//        }
-//    }
-//}
