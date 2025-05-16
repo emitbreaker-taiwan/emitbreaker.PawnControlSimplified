@@ -248,7 +248,7 @@ namespace emitbreaker.PawnControl
                 buckets,
                 warden,
                 (platform, p) => IsValidPlatformTarget(platform, p),
-                new Dictionary<int, Dictionary<Thing, bool>> { { mapId, reachabilityCache } }
+                WorkTag
             );
 
             if (targetPlatform == null)

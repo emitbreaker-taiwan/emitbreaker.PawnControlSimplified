@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.Remoting.Metadata.W3cXsd2001;
 using UnityEngine;
 using Verse;
 using Verse.AI;
@@ -39,9 +38,8 @@ namespace emitbreaker.PawnControl
                 float priority = GetBasePriority(WorkTag);
 
                 // Avoid div-zero or sub-1 intervals:
-                int interval = Math.Max(1, (int)Math.Round(540f / priority));
-
-                return interval;
+                var baseInterval = Math.Max(1, (int)Math.Round(540f / priority));
+                return baseInterval * ((int)Find.TickManager.CurTimeSpeed);
             }
         }
 
@@ -338,6 +336,38 @@ namespace emitbreaker.PawnControl
         }
 
         protected virtual List<Thing> FilterOutAlreadyReservedTarget(Pawn pawn, List<Thing> targets)
+        {
+            // — ORIGINAL (turn1view0 L8):
+            // var filteredTargets = new List<Thing>(Math.Min(targets.Count, 20));
+
+            // !! UPDATED: get a pooled list instead of allocating
+            var filteredTargets = ListPool<Thing>.Get();                // !! UPDATED
+
+            // Use simple for loop for better performance
+            for (int i = 0; i < targets.Count; i++)
+            {
+                var target = targets[i];
+                if (!IsTargetReserved(target, pawn) && pawn.CanReserve(target))
+                {
+                    filteredTargets.Add(target);
+                    // Early exit if we have enough targets
+                    if (filteredTargets.Count >= 10) break;
+                }
+            }
+
+            // — ORIGINAL return:
+            // return filteredTargets.Count > 0 ? filteredTargets : null;
+
+            // !! UPDATED: return empty lists to pool, keep non-empty for caller
+            if (filteredTargets.Count == 0)
+            {
+                ListPool<Thing>.Return(filteredTargets);               // !! UPDATED
+                return null;
+            }
+            return filteredTargets;                                    // !! UPDATED
+        }
+
+        protected virtual List<Thing> FilterOutAlreadyReservedTargetOLD(Pawn pawn, List<Thing> targets)
         {
             // Preallocate with expected capacity to avoid resizing
             var filteredTargets = new List<Thing>(Math.Min(targets.Count, 20));

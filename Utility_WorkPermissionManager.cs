@@ -252,7 +252,7 @@ namespace emitbreaker.PawnControl
                     {
                         canDo = false;
 
-                        if (Prefs.DevMode)
+                        if (Utility_DebugManager.ShouldLogDetailed())
                         {
                             Utility_DebugManager.LogNormal(
                                 $"JobGiver {pawnControlJobGiver.GetType().Name} blocks non-player pawns from {workTag} work: " +

@@ -238,7 +238,7 @@ namespace emitbreaker.PawnControl
                 buckets,
                 warden,
                 (thing, p) => IsValidSuppressionTarget(thing, p, forced),
-                new Dictionary<int, Dictionary<Thing, bool>> { { mapId, reachabilityCache } }
+                WorkTag
             );
 
             if (targetThing == null)

@@ -66,6 +66,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ListPool.cs" />
     <Compile Include="Utility_ReservationManager.cs" />
     <Compile Include="PawnTagFlags.cs" />
     <Compile Include="Utility_UnifiedCache.cs" />

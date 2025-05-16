@@ -244,7 +244,7 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (target, p) => IsValidPrisonerTarget(target as Pawn, p),
-                reachabilityCache);
+                WorkTag);
 
             // Create job if we found a valid target
             if (bestTarget != null && bestTarget is Pawn prisoner)

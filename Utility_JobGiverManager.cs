@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Unity.Jobs;
 using UnityEngine;
 using Verse;
 using Verse.AI;
@@ -34,9 +35,15 @@ namespace emitbreaker.PawnControl
             bool skipEmergencyCheck = false,
             Type jobGiverType = null) where T : class
         {
+            if (!Utility_TagManager.IsWorkEnabled(pawn, workTag))
+                return null;
+
             // Start timing for profiling
             var stopwatch = new System.Diagnostics.Stopwatch();
             stopwatch.Start();
+
+            // Declare job variable at this scope so it's accessible in the finally block
+            Job job = null;
 
             try
             {
@@ -47,8 +54,9 @@ namespace emitbreaker.PawnControl
                     return null;
                 }
 
-                // 0. Progressive scheduling check - determine if this pawn should run this JobGiver on this tick
-                if (jobGiverType != null && !Utility_JobGiverTickManager.ShouldExecuteForPawn(jobGiverType, pawn))
+                // 0. Progressive scheduling check - determine if this pawn should run this job on this tick
+                // Now using workTag instead of jobGiverType for more efficient scheduling
+                if (!Utility_JobGiverTickManager.ShouldExecuteForPawn(workTag, pawn))
                 {
                     return null;
                 }
@@ -65,11 +73,11 @@ namespace emitbreaker.PawnControl
                     return null;
 
                 // 3. Check global state flags if available
-                if (jobGiverType != null && Utility_GlobalStateManager.ShouldSkipJobGiverDueToGlobalState(null, pawn))
+                if (Utility_GlobalStateManager.ShouldSkipJobGiverDueToGlobalState(workTag, pawn))
                     return null;
 
                 // 4. Check dependencies if available
-                if (jobGiverType != null && !AreDependenciesSatisfied(jobGiverType, pawn))
+                if (!AreDependenciesSatisfied(workTag, pawn))
                     return null;
 
                 // 5. Perform any additional checks provided by the specific JobGiver
@@ -83,7 +91,7 @@ namespace emitbreaker.PawnControl
                 }
 
                 // 6. Call the job creator function with the pawn and forced=false
-                Job job = jobCreator(pawn, false);
+                job = jobCreator(pawn, false);
 
                 // 7. Debug logging if a job was found
                 if (job != null && Prefs.DevMode)
@@ -102,14 +110,30 @@ namespace emitbreaker.PawnControl
             {
                 // Stop timing and record metrics
                 stopwatch.Stop();
-                if (jobGiverType != null)
+
+                // Record execution metrics with work tag
+                if (!string.IsNullOrEmpty(workTag))
                 {
-                    RecordJobGiverExecution(jobGiverType, stopwatch.Elapsed.TotalMilliseconds > 0, (float)stopwatch.Elapsed.TotalMilliseconds);
+                    float executionTimeMs = (float)stopwatch.Elapsed.TotalMilliseconds;
+                    bool successful = job != null;
+
+                    // Record in local registry
+                    int currentTick = Find.TickManager.TicksGame;
+                    if (_workTagRegistry.TryGetValue(workTag, out var entry))
+                    {
+                        entry.RecordExecution(successful, executionTimeMs, currentTick);
+                    }
+
+                    // Forward to adaptive profiling system if enabled
+                    if (Utility_AdaptiveProfilingManager.IsProfilingEnabled)
+                    {
+                        Utility_AdaptiveProfilingManager.RecordWorkTagExecution(workTag, executionTimeMs, successful);
+                    }
                 }
             }
         }
 
-        // Also update the simplified version
+        // Updated simplified version using workTag
         public static Job StandardTryGiveJob<T>(
             Pawn pawn,
             string workTag,
@@ -118,6 +142,9 @@ namespace emitbreaker.PawnControl
             string debugJobDesc = null,
             bool skipEmergencyCheck = false) where T : class
         {
+            if (!Utility_TagManager.IsWorkEnabled(pawn, workTag))
+                return null;
+
             try
             {
                 if (pawn?.Map == null || pawn.Dead || !pawn.Spawned || pawn?.Faction == null)
@@ -319,7 +346,7 @@ namespace emitbreaker.PawnControl
             List<T>[] buckets,
             Pawn pawn,
             Func<T, Pawn, bool> validationFunc,
-            Dictionary<int, Dictionary<T, bool>> reachabilityCache = null) where T : Thing
+            string workTag = null) where T : Thing
         {
             if (buckets == null || pawn == null)
                 return null;
@@ -338,19 +365,18 @@ namespace emitbreaker.PawnControl
                 {
                     bool canUse = false;
 
-                    // Use cache if available
-                    if (reachabilityCache != null)
+                    // Use workTag-based cache if available
+                    if (!string.IsNullOrEmpty(workTag) && pawn.Map != null)
                     {
                         int mapId = pawn.Map.uniqueID;
-                        var reachDict = Utility_UnifiedCache.GetReachabilityDict(reachabilityCache, mapId);
 
-                        if (!reachDict.TryGetValue(thing, out canUse))
+                        // Try to get reachability result from cache
+                        if (!Utility_JobGiverCacheManager<T>.TryGetReachabilityResult(workTag, mapId, thing, out canUse))
                         {
                             canUse = validationFunc(thing, pawn);
 
-                            // Cache result but limit cache size
-                            if (reachDict.Count < 1000) // Max cache size
-                                reachDict[thing] = canUse;
+                            // Cache the result
+                            Utility_JobGiverCacheManager<T>.CacheReachabilityResult(workTag, mapId, thing, canUse);
                         }
                     }
                     else
@@ -366,25 +392,45 @@ namespace emitbreaker.PawnControl
             return null;
         }
 
-
         #endregion
 
         #region Registry Data Structures
 
-        // Central registry of all JobGiver types
+        // Central registry of all job givers by work type
+        private static readonly Dictionary<string, JobGiverRegistryEntry> _workTagRegistry = new Dictionary<string, JobGiverRegistryEntry>();
+
+        // Legacy registry of job giver types (for backward compatibility)
         private static readonly Dictionary<Type, JobGiverRegistryEntry> _jobGiverRegistry = new Dictionary<Type, JobGiverRegistryEntry>();
 
-        // JobGiver dependencies (which JobGivers depend on which others)
+        // Work tag dependencies (which work tags depend on which others)
+        private static readonly Dictionary<string, HashSet<string>> _workTagDependencies = new Dictionary<string, HashSet<string>>();
+
+        // Legacy dependencies (for backward compatibility)
         private static readonly Dictionary<Type, HashSet<Type>> _jobGiverDependencies = new Dictionary<Type, HashSet<Type>>();
 
-        // Registry of all JobGivers with their basic data (for scheduling)
+        // Registry of all work tags with their basic data (for scheduling)
+        private static readonly Dictionary<string, object> _workTagsRegistry = new Dictionary<string, object>();
+
+        // Legacy registry (for backward compatibility)
         private static readonly Dictionary<Type, object> _jobGiversRegistry = new Dictionary<Type, object>();
 
-        // JobGivers that have been explicitly deactivated for specific maps
+        // Work tags that have been explicitly deactivated for specific maps
+        private static readonly Dictionary<int, HashSet<string>> _deactivatedWorkTags = new Dictionary<int, HashSet<string>>();
+
+        // Legacy deactivated job givers (for backward compatibility)
         private static readonly Dictionary<int, HashSet<Type>> _deactivatedJobGivers = new Dictionary<int, HashSet<Type>>();
 
-        // Storage for bypass conditions
-        private static readonly Dictionary<Type, Utility_ThinkTreeOptimizationManager.BypassCondition[]> _bypassConditions = new Dictionary<Type, Utility_ThinkTreeOptimizationManager.BypassCondition[]>();
+        // Storage for bypass conditions (work tag-based)
+        private static readonly Dictionary<string, Utility_ThinkTreeOptimizationManager.BypassCondition[]> _workTagBypassConditions =
+            new Dictionary<string, Utility_ThinkTreeOptimizationManager.BypassCondition[]>();
+
+        // Legacy bypass conditions (for backward compatibility)
+        private static readonly Dictionary<Type, Utility_ThinkTreeOptimizationManager.BypassCondition[]> _bypassConditions =
+            new Dictionary<Type, Utility_ThinkTreeOptimizationManager.BypassCondition[]>();
+
+        // Mapping between job giver types and work tags
+        private static readonly Dictionary<Type, string> _jobGiverTypeToWorkTag = new Dictionary<Type, string>();
+        private static readonly Dictionary<string, HashSet<Type>> _workTagToJobGiverTypes = new Dictionary<string, HashSet<Type>>();
 
         #endregion
 
@@ -418,9 +464,33 @@ namespace emitbreaker.PawnControl
             public HashSet<Type> DependsOn { get; } = new HashSet<Type>();
             public HashSet<Type> RequiredBy { get; } = new HashSet<Type>();
 
+            // Work tag dependencies
+            public HashSet<string> WorkTagDependsOn { get; } = new HashSet<string>();
+            public HashSet<string> WorkTagRequiredBy { get; } = new HashSet<string>();
+
             public JobGiverRegistryEntry(Type jobGiverType, string workTypeName, int basePriority = 5, int? customTickInterval = null)
             {
                 JobGiverType = jobGiverType;
+                WorkTypeName = workTypeName;
+                BasePriority = basePriority;
+                CustomTickInterval = customTickInterval;
+
+                // Default values for metadata
+                JobCategory = Utility_GlobalStateManager.JobCategory.Basic;
+                RequiredCapabilities = Utility_GlobalStateManager.PawnCapabilityFlags.None;
+                NeedResponsiveness = new Dictionary<Utility_GlobalStateManager.ColonyNeedType, float>();
+
+                // Initialize statistics
+                TotalExecutions = 0;
+                SuccessfulExecutions = 0;
+                TotalExecutionTime = 0f;
+                MaxExecutionTime = 0f;
+            }
+
+            // Constructor for work tag-based entry
+            public JobGiverRegistryEntry(string workTypeName, int basePriority = 5, int? customTickInterval = null)
+            {
+                JobGiverType = null;
                 WorkTypeName = workTypeName;
                 BasePriority = basePriority;
                 CustomTickInterval = customTickInterval;
@@ -454,7 +524,8 @@ namespace emitbreaker.PawnControl
 
             public override string ToString()
             {
-                return $"{JobGiverType.Name}: {WorkTypeName ?? "no work type"}, Priority: {BasePriority}, " +
+                string typeDesc = JobGiverType != null ? JobGiverType.Name : "work tag";
+                return $"{typeDesc}: {WorkTypeName ?? "no work type"}, Priority: {BasePriority}, " +
                        $"Success rate: {SuccessRate * 100:F1}%, Avg time: {AverageExecutionTime:F2}ms";
             }
         }
@@ -464,17 +535,17 @@ namespace emitbreaker.PawnControl
         #region Performance Tracking
 
         /// <summary>
-        /// Records execution metrics for a JobGiver
+        /// Records execution metrics for a job giver by work tag
         /// </summary>
-        public static void RecordJobGiverExecution(Type jobGiverType, bool successful, float executionTimeMs)
+        public static void RecordJobGiverExecution(string workTag, bool successful, float executionTimeMs)
         {
-            if (jobGiverType == null)
+            if (string.IsNullOrEmpty(workTag))
                 return;
 
             int currentTick = Find.TickManager.TicksGame;
 
-            // Record in registry
-            if (_jobGiverRegistry.TryGetValue(jobGiverType, out var entry))
+            // Record in work tag registry
+            if (_workTagRegistry.TryGetValue(workTag, out var entry))
             {
                 entry.RecordExecution(successful, executionTimeMs, currentTick);
             }
@@ -482,7 +553,7 @@ namespace emitbreaker.PawnControl
             // Integrate with adaptive profiler if enabled
             if (Utility_AdaptiveProfilingManager.IsProfilingEnabled)
             {
-                Utility_AdaptiveProfilingManager.RecordJobGiverExecution(jobGiverType, executionTimeMs, successful);
+                Utility_AdaptiveProfilingManager.RecordWorkTagExecution(workTag, executionTimeMs, successful);
             }
         }
 
@@ -491,13 +562,74 @@ namespace emitbreaker.PawnControl
         #region Dependency Management
 
         /// <summary>
-        /// Validates that all dependencies of a JobGiver are satisfied for a pawn
+        /// Validates that all dependencies of a work tag are satisfied for a pawn
+        /// </summary>
+        public static bool AreDependenciesSatisfied(string workTag, Pawn pawn)
+        {
+            if (string.IsNullOrEmpty(workTag) || pawn == null)
+                return false;
+
+            // Skip dependency check if no dependencies registered
+            if (!_workTagDependencies.TryGetValue(workTag, out var dependencies) ||
+                dependencies.Count == 0)
+                return true;
+
+            // Check each dependency
+            foreach (string dependencyTag in dependencies)
+            {
+                // Skip if dependency check is registered
+                bool bypassAllow = false;
+                Utility_ThinkTreeOptimizationManager.BypassCondition[] conditions = GetWorkTagBypassConditions(dependencyTag);
+                if (conditions != null)
+                {
+                    foreach (var condition in conditions)
+                    {
+                        if (condition(pawn))
+                        {
+                            bypassAllow = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If bypass conditions allow it, skip this dependency check
+                if (bypassAllow)
+                    continue;
+
+                // Check if resources from this dependency exist
+                // This would be dependency-specific logic, possibly through a delegate system
+                // Here we just check if the dependency is active for this pawn's map
+                if (!IsWorkTagActive(dependencyTag, pawn.Map.uniqueID))
+                {
+                    if (Prefs.DevMode)
+                    {
+                        Utility_DebugManager.LogNormal($"Work tag {workTag} skipped for {pawn.LabelShort} - " +
+                                                     $"dependency {dependencyTag} not active");
+                    }
+                    return false;
+                }
+
+                // Additional dependency validation would go here
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Legacy method for backward compatibility
         /// </summary>
         public static bool AreDependenciesSatisfied(Type jobGiverType, Pawn pawn)
         {
             if (jobGiverType == null || pawn == null)
                 return false;
 
+            // If we have a work tag mapping, use the work tag-based method
+            if (_jobGiverTypeToWorkTag.TryGetValue(jobGiverType, out string workTag))
+            {
+                return AreDependenciesSatisfied(workTag, pawn);
+            }
+
+            // Legacy fallback
             // Skip dependency check if no dependencies registered
             if (!_jobGiverDependencies.TryGetValue(jobGiverType, out var dependencies) ||
                 dependencies.Count == 0)
@@ -549,17 +681,46 @@ namespace emitbreaker.PawnControl
         #region ThinkTree Bypass Conditions
 
         /// <summary>
-        /// Registers bypass conditions for a JobGiver
+        /// Registers bypass conditions for a work tag
+        /// </summary>
+        public static void RegisterWorkTagBypassConditions(string workTag, Utility_ThinkTreeOptimizationManager.BypassCondition[] conditions)
+        {
+            if (string.IsNullOrEmpty(workTag) || conditions == null) return;
+
+            _workTagBypassConditions[workTag] = conditions;
+        }
+
+        /// <summary>
+        /// Gets the registered bypass conditions for a work tag
+        /// </summary>
+        public static Utility_ThinkTreeOptimizationManager.BypassCondition[] GetWorkTagBypassConditions(string workTag)
+        {
+            if (string.IsNullOrEmpty(workTag)) return null;
+
+            if (_workTagBypassConditions.TryGetValue(workTag, out var conditions))
+                return conditions;
+
+            return null;
+        }
+
+        /// <summary>
+        /// Registers bypass conditions for a JobGiver (legacy method)
         /// </summary>
         public static void RegisterBypassConditions(Type jobGiverType, Utility_ThinkTreeOptimizationManager.BypassCondition[] conditions)
         {
             if (jobGiverType == null || conditions == null) return;
 
             _bypassConditions[jobGiverType] = conditions;
+
+            // Also register for work tag if mapping exists
+            if (_jobGiverTypeToWorkTag.TryGetValue(jobGiverType, out string workTag))
+            {
+                RegisterWorkTagBypassConditions(workTag, conditions);
+            }
         }
 
         /// <summary>
-        /// Gets the registered bypass conditions for a JobGiver
+        /// Gets the registered bypass conditions for a JobGiver (legacy method)
         /// </summary>
         public static Utility_ThinkTreeOptimizationManager.BypassCondition[] GetBypassConditions(Type jobGiverType)
         {
@@ -572,13 +733,42 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Checks if a JobGiver is active for a specific map
+        /// Checks if a work tag is active for a specific map
+        /// </summary>
+        public static bool IsWorkTagActive(string workTag, int mapId)
+        {
+            if (string.IsNullOrEmpty(workTag))
+                return true; // Default to active if not found
+
+            // Check if work tag is registered
+            bool isRegistered = _workTagsRegistry.ContainsKey(workTag);
+            if (!isRegistered)
+                return true; // If not registered, consider it active
+
+            // Check if explicitly deactivated for this map
+            if (_deactivatedWorkTags.TryGetValue(mapId, out var deactivated) &&
+                deactivated.Contains(workTag))
+                return false;
+
+            // Otherwise, it's active
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if a JobGiver is active for a specific map (legacy method)
         /// </summary>
         public static bool IsJobGiverActive(Type jobGiverType, int mapId)
         {
             if (jobGiverType == null)
                 return true; // Default to active if not found
 
+            // If we have a work tag mapping, use the work tag-based method
+            if (_jobGiverTypeToWorkTag.TryGetValue(jobGiverType, out string workTag))
+            {
+                return IsWorkTagActive(workTag, mapId);
+            }
+
+            // Legacy fallback
             // Check if jobGiver is registered
             bool isRegistered = _jobGiversRegistry.ContainsKey(jobGiverType);
             if (!isRegistered)
@@ -593,15 +783,96 @@ namespace emitbreaker.PawnControl
             return true;
         }
 
-#endregion
+        #endregion
+
+        #region Type-Tag Mapping
+
+        /// <summary>
+        /// Registers a job giver type with its corresponding work tag
+        /// </summary>
+        public static void RegisterJobGiverTypeWithWorkTag(Type jobGiverType, string workTag)
+        {
+            if (jobGiverType == null || string.IsNullOrEmpty(workTag))
+                return;
+
+            _jobGiverTypeToWorkTag[jobGiverType] = workTag;
+
+            if (!_workTagToJobGiverTypes.TryGetValue(workTag, out var types))
+            {
+                types = new HashSet<Type>();
+                _workTagToJobGiverTypes[workTag] = types;
+            }
+
+            types.Add(jobGiverType);
+
+            // Register work tag with the cache manager
+            Utility_JobGiverCacheManager<Thing>.RegisterWorkTag(workTag);
+        }
+
+        /// <summary>
+        /// Gets the work tag for a job giver type
+        /// </summary>
+        public static string GetWorkTagForJobGiverType(Type jobGiverType)
+        {
+            if (jobGiverType == null)
+                return string.Empty;
+
+            if (_jobGiverTypeToWorkTag.TryGetValue(jobGiverType, out string workTag))
+                return workTag;
+
+            // If not registered, try to derive a work tag from the type name
+            workTag = DeriveWorkTagFromType(jobGiverType);
+
+            // Register the derived mapping for future use
+            RegisterJobGiverTypeWithWorkTag(jobGiverType, workTag);
+
+            return workTag;
+        }
+
+        /// <summary>
+        /// Helper method to derive a work tag from a job giver type
+        /// </summary>
+        private static string DeriveWorkTagFromType(Type jobGiverType)
+        {
+            if (jobGiverType == null)
+                return string.Empty;
+
+            // Remove common prefixes like "JobGiver_" or "ThinkNode_JobGiver_"
+            string typeName = jobGiverType.Name;
+            if (typeName.StartsWith("JobGiver_"))
+            {
+                typeName = typeName.Substring("JobGiver_".Length);
+            }
+            else if (typeName.StartsWith("ThinkNode_JobGiver_"))
+            {
+                typeName = typeName.Substring("ThinkNode_JobGiver_".Length);
+            }
+
+            // Convert to proper work tag format (usually a single word like "Hauling", "Cleaning", etc.)
+            return typeName;
+        }
+
+        #endregion
 
         #region Cleanup Methods
 
         /// <summary>
-        /// Resets all JobGiver registry data
+        /// Resets all registry data
         /// </summary>
         public static void ResetRegistry()
         {
+            // Reset work tag-based registries
+            _workTagRegistry.Clear();
+            _workTagDependencies.Clear();
+            _workTagsRegistry.Clear();
+            _deactivatedWorkTags.Clear();
+            _workTagBypassConditions.Clear();
+
+            // Reset mapping dictionaries
+            _jobGiverTypeToWorkTag.Clear();
+            _workTagToJobGiverTypes.Clear();
+
+            // Reset legacy registries
             _jobGiverRegistry.Clear();
             _jobGiverDependencies.Clear();
             _jobGiversRegistry.Clear();
@@ -617,8 +888,19 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void CleanupMapData(int mapId)
         {
-            // Nothing specific to clean up here since data is not stored per-map
-            // Just forward the call to other systems
+            // Clean up map-specific data for work tags
+            if (_deactivatedWorkTags.TryGetValue(mapId, out _))
+            {
+                _deactivatedWorkTags.Remove(mapId);
+            }
+
+            // Clean up legacy map-specific data
+            if (_deactivatedJobGivers.TryGetValue(mapId, out _))
+            {
+                _deactivatedJobGivers.Remove(mapId);
+            }
+
+            // Forward the call to other systems
             Utility_JobGiverTickManager.CleanupMap(mapId);
         }
 

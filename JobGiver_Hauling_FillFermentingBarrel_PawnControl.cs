@@ -89,7 +89,7 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (thing, worker) => IsValidBarrelTarget(thing, worker),
-                reachabilityCache: null);
+                WorkTag);
 
             // Create job if target found
             if (targetThing != null && targetThing is Building_FermentingBarrel barrel)

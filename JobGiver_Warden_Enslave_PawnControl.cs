@@ -221,7 +221,7 @@ namespace emitbreaker.PawnControl
                 buckets,
                 warden,
                 (prisoner, p) => IsValidPrisonerTarget(prisoner, p),
-                new Dictionary<int, Dictionary<Pawn, bool>> { { mapId, reachabilityCache } }
+                WorkTag
             );
 
             if (targetPrisoner == null)

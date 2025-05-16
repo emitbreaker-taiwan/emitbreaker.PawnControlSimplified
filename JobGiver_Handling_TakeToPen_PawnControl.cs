@@ -297,7 +297,7 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (animal, p) => NeedsPenHandling(animal, p, forced, balanceCalculator),
-                reachabilityCache);
+                WorkTag);
 
             // Create job based on what we found
             if (targetAnimal != null)

@@ -220,7 +220,7 @@ namespace emitbreaker.PawnControl
                 buckets,
                 pawn,
                 (plantTarget, p) => ValidatePlantTarget(plantTarget as Plant, p),
-                reachabilityCache);
+                WorkTag);
 
             // Create job if we found a valid target
             if (bestTarget != null && bestTarget is Plant plant)
