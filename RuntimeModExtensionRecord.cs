@@ -31,7 +31,15 @@ namespace emitbreaker.PawnControl
         public void ExposeData()
         {
             Scribe_Values.Look(ref targetDefName, "targetDefName");
+            // Use Scribe_Deep for classes that implement IExposable
             Scribe_Deep.Look(ref extension, "extension");
+
+            // If extension was loaded, make sure to rebuild its caches
+            if (Scribe.mode == LoadSaveMode.PostLoadInit && extension != null)
+            {
+                extension.CacheSkillPassions();
+                extension.CacheSimulatedSkillLevels();
+            }
         }
     }
 }

@@ -20,10 +20,10 @@ namespace emitbreaker.PawnControl
                 return PawnTagFlags.None;
             }
 
-            if (!Utility_UnifiedCache.TagFlags.TryGetValue(def, out PawnTagFlags flags))
+            if (!Utility_CacheManager.TagFlags.TryGetValue(def, out PawnTagFlags flags))
             {
                 flags = BuildTagFlags(def);
-                Utility_UnifiedCache.TagFlags[def] = flags;
+                Utility_CacheManager.TagFlags[def] = flags;
             }
             return flags;
         }
@@ -39,7 +39,7 @@ namespace emitbreaker.PawnControl
             }
 
             PawnTagFlags flags = PawnTagFlags.None;
-            var modExtension = Utility_UnifiedCache.GetModExtension(def);
+            var modExtension = Utility_CacheManager.GetModExtension(def);
 
             if (modExtension == null || modExtension.tags == null)
             {
@@ -188,7 +188,7 @@ namespace emitbreaker.PawnControl
                 return false;
             }
 
-            modExtension = Utility_UnifiedCache.GetModExtension(def);
+            modExtension = Utility_CacheManager.GetModExtension(def);
 
             if (modExtension == null)
             {
@@ -253,7 +253,7 @@ namespace emitbreaker.PawnControl
         {
             if (!Utility_Common.RaceDefChecker(pawn.def) || workTypeDef == null) return false;
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null) return false; // No mod extension found
 
             // Race‐tags check unchanged…
@@ -307,12 +307,12 @@ namespace emitbreaker.PawnControl
             var key = new ValueTuple<Pawn, string>(pawn, tag);
 
             // Try to get from cache first
-            if (Utility_UnifiedCache.ForceDraftable.TryGetValue(key, out bool result))
+            if (Utility_CacheManager.ForceDraftable.TryGetValue(key, out bool result))
             {
                 return result;
             }
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return false; // No mod extension found
@@ -331,7 +331,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Store in cache
-            Utility_UnifiedCache.ForceDraftable[key] = result;
+            Utility_CacheManager.ForceDraftable[key] = result;
             return result;
         }
 
@@ -345,12 +345,12 @@ namespace emitbreaker.PawnControl
             var key = new ValueTuple<Pawn, string>(pawn, tag);
 
             // Try to get from cache first
-            if (Utility_UnifiedCache.ForceEquipWeapon.TryGetValue(key, out bool result))
+            if (Utility_CacheManager.ForceEquipWeapon.TryGetValue(key, out bool result))
             {
                 return result;
             }
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return false; // No mod extension found
@@ -375,7 +375,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Store in cache
-            Utility_UnifiedCache.ForceEquipWeapon[key] = result;
+            Utility_CacheManager.ForceEquipWeapon[key] = result;
             return result;
         }
 
@@ -389,12 +389,12 @@ namespace emitbreaker.PawnControl
             var key = new ValueTuple<Pawn, string>(pawn, tag);
 
             // Try to get from cache first
-            if (Utility_UnifiedCache.ForceWearApparel.TryGetValue(key, out bool result))
+            if (Utility_CacheManager.ForceWearApparel.TryGetValue(key, out bool result))
             {
                 return result;
             }
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return false; // No mod extension found
@@ -419,7 +419,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Store in cache
-            Utility_UnifiedCache.ForceWearApparel[key] = result;
+            Utility_CacheManager.ForceWearApparel[key] = result;
             return result;
         }
 
@@ -430,10 +430,10 @@ namespace emitbreaker.PawnControl
                 return new HashSet<string>();
             }
 
-            if (!Utility_UnifiedCache.Tags.TryGetValue(def, out var set))
+            if (!Utility_CacheManager.Tags.TryGetValue(def, out var set))
             {
                 set = BuildTags(def);
-                Utility_UnifiedCache.Tags[def] = set;
+                Utility_CacheManager.Tags[def] = set;
             }
             return set;
         }
@@ -447,7 +447,7 @@ namespace emitbreaker.PawnControl
 
             HashSet<string> set = new HashSet<string>();
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(def);
+            var modExtension = Utility_CacheManager.GetModExtension(def);
 
             if (modExtension == null || modExtension.tags == null)
             {
@@ -671,67 +671,67 @@ namespace emitbreaker.PawnControl
             if (!Utility_Common.RaceDefChecker(pawn.def)) return;
 
             // Clear flag cache
-            Utility_UnifiedCache.TagFlags.Remove(pawn.def);
+            Utility_CacheManager.TagFlags.Remove(pawn.def);
 
             // Clear string tag cache
-            Utility_UnifiedCache.Tags.Remove(pawn.def);
+            Utility_CacheManager.Tags.Remove(pawn.def);
 
             // Find and remove all tuple entries that reference this race
             var keysToRemove = new List<ValueTuple<Pawn, string>>();
 
             // Clear work enabled cache for this race
-            foreach (var key in Utility_UnifiedCache.WorkEnabled.Keys)
+            foreach (var key in Utility_CacheManager.WorkEnabled.Keys)
             {
                 if (key.Item1.def == def)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.WorkEnabled.Remove(key);
+                Utility_CacheManager.WorkEnabled.Remove(key);
 
             // Reset and reuse list for work disabled cache
             keysToRemove.Clear();
-            foreach (var key in Utility_UnifiedCache.WorkDisabled.Keys)
+            foreach (var key in Utility_CacheManager.WorkDisabled.Keys)
             {
                 if (key.Item1.def == def)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.WorkDisabled.Remove(key);
+                Utility_CacheManager.WorkDisabled.Remove(key);
 
             // Reset and reuse list for force draftable cache
             keysToRemove.Clear();
-            foreach (var key in Utility_UnifiedCache.ForceDraftable.Keys)
+            foreach (var key in Utility_CacheManager.ForceDraftable.Keys)
             {
                 if (key.Item1.def == def)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.ForceDraftable.Remove(key);
+                Utility_CacheManager.ForceDraftable.Remove(key);
 
             // Reset and reuse list for force equip weapon cache
             keysToRemove.Clear();
-            foreach (var key in Utility_UnifiedCache.ForceEquipWeapon.Keys)
+            foreach (var key in Utility_CacheManager.ForceEquipWeapon.Keys)
             {
                 if (key.Item1.def == def)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.ForceEquipWeapon.Remove(key);
+                Utility_CacheManager.ForceEquipWeapon.Remove(key);
 
             // Reset and reuse list for force wear apparel cache
             keysToRemove.Clear();
-            foreach (var key in Utility_UnifiedCache.ForceWearApparel.Keys)
+            foreach (var key in Utility_CacheManager.ForceWearApparel.Keys)
             {
                 if (key.Item1.def == def)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.ForceWearApparel.Remove(key);
+                Utility_CacheManager.ForceWearApparel.Remove(key);
 
             // Also clear related caches in other managers if needed
-            Utility_UnifiedCache.IsAnimal.Remove(pawn.def);
-            Utility_UnifiedCache.IsHumanlike.Remove(pawn.def);
-            Utility_UnifiedCache.IsMechanoid.Remove(pawn.def);
+            Utility_CacheManager.IsAnimal.Remove(pawn.def);
+            Utility_CacheManager.IsHumanlike.Remove(pawn.def);
+            Utility_CacheManager.IsMechanoid.Remove(pawn.def);
 
             Utility_DebugManager.LogNormal($"Cache entries for race {pawn.def.defName} successfully cleared");
         }
@@ -741,83 +741,83 @@ namespace emitbreaker.PawnControl
             if (!Utility_Common.RaceDefChecker(pawn.def)) return;
 
             // Clear flag cache
-            Utility_UnifiedCache.TagFlags.Remove(pawn.def);
+            Utility_CacheManager.TagFlags.Remove(pawn.def);
 
             // Clear race's tag cache
-            Utility_UnifiedCache.Tags.Remove(pawn.def);
+            Utility_CacheManager.Tags.Remove(pawn.def);
 
             // Find and remove all tuple entries that reference this race
             var keysToRemove = new List<ValueTuple<Pawn, string>>();
 
             // Clear work enabled cache for this race
-            foreach (var key in Utility_UnifiedCache.WorkEnabled.Keys)
+            foreach (var key in Utility_CacheManager.WorkEnabled.Keys)
             {
                 if (key.Item1 == pawn)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.WorkEnabled.Remove(key);
+                Utility_CacheManager.WorkEnabled.Remove(key);
 
             // Reset and reuse list for work disabled cache
             keysToRemove.Clear();
-            foreach (var key in Utility_UnifiedCache.WorkDisabled.Keys)
+            foreach (var key in Utility_CacheManager.WorkDisabled.Keys)
             {
                 if (key.Item1 == pawn)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.WorkDisabled.Remove(key);
+                Utility_CacheManager.WorkDisabled.Remove(key);
 
             // Reset and reuse list for force draftable cache
             keysToRemove.Clear();
-            foreach (var key in Utility_UnifiedCache.ForceDraftable.Keys)
+            foreach (var key in Utility_CacheManager.ForceDraftable.Keys)
             {
                 if (key.Item1 == pawn)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.ForceDraftable.Remove(key);
+                Utility_CacheManager.ForceDraftable.Remove(key);
 
             // Reset and reuse list for force equip weapon cache
             keysToRemove.Clear();
-            foreach (var key in Utility_UnifiedCache.ForceEquipWeapon.Keys)
+            foreach (var key in Utility_CacheManager.ForceEquipWeapon.Keys)
             {
                 if (key.Item1 == pawn)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.ForceEquipWeapon.Remove(key);
+                Utility_CacheManager.ForceEquipWeapon.Remove(key);
 
             // Reset and reuse list for force wear apparel cache
             keysToRemove.Clear();
-            foreach (var key in Utility_UnifiedCache.ForceWearApparel.Keys)
+            foreach (var key in Utility_CacheManager.ForceWearApparel.Keys)
             {
                 if (key.Item1 == pawn)
                     keysToRemove.Add(key);
             }
             foreach (var key in keysToRemove)
-                Utility_UnifiedCache.ForceWearApparel.Remove(key);
+                Utility_CacheManager.ForceWearApparel.Remove(key);
 
             // Also clear related caches in other managers if needed
-            Utility_UnifiedCache.IsAnimal.Remove(pawn.def);
-            Utility_UnifiedCache.IsHumanlike.Remove(pawn.def);
-            Utility_UnifiedCache.IsMechanoid.Remove(pawn.def);
+            Utility_CacheManager.IsAnimal.Remove(pawn.def);
+            Utility_CacheManager.IsHumanlike.Remove(pawn.def);
+            Utility_CacheManager.IsMechanoid.Remove(pawn.def);
 
             Utility_DebugManager.LogNormal($"Cache entries for race {pawn.def.defName} successfully cleared");
         }
 
         public static void ClearAllCaches()
         {
-            Utility_UnifiedCache.TagFlags.Clear();
-            Utility_UnifiedCache.Tags.Clear();
-            Utility_UnifiedCache.WorkEnabled.Clear();
-            Utility_UnifiedCache.WorkDisabled.Clear();
-            Utility_UnifiedCache.ForceDraftable.Clear();
-            Utility_UnifiedCache.ForceEquipWeapon.Clear();
-            Utility_UnifiedCache.ForceWearApparel.Clear();
-            Utility_UnifiedCache.IsAnimal.Clear();
-            Utility_UnifiedCache.IsHumanlike.Clear();
-            Utility_UnifiedCache.IsMechanoid.Clear();
+            Utility_CacheManager.TagFlags.Clear();
+            Utility_CacheManager.Tags.Clear();
+            Utility_CacheManager.WorkEnabled.Clear();
+            Utility_CacheManager.WorkDisabled.Clear();
+            Utility_CacheManager.ForceDraftable.Clear();
+            Utility_CacheManager.ForceEquipWeapon.Clear();
+            Utility_CacheManager.ForceWearApparel.Clear();
+            Utility_CacheManager.IsAnimal.Clear();
+            Utility_CacheManager.IsHumanlike.Clear();
+            Utility_CacheManager.IsMechanoid.Clear();
 
             Utility_DebugManager.LogNormal("All tag caches cleared");
         }

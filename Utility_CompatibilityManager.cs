@@ -128,7 +128,7 @@ namespace emitbreaker.PawnControl
 
             public static bool IsApparelCompatibleWithPawn(Pawn pawn, ThingDef apparelDef)
             {
-                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
 
                 if (modExtension != null)
                 {

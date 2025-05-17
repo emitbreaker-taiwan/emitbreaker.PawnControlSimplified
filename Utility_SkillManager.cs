@@ -11,7 +11,7 @@ namespace emitbreaker.PawnControl
             if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.health == null || pawn.health.hediffSet == null)
                 return false;
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return false;
@@ -32,7 +32,7 @@ namespace emitbreaker.PawnControl
                 return 0;
             }
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
 
             if (modExtension == null)
             {
@@ -201,7 +201,7 @@ namespace emitbreaker.PawnControl
 
         public static Passion SetInjectedPassion(ThingDef def, SkillDef skillDef)
         {
-            var modExtension = Utility_UnifiedCache.GetModExtension(def);
+            var modExtension = Utility_CacheManager.GetModExtension(def);
             if (modExtension?.SkillPassionDict == null)
             {
                 return Passion.None;
@@ -300,7 +300,7 @@ namespace emitbreaker.PawnControl
                             continue;
                         }
 
-                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                         if (modExtension == null)
                         {
                             continue; // Skip if no mod extension is found
@@ -344,7 +344,7 @@ namespace emitbreaker.PawnControl
                             continue;
                         }
 
-                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                         if (modExtension == null)
                         {
                             continue; // Skip if no mod extension is found
@@ -406,7 +406,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Check for any managed extension that indicates this pawn should work
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return false;

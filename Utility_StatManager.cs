@@ -101,7 +101,7 @@ namespace emitbreaker.PawnControl
             if (pawn == null || pawn.skills == null || pawn.def == null)
                 return result;
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
                 return result;
 
@@ -136,7 +136,7 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void InjectConsolidatedStatHediff(Pawn pawn)
         {
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
 
             if (HasAlreadyInjected(pawn))
             {

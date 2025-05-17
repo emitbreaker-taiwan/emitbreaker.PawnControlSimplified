@@ -31,15 +31,11 @@ namespace emitbreaker.PawnControl
             if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
 
-            // Check combined cache first
-            if (Utility_UnifiedCache.CombinedWorkTag.TryGetValue(pawn, out bool result))
-                return result;
-
             // Quick reject if no extension
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
-                Utility_UnifiedCache.CombinedWorkTag[pawn] = false;
+                Utility_CacheManager.CombinedWorkTag[pawn] = false;
                 return false;
             }
 
@@ -51,9 +47,9 @@ namespace emitbreaker.PawnControl
                                Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.BlockWorkPrefix);
 
             // Store in respective caches
-            Utility_UnifiedCache.AllowWorkTag[pawn] = allowResult;
-            Utility_UnifiedCache.BlockWorkTag[pawn] = blockResult;
-            Utility_UnifiedCache.CombinedWorkTag[pawn] = allowResult || blockResult;
+            Utility_CacheManager.AllowWorkTag[pawn] = allowResult;
+            Utility_CacheManager.BlockWorkTag[pawn] = blockResult;
+            Utility_CacheManager.CombinedWorkTag[pawn] = allowResult || blockResult;
 
             return allowResult || blockResult;
         }
@@ -68,14 +64,14 @@ namespace emitbreaker.PawnControl
             if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
 
-            if (Utility_UnifiedCache.AllowWorkTag.TryGetValue(pawn, out bool hasTag))
+            if (Utility_CacheManager.AllowWorkTag.TryGetValue(pawn, out bool hasTag))
             {
                 return hasTag;
             }
 
-            if (Utility_UnifiedCache.GetModExtension(pawn.def) == null)
+            if (Utility_CacheManager.GetModExtension(pawn.def) == null)
             {
-                Utility_UnifiedCache.AllowWorkTag[pawn] = false;
+                Utility_CacheManager.AllowWorkTag[pawn] = false;
                 return false; // No mod extension, no tags
             }
 
@@ -83,7 +79,7 @@ namespace emitbreaker.PawnControl
                 Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
                 Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.AllowWorkPrefix);
 
-            Utility_UnifiedCache.AllowWorkTag[pawn] = result; // ✅ Cache the computed result
+            Utility_CacheManager.AllowWorkTag[pawn] = result; // ✅ Cache the computed result
             return result;
         }
 
@@ -97,14 +93,14 @@ namespace emitbreaker.PawnControl
             if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
 
-            if (Utility_UnifiedCache.BlockWorkTag.TryGetValue(pawn, out bool hasTag))
+            if (Utility_CacheManager.BlockWorkTag.TryGetValue(pawn, out bool hasTag))
             {
                 return hasTag;
             }
 
-            if (Utility_UnifiedCache.GetModExtension(pawn.def) == null)
+            if (Utility_CacheManager.GetModExtension(pawn.def) == null)
             {
-                Utility_UnifiedCache.BlockWorkTag[pawn] = false;
+                Utility_CacheManager.BlockWorkTag[pawn] = false;
                 return false; // No mod extension, no tags
             }
 
@@ -112,7 +108,7 @@ namespace emitbreaker.PawnControl
                 Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
                 Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.BlockWorkPrefix);
 
-            Utility_UnifiedCache.BlockWorkTag[pawn] = result; // ✅ Cache the computed result
+            Utility_CacheManager.BlockWorkTag[pawn] = result; // ✅ Cache the computed result
             return result;
         }
 
@@ -345,7 +341,7 @@ namespace emitbreaker.PawnControl
 
                 foreach (var node in pawn.thinker.MainThinkNodeRoot.ThisAndChildrenRecursive)
                 {
-                    if (node is JobGiver_Work || node is JobGiver_WorkNonHumanlike)
+                    if (node is JobGiver_Work)
                         hasWorkGiver = true;
 
                     if (node is ThinkNode_ConditionalColonist)
@@ -370,7 +366,7 @@ namespace emitbreaker.PawnControl
             if (pawn == null) return;
 
             // Check if there's a mod extension with stored original think trees
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             bool debugLogging = modExtension?.debugMode == true;
 
             try
@@ -617,9 +613,9 @@ namespace emitbreaker.PawnControl
 
         public static void ResetCache()
         {
-            Utility_UnifiedCache.AllowWorkTag.Clear();
-            Utility_UnifiedCache.BlockWorkTag.Clear();
-            Utility_UnifiedCache.CombinedWorkTag.Clear();
+            Utility_CacheManager.AllowWorkTag.Clear();
+            Utility_CacheManager.BlockWorkTag.Clear();
+            Utility_CacheManager.CombinedWorkTag.Clear();
         }
     }
 }

@@ -24,7 +24,7 @@ namespace emitbreaker.PawnControl
             if (pawn == null || pawn.def == null || pawn.def.statBases == null)
                 return;
 
-            var modExt = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExt = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExt == null)
                 return;
 

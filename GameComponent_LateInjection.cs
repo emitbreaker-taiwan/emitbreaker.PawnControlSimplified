@@ -30,26 +30,78 @@ namespace emitbreaker.PawnControl
             base.StartedNewGame();
 
             // Clear all caches when starting a new game
-            Utility_MapCacheManager.ClearAllCaches();
-            Utility_UnifiedCache.Clear(); // Use the unified cache
+            Utility_CacheManager.Clear(); // Use the unified cache
             ResetAllCaches(resetMode: "NewGame");
 
             // Clean up any runtime mod extensions to start fresh
-            Utility_UnifiedCache.CleanupRuntimeModExtensions(); // Use the unified cache method
+            Utility_CacheManager.CleanupRuntimeModExtensions(); // Use the unified cache method
         }
 
         public override void LoadedGame()
         {
             base.LoadedGame();
-            Utility_JobGiverRegistry.RegisterAllJobGivers();
-
-            // Initial calculation of tick groups based on colony size
-            Utility_JobGiverSchedulingManager.RecalculateTickGroups();
 
             // Clear all caches when loading a saved game
-            Utility_MapCacheManager.ClearAllCaches();
-            Utility_UnifiedCache.Clear(); // Use the unified cache
+            Utility_CacheManager.Clear(); // Use the unified cache
             ResetAllCaches(resetMode: "LoadedGame");
+
+            // NEW: repopulate BioTabVisibility now that any runtime extensions have
+            // been re-loaded in FinalizeInit
+            RefreshBioTabVisibilityCache();
+        }
+
+        /// <summary>
+        /// Walks every spawned pawn (and world‐pawn) and marks BioTabVisibility[pawnID] = true
+        /// for any pawn that currently has a NonHumanlikePawnControlExtension *and* is non-humanlike.
+        /// All other entries stay absent, so your patch will re-check them at runtime.
+        /// </summary>
+        private void RefreshBioTabVisibilityCache()
+        {
+            // clear only the BioTabVisibility cache, leave everything else intact
+            Utility_CacheManager.BioTabVisibility.Clear();
+
+            // local function to scan a single pawn list
+            void Scan(IEnumerable<Pawn> pawns)
+            {
+                foreach (var pawn in pawns)
+                {
+                    if (pawn?.def == null) continue;
+                    // pick up either XML or runtime‐injected extension
+                    var ext = Utility_CacheManager.GetModExtension(pawn.def)
+                           ?? this.GetRuntimeModExtensionForRace(pawn.def);
+                    if (ext != null && !pawn.RaceProps.Humanlike)
+                    {
+                        Utility_CacheManager.BioTabVisibility[pawn.thingIDNumber] = true;
+                        if (ext.debugMode)
+                            Utility_DebugManager.LogNormal($"[CachePrep] will hide Bio for {pawn.LabelShort}");
+                    }
+                }
+            }
+
+            // scan all maps
+            if (Find.Maps != null)
+            {
+                foreach (var map in Find.Maps)
+                    Scan(map.mapPawns.AllPawnsSpawned);
+            }
+
+            // scan all world pawns
+            if (Find.World?.worldPawns?.AllPawnsAliveOrDead != null)
+                Scan(Find.World.worldPawns.AllPawnsAliveOrDead);
+
+            if (Prefs.DevMode)
+                Utility_DebugManager.LogNormal($"BioTabVisibility cache rebuilt: {Utility_CacheManager.BioTabVisibility.Count} entries");
+        }
+
+        /// <summary>
+        /// Helper to pull any runtime‐injected extension for a race from our saved list.
+        /// </summary>
+        private NonHumanlikePawnControlExtension GetRuntimeModExtensionForRace(ThingDef def)
+        {
+            if (runtimeModExtensions == null) return null;
+            var record = runtimeModExtensions
+                .FirstOrDefault(r => r.targetDefName == def.defName);
+            return record?.extension;
         }
 
         public override void GameComponentTick()
@@ -60,9 +112,6 @@ namespace emitbreaker.PawnControl
                 PerformPeriodicCacheMaintenance();
                 return;
             }
-
-            // Recalculate periodically - the manager handles frequency internally
-            Utility_JobGiverSchedulingManager.RecalculateTickGroups();
 
             if (Find.TickManager.TicksGame < 200)
             {
@@ -95,14 +144,8 @@ namespace emitbreaker.PawnControl
 
             try
             {
-                // Clean up any invalid entries in the reachability cache
-                CleanupInvalidReachabilityCacheEntries();
-
                 // The unified cache system handles its own maintenance
                 // but we can still clean up specific things that need game logic
-
-                // Clean job caches for non-existent things
-                CleanupStaleJobCaches();
 
                 // Prune extension caches for races no longer in use
                 CleanupUnusedRaceExtensionCaches();
@@ -114,54 +157,13 @@ namespace emitbreaker.PawnControl
         }
 
         /// <summary>
-        /// Clean up any invalid cached reachability results
-        /// </summary>
-        private void CleanupInvalidReachabilityCacheEntries()
-        {
-            // We don't have direct access to the internal dictionary in the generic class
-            // Instead we'll provide a utility method that each job giver can call
-
-            // Signal to all maps that they should check for cleanup
-            if (Find.Maps != null)
-            {
-                foreach (var map in Find.Maps)
-                {
-                    // Invalidate any reachability results for despawned things
-                    Utility_TargetPrefilteringManager.CleanupInvalidTargetsForMap(map);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Clean up any stale job caches for things that no longer exist
-        /// </summary>
-        private void CleanupStaleJobCaches()
-        {
-            // Clean cached jobs for things that are no longer valid
-            var invalidEntries = Utility_UnifiedCache.JobCache
-                .Where(kvp => kvp.Key == null || !kvp.Key.Spawned || kvp.Key.Destroyed)
-                .Select(kvp => kvp.Key)
-                .ToList();
-
-            foreach (var key in invalidEntries)
-            {
-                Utility_UnifiedCache.JobCache.Remove(key);
-            }
-
-            if (invalidEntries.Count > 0 && Prefs.DevMode)
-            {
-                Utility_DebugManager.LogNormal($"Cleaned up {invalidEntries.Count} stale job cache entries");
-            }
-        }
-
-        /// <summary>
         /// Clean up extension caches for races that are no longer in use
         /// </summary>
         private void CleanupUnusedRaceExtensionCaches()
         {
             // This is mostly a memory optimization
             // Only perform if we have a lot of cached extensions
-            if (Utility_UnifiedCache.ModExtensions.Count > 50)
+            if (Utility_CacheManager._modExtensionCache.Count > 50)
             {
                 // Find races that aren't currently spawned on any map
                 var usedRaces = new HashSet<ThingDef>();
@@ -190,7 +192,7 @@ namespace emitbreaker.PawnControl
                 }
 
                 // Find extension cache entries for races not currently in use
-                var unusedExtensionDefs = Utility_UnifiedCache.ModExtensions.Keys
+                var unusedExtensionDefs = Utility_CacheManager._modExtensionCache.Keys
                     .Where(def => !usedRaces.Contains(def))
                     .ToList();
 
@@ -202,7 +204,7 @@ namespace emitbreaker.PawnControl
                     // Remove a portion of the unused entries (not all, in case they're needed soon)
                     foreach (var def in unusedExtensionDefs.Take(unusedExtensionDefs.Count / 2))
                     {
-                        Utility_UnifiedCache.ModExtensions.Remove(def);
+                        Utility_CacheManager._modExtensionCache.Remove(def);
                         removed++;
                     }
 
@@ -227,8 +229,6 @@ namespace emitbreaker.PawnControl
             // Restore runtime mod extensions from this save file
             RestoreRuntimeModExtensions();
 
-            Utility_JobGiverManager.ResetRegistry();
-
             // Ensure all modded pawns have their stat injections applied
             Utility_StatManager.CheckStatHediffDefExists();
 
@@ -244,7 +244,7 @@ namespace emitbreaker.PawnControl
             {
                 foreach (Map map in Find.Maps)
                 {
-                    Utility_UnifiedCache.InvalidateColonistCache(map); // Use the unified cache
+                    Utility_CacheManager.InvalidateColonistCache(map); // Use the unified cache
                 }
             }
         }
@@ -256,18 +256,13 @@ namespace emitbreaker.PawnControl
         private void ResetAllCaches(string resetMode)
         {
             // Core reset using the unified cache
-            Utility_UnifiedCache.Clear();
+            Utility_CacheManager.Clear();
 
             // Reset other specialized subsystems
             Utility_DrafterManager.ResetTrackerTracking();
             Utility_ThinkTreeManager.ResetCache();
 
             // Reset global system caches that aren't part of the unified system
-            Utility_JobGiverTickManager.ResetAll();
-            Utility_TargetPrefilteringManager.ResetAllCaches();
-            Utility_PathfindingManager.ResetAllCaches();
-            Utility_GlobalStateManager.ResetAllData();
-            Utility_JobGiverCacheManager<Thing>.Reset();
 
             // Initialize work settings for all maps
             if (Find.Maps != null)
@@ -289,7 +284,7 @@ namespace emitbreaker.PawnControl
                 List<ThingDef> defsToProcess = new List<ThingDef>();
 
                 // Find races with mod extensions marked for removal from the cache
-                foreach (var cacheEntry in Utility_UnifiedCache.ModExtensions.ToList())
+                foreach (var cacheEntry in Utility_CacheManager._modExtensionCache.ToList())
                 {
                     ThingDef def = cacheEntry.Key;
                     NonHumanlikePawnControlExtension modExtension = cacheEntry.Value;
@@ -339,7 +334,7 @@ namespace emitbreaker.PawnControl
                     }
 
                     // Clear the cached extension for this def
-                    Utility_UnifiedCache.ClearModExtension(def);
+                    Utility_CacheManager.ClearModExtension(def);
 
                     // Clear race-specific tag caches
                     Utility_TagManager.ClearCacheForRace(def);
@@ -409,7 +404,7 @@ namespace emitbreaker.PawnControl
                 // Now give every non-human pawn its equipment/apparel/inventory
                 foreach (var pawn in map.mapPawns.AllPawnsSpawned)
                 {
-                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                     if (modExtension == null || pawn.RaceProps.Humanlike)
                     {
                         continue;
@@ -524,8 +519,8 @@ namespace emitbreaker.PawnControl
                     record.extension.CacheSkillPassions();
 
                     // Update the cache for this def
-                    Utility_UnifiedCache.ClearModExtension(def);
-                    Utility_UnifiedCache.PreloadModExtensionForRace(def);
+                    Utility_CacheManager.ClearModExtension(def);
+                    Utility_CacheManager.PreloadModExtensionForRace(def);
 
                     // Apply to existing pawns
                     ApplyExtensionToExistingPawns(def, record.extension);

@@ -26,7 +26,7 @@ namespace emitbreaker.PawnControl
             }
 
             // ✅ New Safe Check: Only inject subtree if mainWorkThinkTreeDefName was NOT injected statically
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
 
             if (modExtension == null)
             {
@@ -73,7 +73,7 @@ namespace emitbreaker.PawnControl
                 if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(pawn))
                     continue;
 
-                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
 
                 if (modExtension == null)
                     continue; // No mod extension found, nothing to do
@@ -107,7 +107,7 @@ namespace emitbreaker.PawnControl
         {
             if (pawn == null || pawn.workSettings == null)
             {
-                var modExtension = Utility_UnifiedCache.GetModExtension(pawn?.def);
+                var modExtension = Utility_CacheManager.GetModExtension(pawn?.def);
                 if (modExtension == null)
                 {
                     return; // No mod extension found, nothing to do
@@ -138,7 +138,7 @@ namespace emitbreaker.PawnControl
                 return;
             }
 
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return; // No mod extension found, nothing to do
@@ -178,7 +178,7 @@ namespace emitbreaker.PawnControl
             {
                 return;
             }
-            var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
                 return; // No mod extension found, nothing to do

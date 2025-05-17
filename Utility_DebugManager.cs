@@ -617,7 +617,7 @@ namespace emitbreaker.PawnControl
                 LogNormal($"- Emergency list count: {emergencyList?.Count ?? 0}");
 
                 // Check if the pawn has valid mod extension
-                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                 LogNormal($"- Has mod extension: {modExtension != null}");
 
                 // Check if ThinkTree is properly configured
@@ -646,7 +646,7 @@ namespace emitbreaker.PawnControl
 
             // Log basic pawn info
             LogNormal($"- Race: {pawn.def.defName}");
-            LogNormal($"- Mod extension: {(Utility_UnifiedCache.GetModExtension(pawn.def) != null ? "Present" : "Missing")}");
+            LogNormal($"- Mod extension: {(Utility_CacheManager.GetModExtension(pawn.def) != null ? "Present" : "Missing")}");
             LogNormal($"- Work tags: AllowWork={Utility_ThinkTreeManager.HasAllowWorkTag(pawn)}, HasBlock={Utility_ThinkTreeManager.HasBlockWorkTag(pawn)}");
 
             // Check WorkSettings

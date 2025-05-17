@@ -13,7 +13,7 @@ namespace emitbreaker.PawnControl
     {
         public static bool PawnCompatibilityChecker(Pawn pawn)
         {
-            if (pawn == null || pawn.RaceProps.Humanlike || pawn.Dead || !pawn.Spawned || pawn.IsDessicated())
+            if (pawn.RaceProps.Humanlike || pawn.Dead || !pawn.Spawned || pawn.IsDessicated())
             {
                 return false;
             }

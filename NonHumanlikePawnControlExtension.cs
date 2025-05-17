@@ -106,7 +106,7 @@ namespace emitbreaker.PawnControl
         // Implementation of IExposable for saving/loading
         public void ExposeData()
         {
-
+            // Existing code
             Scribe_Values.Look(ref mainWorkThinkTreeDefName, "mainWorkThinkTreeDefName");
             Scribe_Values.Look(ref constantThinkTreeDefName, "constantThinkTreeDefName");
             Scribe_Values.Look(ref originalMainWorkThinkTreeDefName, "originalMainWorkThinkTreeDefName");
@@ -146,6 +146,10 @@ namespace emitbreaker.PawnControl
             Scribe_Values.Look(ref skillLevelAnimalIntermediate, "skillLevelAnimalIntermediate", 0);
             Scribe_Values.Look(ref skillLevelAnimalBasic, "skillLevelAnimalBasic", 0);
 
+            // MISSING CODE: Save and load injected skills and passions
+            Scribe_Collections.Look(ref injectedSkills, "injectedSkills", LookMode.Deep);
+            Scribe_Collections.Look(ref injectedPassions, "injectedPassions", LookMode.Deep);
+
             // Make sure lists are property initialized after loading
             if (Scribe.mode == LoadSaveMode.LoadingVars)
             {
@@ -171,6 +175,13 @@ namespace emitbreaker.PawnControl
             Scribe_Values.Look(ref fromXML, "fromXML", true);
             Scribe_Values.Look(ref toBeRemoved, "toBeRemoved", false);
             Scribe_Values.Look(ref ignoreCapability, "ignoreCapability", true);
+
+            // Re-cache after loading
+            if (Scribe.mode == LoadSaveMode.PostLoadInit)
+            {
+                CacheSkillPassions();
+                CacheSimulatedSkillLevels();
+            }
         }
 
         public Dictionary<SkillDef, Passion> SkillPassionDict

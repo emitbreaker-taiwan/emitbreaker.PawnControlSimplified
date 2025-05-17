@@ -29,96 +29,156 @@ namespace emitbreaker.PawnControl
             [HarmonyPatch(typeof(RaceProperties), nameof(RaceProperties.Animal), MethodType.Getter)]
             public static class Patch_RaceProperties_Animal
             {
-                private static int _callCounter = 0;
-                private static long _totalTicks = 0;
-                private static readonly Stopwatch _stopwatch = new Stopwatch();
+                // Map each RaceProperties instance to its resolved override.
+                // If a key is present, we can skip the vanilla Animal getter entirely.
+                private static readonly Dictionary<RaceProperties, bool> _overrideCache = new Dictionary<RaceProperties, bool>();
+
+                // For debug/throttled logging
+                private static long _lastLogTick = 0;
+                private const int LogIntervalTicks = 30 * 60; // e.g. every 30 seconds
+
+                public static bool Prefix(RaceProperties __instance, ref bool __result)
+                {
+                    if (_overrideCache.TryGetValue(__instance, out bool forcedAnimal))
+                    {
+                        __result = forcedAnimal;
+                        return false; // skip original getter
+                    }
+
+                    // not in cache, let vanilla compute
+                    return true;
+                }
 
                 public static void Postfix(RaceProperties __instance, ref bool __result)
                 {
-                    if (Utility_DebugManager.ShouldLog())
-                    {
-                        _stopwatch.Restart();
-                    }
-
+                    // if vanilla already said “true”, just cache that and exit
                     if (__result)
                     {
+                        _overrideCache[__instance] = true;
                         return;
                     }
 
-                    PawnKindDef pawnKind = __instance.AnyPawnKind;
-                    if (pawnKind == null)
+                    // vanilla said “false” → check our mod extension
+                    var pawnKind = __instance.AnyPawnKind;
+                    if (pawnKind?.race is ThingDef raceDef)
                     {
-                        return;
-                    }
+                        var ext = Utility_CacheManager.GetModExtension(raceDef);
+                        bool isForced = ext?.forceIdentity == ForcedIdentityType.ForceAnimal;
+                        _overrideCache[__instance] = isForced;
 
-                    ThingDef raceDef = pawnKind.race;
-                    if (raceDef == null)
-                    {
-                        return;
-                    }
-
-                    var modExtension = Utility_UnifiedCache.GetModExtension(raceDef);
-                    if (modExtension == null)
-                    {
-                        return; // ✅ No mod extension, proceed with vanilla logic
-                    }
-
-                    // ✅ Try fast cache lookup
-                    if (Utility_UnifiedCache.ForcedAnimals.TryGetValue(raceDef, out bool isForcedAnimal))
-                    {
-                        __result = isForcedAnimal;
-                        return;
-                    }
-
-                    // ✅ Cache miss, check mod extension
-                    isForcedAnimal = Utility_UnifiedCache.GetModExtension(raceDef)?.forceIdentity == ForcedIdentityType.ForceAnimal;
-                    Utility_UnifiedCache.ForcedAnimals[raceDef] = isForcedAnimal;
-
-                    if (isForcedAnimal && modExtension.debugMode)
-                    {
-                        Utility_DebugManager.LogNormal($"ForceAnimal override applied: {raceDef.defName}");
-                    }
-
-                    __result = isForcedAnimal;
-
-                    if (Utility_DebugManager.ShouldLog())
-                    {
-                        _stopwatch.Stop();
-                        _totalTicks += _stopwatch.ElapsedTicks;
-                        _callCounter++;
-
-                        // Log every 10,000 calls
-                        if (_callCounter % 10000 == 0)
+                        if (isForced && ext.debugMode)
                         {
-                            float avgMs = (float)_totalTicks / _callCounter / TimeSpan.TicksPerMillisecond;
-                            Utility_DebugManager.LogWarning($"Animal getter called {_callCounter} times, avg {avgMs:F6}ms per call");
+                            long now = Find.TickManager.TicksGame;
+                            if (now - _lastLogTick > LogIntervalTicks)
+                            {
+                                Utility_DebugManager.LogNormal($"[PawnControl] ForcedAnimal: {raceDef.defName}");
+                                _lastLogTick = now;
+                            }
                         }
+
+                        __result = isForced;
                     }
-                }
-
-                private static void CodeBackupOriginal(RaceProperties __instance, ref bool __result)
-                {
-                    if (__result) return; // Already animal, no debug needed
-
-                    PawnKindDef pawnKind = __instance.AnyPawnKind;
-                    if (pawnKind == null)
+                    else
                     {
-                        return;
-                    }
-
-                    ThingDef raceDef = pawnKind.race;
-                    if (raceDef == null)
-                    {
-                        return;
-                    }
-
-                    if (Utility_IdentityManager.IsForcedAnimal(raceDef))
-                    {
-                        Utility_DebugManager.LogNormal($"ForceAnimal override applied: Race '{raceDef.defName}' was treated as Animal.");
-                        __result = true;
+                        // still no pawnKind→race, just cache false once so we don’t repeat
+                        _overrideCache[__instance] = false;
                     }
                 }
             }
+
+            //[HarmonyPatch(typeof(RaceProperties), nameof(RaceProperties.Animal), MethodType.Getter)]
+            //public static class Patch_RaceProperties_Animal
+            //{
+            //    private static int _callCounter = 0;
+            //    private static long _totalTicks = 0;
+            //    private static readonly Stopwatch _stopwatch = new Stopwatch();
+
+            //    public static void Postfix(RaceProperties __instance, ref bool __result)
+            //    {
+            //        if (Utility_DebugManager.ShouldLog())
+            //        {
+            //            _stopwatch.Restart();
+            //        }
+
+            //        if (__result)
+            //        {
+            //            return;
+            //        }
+
+            //        PawnKindDef pawnKind = __instance.AnyPawnKind;
+            //        if (pawnKind == null)
+            //        {
+            //            return;
+            //        }
+
+            //        ThingDef raceDef = pawnKind.race;
+            //        if (raceDef == null)
+            //        {
+            //            return;
+            //        }
+
+            //        var modExtension = Utility_CacheManager.GetModExtension(raceDef);
+            //        if (modExtension == null)
+            //        {
+            //            return; // ✅ No mod extension, proceed with vanilla logic
+            //        }
+
+            //        // ✅ Try fast cache lookup
+            //        if (Utility_CacheManager.ForcedAnimals.TryGetValue(raceDef, out bool isForcedAnimal))
+            //        {
+            //            __result = isForcedAnimal;
+            //            return;
+            //        }
+
+            //        // ✅ Cache miss, check mod extension
+            //        isForcedAnimal = Utility_CacheManager.GetModExtension(raceDef)?.forceIdentity == ForcedIdentityType.ForceAnimal;
+            //        Utility_CacheManager.ForcedAnimals[raceDef] = isForcedAnimal;
+
+            //        if (isForcedAnimal && modExtension.debugMode)
+            //        {
+            //            Utility_DebugManager.LogNormal($"ForceAnimal override applied: {raceDef.defName}");
+            //        }
+
+            //        __result = isForcedAnimal;
+
+            //        if (Utility_DebugManager.ShouldLog())
+            //        {
+            //            _stopwatch.Stop();
+            //            _totalTicks += _stopwatch.ElapsedTicks;
+            //            _callCounter++;
+
+            //            // Log every 10,000 calls
+            //            if (_callCounter % 10000 == 0)
+            //            {
+            //                float avgMs = (float)_totalTicks / _callCounter / TimeSpan.TicksPerMillisecond;
+            //                Utility_DebugManager.LogWarning($"Animal getter called {_callCounter} times, avg {avgMs:F6}ms per call");
+            //            }
+            //        }
+            //    }
+
+            //    private static void CodeBackupOriginal(RaceProperties __instance, ref bool __result)
+            //    {
+            //        if (__result) return; // Already animal, no debug needed
+
+            //        PawnKindDef pawnKind = __instance.AnyPawnKind;
+            //        if (pawnKind == null)
+            //        {
+            //            return;
+            //        }
+
+            //        ThingDef raceDef = pawnKind.race;
+            //        if (raceDef == null)
+            //        {
+            //            return;
+            //        }
+
+            //        if (Utility_IdentityManager.IsForcedAnimal(raceDef))
+            //        {
+            //            Utility_DebugManager.LogNormal($"ForceAnimal override applied: Race '{raceDef.defName}' was treated as Animal.");
+            //            __result = true;
+            //        }
+            //    }
+            //}
 
             /// <summary>
             /// Patch #1 Step 2. Humanlike Race replacement by using cache.
@@ -225,11 +285,11 @@ namespace emitbreaker.PawnControl
                 {
                     using (new Utility_IdentityManager_ScopedFlagContext(FlagScopeTarget.IsColonist))
                     {
-                        var taggedPawns = Utility_UnifiedCache.GetColonistLikePawns(Find.CurrentMap);
+                        var taggedPawns = Utility_CacheManager.GetColonistLikePawns(Find.CurrentMap);
 
                         // If all are vanilla humanlike without mod extension, fall back to vanilla logic
                         bool isPureVanillaHumanlike = taggedPawns.All(p =>
-                            p.RaceProps.Humanlike && Utility_UnifiedCache.GetModExtension(p.def) == null);
+                            p.RaceProps.Humanlike && Utility_CacheManager.GetModExtension(p.def) == null);
 
                         if (isPureVanillaHumanlike)
                         {
@@ -250,7 +310,7 @@ namespace emitbreaker.PawnControl
                         // Make sure all pawns have proper work settings initialized
                         foreach (var pawn in taggedPawns)
                         {
-                            if (pawn != null && Utility_UnifiedCache.GetModExtension(pawn.def) != null)
+                            if (pawn != null && Utility_CacheManager.GetModExtension(pawn.def) != null)
                             {
                                 Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
                             }
@@ -276,7 +336,7 @@ namespace emitbreaker.PawnControl
                 [HarmonyPrefix]
                 public static bool Prefix(Pawn __instance, WorkTypeDef w, ref bool __result)
                 {
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null)
                     {
                         return true; // No mod extension, proceed with vanilla logic
@@ -304,7 +364,7 @@ namespace emitbreaker.PawnControl
                         return true;
 
                     // For modded pawns, check tag system instead of standard capability checks
-                    var modExtension = Utility_UnifiedCache.GetModExtension(p.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(p.def);
                     if (modExtension != null)
                     {
                         string tag = ManagedTags.AllowWorkPrefix + work.defName;
@@ -377,8 +437,8 @@ namespace emitbreaker.PawnControl
                     if (a.skills != null && b.skills != null)
                         return true; // Both have normal skills, use vanilla comparison
 
-                    var modExtensionPawnA = Utility_UnifiedCache.GetModExtension(a.def);
-                    var modExtensionPawnB = Utility_UnifiedCache.GetModExtension(b.def);
+                    var modExtensionPawnA = Utility_CacheManager.GetModExtension(a.def);
+                    var modExtensionPawnB = Utility_CacheManager.GetModExtension(b.def);
 
                     if (modExtensionPawnA == null && modExtensionPawnB == null)
                         return true; // Neither are modded pawns
@@ -498,7 +558,7 @@ namespace emitbreaker.PawnControl
                     if (p == null || p.def == null || p.def.race == null)
                         return true; // Allow vanilla drawing for invalid pawns
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(p.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(p.def);
                     if (modExtension == null)
                         return true; // Allow vanilla drawing for non-modded pawns
 
@@ -708,14 +768,14 @@ namespace emitbreaker.PawnControl
                         if (pawn == null || pawn.def == null)
                             return true;
 
-                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                         if (modExtension == null)
                             return true; // Not our modded pawn
 
                         int pawnId = pawn.thingIDNumber;
 
                         // Check visibility cache
-                        if (Utility_UnifiedCache.BioTabVisibility.TryGetValue(pawnId, out bool shouldHide))
+                        if (Utility_CacheManager.BioTabVisibility.TryGetValue(pawnId, out bool shouldHide))
                         {
                             if (shouldHide)
                             {
@@ -726,15 +786,15 @@ namespace emitbreaker.PawnControl
                         }
 
                         // Not in cache, decide visibility
-                        bool hideBioTab = modExtension != null && !pawn.RaceProps.Humanlike;
+                        bool hideBioTab = !pawn.RaceProps.Humanlike;
 
                         // Cache the result
-                        Utility_UnifiedCache.BioTabVisibility[pawnId] = hideBioTab;
+                        Utility_CacheManager.BioTabVisibility[pawnId] = hideBioTab;
 
                         // Log and set result for hidden tabs
                         if (hideBioTab)
                         {
-                            if (modExtension.debugMode)
+                            if (Utility_DebugManager.ShouldLog())
                                 Utility_DebugManager.LogNormal($"Hidden Bio tab for modded non-humanlike pawn: {pawn.LabelShort}");
 
                             __result = false;
@@ -770,20 +830,20 @@ namespace emitbreaker.PawnControl
                         int pawnId = pawn.thingIDNumber;
 
                         // Check cached visibility
-                        if (Utility_UnifiedCache.BioTabVisibility.TryGetValue(pawnId, out bool shouldHide) && shouldHide)
+                        if (Utility_CacheManager.BioTabVisibility.TryGetValue(pawnId, out bool shouldHide) && shouldHide)
                         {
                             __result = false;
                             return;
                         }
 
                         // Focus on non-humanlike modded pawns only
-                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                         if (modExtension == null) return;
 
                         bool hideBioTab = !pawn.RaceProps.Humanlike;
 
                         // Update cache and hide if needed
-                        Utility_UnifiedCache.BioTabVisibility[pawnId] = hideBioTab;
+                        Utility_CacheManager.BioTabVisibility[pawnId] = hideBioTab;
                         if (hideBioTab)
                         {
                             __result = false;
@@ -816,7 +876,7 @@ namespace emitbreaker.PawnControl
                     if (__result == null || __result.def == null || __result.RaceProps.Humanlike)
                         return;
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__result.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(__result.def);
                     if (modExtension == null)
                         return;
 
@@ -834,69 +894,71 @@ namespace emitbreaker.PawnControl
             }
 
             /// <summary>
-            /// Initializes modded pawns when they are spawned
+            /// Initializes modded non-humanlike pawns when they are spawned, injecting skills, passions,
+            /// stats, and work settings according to the ModExtension.
             /// </summary>
             [HarmonyPatch(typeof(Pawn), "SpawnSetup")]
-            [HarmonyPatch(new Type[] { typeof(Map), typeof(bool) })]
+            [HarmonyPatch(new[] { typeof(Map), typeof(bool) })]
             public static class Patch_Pawn_SpawnSetup
             {
                 [HarmonyPostfix]
-                public static void Postfix(Pawn __instance)
+                public static void Postfix(Pawn __instance, Map map, bool respawningAfterLoad)
                 {
-                    //// Initialize the static filter for this pawn
-                    //JobGiver_PawnControl.GetStaticAllowedJobGivers(__instance);
-
+                    // --- early outs ---
                     if (__instance == null || __instance.Dead || __instance.Destroyed)
                         return;
-
-                    // Skip humanlike pawns
                     if (__instance.RaceProps.Humanlike)
                         return;
 
-                    // Check for mod extension and work tags
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
+                    // fetch your ModExtension
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null)
                         return;
 
-                    bool hasTags = Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance);
-                    if (!hasTags)
+                    // only proceed if this pawn actually has any work-tag configuration
+                    if (!Utility_ThinkTreeManager.HasAllowOrBlockWorkTag(__instance))
                         return;
 
-                    // Ensure mind state is active for any eligible pawn
-                    if (__instance.mindState != null &&
-                        __instance.workSettings != null &&
-                        __instance.workSettings.EverWork)
+                    // ensure mindState is active
+                    if (__instance.mindState != null
+                        && __instance.workSettings != null
+                        && __instance.workSettings.EverWork)
                     {
                         __instance.mindState.Active = true;
                         if (__instance.Faction == Faction.OfPlayer && Utility_DebugManager.ShouldLogDetailed())
                             Utility_DebugManager.LogNormal($"Activated {__instance.LabelShort}'s mind during SpawnSetup");
                     }
 
-                    // Delayed setup to ensure all components are initialized
                     LongEventHandler.ExecuteWhenFinished(() =>
                     {
                         if (__instance.health?.hediffSet == null || !__instance.Spawned)
                             return;
 
-                        // Inject stats if needed
-                        if (!__instance.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub")))
+                        // only once per pawn
+                        var stubDef = HediffDef.Named("PawnControl_StatStub");
+                        if (__instance.health.hediffSet.HasHediff(stubDef))
+                            return;
+
+                        // ── HERE ──
+                        // 1) Force‐attach a real SkillTracker, which will
+                        //    – read injectedSkills & baseSkillLevelOverride
+                        //    – read injectedPassions
+                        //    – fall back on trainability / raceProps
+                        Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__instance);
+
+                        // 2) Stats & work-settings (unchanged)
+                        Utility_StatManager.InjectConsolidatedStatHediff(__instance);
+                        Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__instance);
+
+                        // 3) Debug logging (unchanged)
+                        if (Utility_DebugManager.ShouldLogDetailed())
                         {
-                            Utility_SkillManager.ForceAttachSkillTrackerIfMissing(__instance);
-
-                            if (Utility_DebugManager.ShouldLogDetailed())
-                            {
-                                // Debug info
-                                Utility_DebugManager.DumpThinkerStatus(__instance);
-                                Utility_DebugManager.DiagnoseWorkGiversForPawn(__instance);
-                            }
-
-                            Utility_StatManager.InjectConsolidatedStatHediff(__instance);
-                            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(__instance);
+                            Utility_DebugManager.DumpThinkerStatus(__instance);
+                            Utility_DebugManager.DiagnoseWorkGiversForPawn(__instance);
                         }
                     });
                 }
             }
-
             #endregion
 
             #region Safe-Guard for new game
@@ -907,7 +969,7 @@ namespace emitbreaker.PawnControl
                 public static void Prefix()
                 {
                     // Clean up any lingering mod extensions from previous games
-                    Utility_UnifiedCache.CleanupRuntimeModExtensions();
+                    Utility_CacheManager.CleanupRuntimeModExtensions();
                 }
             }
 
@@ -974,7 +1036,7 @@ namespace emitbreaker.PawnControl
                     JobDef jobForReservation,
                     ref bool __result)
                 {
-                    if (p.RaceProps.Humanlike || Utility_UnifiedCache.GetModExtension(p.def) == null)
+                    if (p.RaceProps.Humanlike || Utility_CacheManager.GetModExtension(p.def) == null)
                         return true; // ✅ Let vanilla run if humanlike or no mod extension
 
                     // ⛔ Skip workSettings requirement check, as modded animals may not have any
@@ -1051,7 +1113,7 @@ namespace emitbreaker.PawnControl
 
                     if (worker.RaceProps.Humanlike) return true; // Let vanilla handle humanlike pawns
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(worker.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(worker.def);
                     if (modExtension == null) return true; // Not our modded pawn
 
                     if (!Utility_TagManager.HasTagSet(worker.def)) return true; // Not using our tag system
@@ -1147,7 +1209,7 @@ namespace emitbreaker.PawnControl
                     // only care about non-humanlike
                     if (pawn.RaceProps.Humanlike) return;
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                     if (modExtension == null) return; // not our modded pawn
 
                     if (!Utility_TagManager.HasTagSet(pawn.def)) return; // not using our tag system
@@ -1164,123 +1226,7 @@ namespace emitbreaker.PawnControl
                     // • you could also raise your own custom event, notify your tick-manager, etc.
                 }
             }
-
-            ///// <summary>
-            ///// Allows non-humanlike pawns to have work priorities by modifying the GetPriority method
-            ///// to consider modded pawns with our extensions when checking for priority conversion.
-            ///// </summary>
-            //[HarmonyPatch(typeof(Pawn_WorkSettings), "GetPriority")]
-            //public static class Patch_Pawn_WorkSettings_GetPriority
-            //{
-            //    public static bool Prefix(Pawn_WorkSettings __instance, WorkTypeDef w, ref int __result)
-            //    {
-            //        // Make sure the field info is cached
-            //        if (_pawnField == null)
-            //        {
-            //            _pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
-            //            _prioritiesField = AccessTools.Field(typeof(Pawn_WorkSettings), "priorities");
-            //        }
-
-            //        // Get the pawn from the private field
-            //        var pawn = _pawnField.GetValue(__instance) as Pawn;
-            //        if (pawn == null) return true; // Let vanilla handle it
-
-            //        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            //        if (modExtension == null) return true; // Let vanilla handle it
-
-            //        // Get priorities directly from the field
-            //        var priorities = _prioritiesField.GetValue(__instance) as DefMap<WorkTypeDef, int>;
-            //        if (priorities == null)
-            //        {
-            //            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
-
-            //            priorities = _prioritiesField.GetValue(__instance) as DefMap<WorkTypeDef, int>;
-
-            //            if (priorities == null) return true; // Let vanilla handle it
-            //        }
-
-            //        // Get the raw priority value
-            //        int rawPriority = priorities[w];
-
-            //        // For our modded pawns, bypass the Humanlike check
-            //        if (!pawn.RaceProps.Humanlike && rawPriority > 0)
-            //        {
-            //            // If work priorities are disabled in game settings, force to 3
-            //            if (!Find.PlaySettings.useWorkPriorities)
-            //            {
-            //                __result = 3;
-            //            }
-            //            else
-            //            {
-            //                // Otherwise use the actual priority value
-            //                __result = rawPriority;
-            //            }
-
-            //            // Skip the original method
-            //            return false;
-            //        }
-
-            //        return true; // Let vanilla handle normal pawns
-            //    }
-
-            //    // Cache these for better performance
-            //    private static System.Reflection.FieldInfo _pawnField;
-            //    private static System.Reflection.FieldInfo _prioritiesField;
-            //}
-
-            ///// <summary>
-            ///// Patch to ensure work priority values are properly returned even when
-            ///// the pawn doesn't have the Humanlike flag set.
-            ///// </summary>
-            //[HarmonyPatch(typeof(Pawn_WorkSettings), "WorkIsActive")]
-            //public static class Patch_Pawn_WorkSettings_WorkIsActive
-            //{
-            //    public static bool Prefix(Pawn_WorkSettings __instance, WorkTypeDef w, ref bool __result)
-            //    {
-            //        if (_pawnField == null)
-            //        {
-            //            _pawnField = AccessTools.Field(typeof(Pawn_WorkSettings), "pawn");
-            //        }
-
-            //        var pawn = _pawnField.GetValue(__instance) as Pawn;
-            //        if (pawn == null) return true; // Let vanilla handle it
-
-            //        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            //        if (modExtension == null) return true; // Let vanilla handle it
-
-            //        // For our modded pawns only, we'll get the priority and check if > 0
-            //        // This bypasses any Humanlike check in GetPriority
-            //        if (!pawn.RaceProps.Humanlike && Utility_TagManager.WorkTypeEnabled(pawn.def, w))
-            //        {
-            //            int priority = __instance.GetPriority(w);
-            //            __result = priority > 0;
-            //            return false; // Skip original method
-            //        }
-
-            //        return true; // Let vanilla handle normal pawns
-            //    }
-
-            //    private static System.Reflection.FieldInfo _pawnField;
-            //}
-
-            //[HarmonyPatch(typeof(ThinkNode_PrioritySorter), nameof(ThinkNode_PrioritySorter.TryIssueJobPackage))]
-            //public static class Patch_PrioritySorter_PreFilter
-            //{
-            //    public static readonly FieldInfo SubNodesField = AccessTools.Field(typeof(ThinkNode_PrioritySorter), "subNodes");
-
-            //    public static void Prefix(ThinkNode_PrioritySorter __instance, Pawn pawn)
-            //    {
-            //        if (pawn == null) return;
-
-            //        var subNodes = (List<ThinkNode>)SubNodesField.GetValue(__instance);
-            //        // Only remove those JobGiver_PawnControl nodes that say they should skip.
-            //        subNodes.RemoveAll(node =>
-            //            node is JobGiver_PawnControl jg
-            //            && jg.ShouldSkip(pawn)
-            //        );
-            //    }
-            //}
-        }
+       }
 
         public static class Patch_Iteration3_DrafterInjection
         {
@@ -1315,7 +1261,7 @@ namespace emitbreaker.PawnControl
                         return;
                     }
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null)
                     {
                         return;
@@ -1373,7 +1319,7 @@ namespace emitbreaker.PawnControl
                     foreach (var g in __result)
                         yield return g;
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null)
                     {
                         yield break; // No mod extension, skip
@@ -1394,6 +1340,169 @@ namespace emitbreaker.PawnControl
                 }
             }
 
+            // Patch #3 Step 2.5 Immediately yank modded pawns out of whatever job they’re in
+            [HarmonyPatch(typeof(Pawn_DraftController), nameof(Pawn_DraftController.Drafted), MethodType.Setter)]
+            public static class Patch_PawnDraftController_DraftedSetter_ForceInterrupt
+            {
+                public static void Postfix(Pawn_DraftController __instance, bool value)
+                {
+                    var pawn = __instance?.pawn;
+                    if (pawn == null || pawn.def == null) return;
+
+                    // Only for modded ForceDraftable pawns when being drafted (not when undrafted)
+                    if (value && Utility_CacheManager.GetModExtension(pawn.def) != null
+                        && Utility_TagManager.ForceDraftable(pawn))
+                    {
+                        // Important: Check if the pawn is currently wandering
+                        bool isWandering = pawn.jobs?.curJob?.def?.defName == "Wander" ||
+                                          (pawn.jobs?.curDriver != null && pawn.jobs.curDriver.GetType().Name.Contains("Wander"));
+
+                        // Critical fix: The parameter should be FALSE to immediately end jobs
+                        // true = finish up, false = drop immediately
+                        pawn.jobs.StopAll(false);
+
+                        // Clear reservations to prevent job resumption
+                        pawn.ClearAllReservations(true);
+
+                        // Clear job queue
+                        pawn.jobs.ClearQueuedJobs();
+
+                        // Force state change in mindstate
+                        if (pawn.mindState != null)
+                        {
+                            pawn.mindState.maxDistToSquadFlag = -1f;
+                            pawn.mindState.duty = null;
+                        }
+
+                        // Force pawn to stop moving if it was wandering
+                        if (isWandering)
+                        {
+                            // For wandering pawns, we need to interrupt any movement in progress
+                            pawn.pather?.StopDead();
+
+                            // Complete check to make sure the pawn stops moving
+                            if (pawn.stances?.curStance is Stance_Busy || pawn.stances?.curStance is Stance_Mobile)
+                            {
+                                pawn.stances.CancelBusyStanceHard();
+                            }
+
+                            if (Utility_DebugManager.ShouldLogDetailed())
+                                Utility_DebugManager.LogNormal($"Interrupted wandering movement for {pawn.LabelShort}");
+                        }
+
+                        // Force rebuild think tree to ensure drafted state is recognized
+                        ForceRebuildThinkTree(pawn);
+
+                        // Log the action at detailed level
+                        if (Utility_DebugManager.ShouldLogDetailed())
+                        {
+                            Utility_DebugManager.LogNormal($"Forced immediate job stop for drafted pawn {pawn.LabelShort}");
+                        }
+                    }
+                }
+
+                private static void ForceRebuildThinkTree(Pawn pawn)
+                {
+                    if (pawn?.thinker == null) return;
+
+                    try
+                    {
+                        // Force rebuild think tree by nulling the root
+                        FieldInfo thinkRootField = AccessTools.Field(pawn.thinker.GetType(), "thinkRoot");
+                        if (thinkRootField != null)
+                        {
+                            thinkRootField.SetValue(pawn.thinker, null);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Utility_DebugManager.LogError($"Error rebuilding think tree: {ex}");
+                    }
+                }
+            }
+
+            [HarmonyPatch(typeof(Pawn_JobTracker), "TryFindAndStartJob")]
+            public static class Patch_Pawn_JobTracker_TryFindAndStartJob_DraftedCheck
+            {
+                public static bool Prefix(Pawn_JobTracker __instance)
+                {
+                    // Get the pawn from the job tracker
+                    Pawn pawn = AccessTools.Field(typeof(Pawn_JobTracker), "pawn").GetValue(__instance) as Pawn;
+                    if (pawn == null) return true;
+
+                    // Skip vanilla humanlike pawns
+                    if (pawn.RaceProps.Humanlike && Utility_CacheManager.GetModExtension(pawn.def) == null)
+                        return true;
+
+                    // Check if pawn is drafted
+                    if (pawn.drafter != null && pawn.drafter.Drafted)
+                    {
+                        // Drafted pawns should not get regular jobs
+                        if (Utility_DebugManager.ShouldLogDetailed())
+                            Utility_DebugManager.LogNormal($"Blocked job start for drafted pawn {pawn.LabelShort}");
+
+                        return false; // Skip job finding for drafted pawns
+                    }
+
+                    return true; // Allow normal job finding for non-drafted pawns
+                }
+            }
+
+            [HarmonyPatch(typeof(Pawn_JobTracker), "EndCurrentJob")]
+            public static class Patch_Pawn_JobTracker_EndCurrentJob_ForceImmediate
+            {
+                public static void Prefix(Pawn_JobTracker __instance, ref JobCondition condition, ref bool startNewJob)
+                {
+                    // Get the pawn via reflection
+                    Pawn pawn = AccessTools.Field(typeof(Pawn_JobTracker), "pawn").GetValue(__instance) as Pawn;
+                    if (pawn == null) return;
+
+                    // We only need to override for drafted non-humanlike modded pawns
+                    if (pawn.RaceProps.Humanlike && Utility_CacheManager.GetModExtension(pawn.def) == null)
+                        return;
+
+                    // Check if pawn is drafted
+                    if (pawn.drafter?.Drafted == true)
+                    {
+                        // If the job is not null and setting to UserCancelled
+                        if (__instance.curJob != null && condition == JobCondition.InterruptForced)
+                        {
+                            // Make sure the job ends immediately and completely
+                            condition = JobCondition.InterruptForced;
+                            startNewJob = false;
+
+                            // Log for debugging
+                            if (Utility_DebugManager.ShouldLogDetailed())
+                                Utility_DebugManager.LogNormal($"Force-ended job {__instance.curJob.def.defName} for drafted pawn {pawn.LabelShort}");
+                        }
+                    }
+                }
+            }
+
+            // Add this patch to prevent any moving animations or movement for drafted pawns
+            [HarmonyPatch(typeof(Pawn_PathFollower), "PatherTick")]
+            public static class Patch_Pawn_PathFollower_PatherTick_StopIfDrafted
+            {
+                public static bool Prefix(Pawn_PathFollower __instance)
+                {
+                    // Get the pawn that owns this path follower
+                    Pawn pawn = AccessTools.Field(typeof(Pawn_PathFollower), "pawn").GetValue(__instance) as Pawn;
+                    if (pawn == null) return true;
+
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension == null) return true;
+
+                    // If pawn is drafted, stop all movement
+                    if (pawn.drafter?.Drafted == true)
+                    {
+                        __instance.StopDead();
+                        return false; // Skip the original method
+                    }
+
+                    return true; // Continue with vanilla logic
+                }
+            }
+
             /// <summary>
             /// Patch #3 Step 3. Stops *all* think-tree jobs for drafted animals, exactly as happens for drafted colonists.
             /// </summary>
@@ -1405,7 +1514,7 @@ namespace emitbreaker.PawnControl
                     if (pawn == null || pawn.Dead || pawn.Destroyed)
                         return true;
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                     if (modExtension == null)
                         return true; // No mod extension, skip
 
@@ -1447,9 +1556,15 @@ namespace emitbreaker.PawnControl
                         if (pawn == null || pawn.RaceProps.Humanlike || pawn.Map == null)
                             return;
 
-                        var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                         if (modExtension == null || !Utility_TagManager.ForceEquipWeapon(pawn))
                             return;
+
+                        if (pawn.IsSlave && pawn.HostFaction != Faction.OfPlayer)
+                            return; // Only allow for player faction
+
+                        if (pawn.Faction != Faction.OfPlayer)
+                            return; // Only allow for player faction
 
                         // Alternative approach:
                         // 1. Get the cell the player clicked on
@@ -1510,7 +1625,7 @@ namespace emitbreaker.PawnControl
                     // For non-humanlike modded pawns, allow them to start bills
                     if (p.RaceProps.Humanlike) return true; // Let vanilla handle humanlike pawns
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(p.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(p.def);
                     if (modExtension == null) return true; // No mod extension, skip
 
                     if (!Utility_TagManager.HasTagSet(p.def)) return true; // No tag set, skip
@@ -1858,37 +1973,6 @@ namespace emitbreaker.PawnControl
             //}
         }
 
-        public static class Patch_MapCacheHandling
-        {
-            // Patch for when a new map is created
-            [HarmonyPatch(typeof(Map), nameof(Map.FinalizeInit))]
-            public static class Map_FinalizeInit_Patch
-            {
-                public static void Postfix(Map __instance)
-                {
-                    if (__instance != null)
-                    {
-                        // Clear any existing cache for this map ID just to be safe
-                        Utility_UnifiedCache.InvalidateMap(__instance.uniqueID);
-                    }
-                }
-            }
-
-            // Patch for when a map is removed
-            [HarmonyPatch(typeof(Game), nameof(Game.DeinitAndRemoveMap))]
-            public static class Game_DeinitAndRemoveMap_Patch
-            {
-                public static void Prefix(Map map)
-                {
-                    if (map != null)
-                    {
-                        // Clear cache when a map is being removed
-                        Utility_UnifiedCache.InvalidateMap(map.uniqueID);
-                    }
-                }
-            }
-        }
-
         public static class Patch_SafePurge
         {
             [HarmonyPatch(typeof(ITab_Pawn_Gear), "ShouldShowInventory")]
@@ -1931,7 +2015,7 @@ namespace emitbreaker.PawnControl
                     if (pawn?.def == null)
                         return true; // Allow vanilla if null
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                     if (modExtension == null)
                         return true; // Only for modded pawns
 
@@ -1948,7 +2032,7 @@ namespace emitbreaker.PawnControl
                     if (pawn?.def == null)
                         return; // Allow vanilla if null
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                     if (modExtension == null)
                         return; // Only for modded pawns
 
@@ -2013,7 +2097,7 @@ namespace emitbreaker.PawnControl
                     if (_processedPawns.Contains(pawn.thingIDNumber))
                         return;
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                     if (modExtension == null)
                         return; // Only for modded pawns
 
@@ -2049,7 +2133,8 @@ namespace emitbreaker.PawnControl
             /// hierarchy for controlled pawns, revealing how job priorities and work capabilities are 
             /// structured. Only executes in development mode to avoid log spam in normal gameplay.
             /// </summary>
-            [HarmonyPatch(typeof(Pawn), nameof(Pawn.SpawnSetup))]
+            [HarmonyPatch(typeof(Pawn), "SpawnSetup")]
+            [HarmonyPatch(new Type[] { typeof(Map), typeof(bool) })]
             public static class Patch_Pawn_SpawnSetup_DumpThinkTree
             {
                 // Cache to track which pawns we've already processed
@@ -2071,7 +2156,7 @@ namespace emitbreaker.PawnControl
                     if (_processedPawns.Contains(__instance.thingIDNumber))
                         return;
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null)
                         return; // Only for modded pawns
 
@@ -2132,7 +2217,7 @@ namespace emitbreaker.PawnControl
                     }
 
                     // ✅ Only show if pawn has mod extension
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null)
                         yield break;
 
@@ -2175,7 +2260,7 @@ namespace emitbreaker.PawnControl
                     if (__instance?.def == null)
                         yield break;
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null)
                         yield break;
 
@@ -2203,10 +2288,10 @@ namespace emitbreaker.PawnControl
 
                     if (!Prefs.DevMode) yield break;
 
-                    var modExtension = Utility_UnifiedCache.GetModExtension(__instance.def);
+                    var modExtension = Utility_CacheManager.GetModExtension(__instance.def);
                     if (modExtension == null) yield break;
 
-                    if (!modExtension.debugMode) yield break;
+                    if (!Utility_DebugManager.ShouldLog()) yield break;
 
                     // Add verification gizmo
                     yield return new Command_Action

@@ -167,7 +167,7 @@ namespace emitbreaker.PawnControl
                     continue;
                 }
 
-                var modExtension = Utility_UnifiedCache.GetModExtension(pawn.def);
+                var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
                 if (modExtension == null)
                 {
                     continue;
@@ -194,7 +194,7 @@ namespace emitbreaker.PawnControl
         {
             if (Utility_TagManager.HasTag(p.def, "Siege_HoldFire"))
             {
-                var holdFire = Utility_UnifiedCache.GetDuty("HoldFire");
+                var holdFire = Utility_CacheManager.GetDuty("HoldFire");
                 if (holdFire != null)
                 {
                     return holdFire;
@@ -203,7 +203,7 @@ namespace emitbreaker.PawnControl
 
             if (Utility_TagManager.HasTag(p.def, "Siege_ManTurret"))
             {
-                var manTurrets = Utility_UnifiedCache.GetDuty("ManTurrets");
+                var manTurrets = Utility_CacheManager.GetDuty("ManTurrets");
                 if (manTurrets != null)
                 {
                     return manTurrets;

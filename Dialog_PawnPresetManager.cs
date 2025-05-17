@@ -285,7 +285,7 @@ namespace emitbreaker.PawnControl
             selectedPreset = null;
 
             // Force cache refresh to ensure we're getting the latest mod extension state
-            Utility_UnifiedCache.ClearModExtension(raceDef);
+            Utility_CacheManager.ClearModExtension(raceDef);
         }
 
         private void DrawPresetManagementPanel(Rect rect)
@@ -297,7 +297,7 @@ namespace emitbreaker.PawnControl
             float curY = rect.y + gap;
 
             // Get current mod extension (if any)
-            var modExtension = Utility_UnifiedCache.GetModExtension(_def);
+            var modExtension = Utility_CacheManager.GetModExtension(_def);
 
             // Show preset selection button
             var selectPresetRect = new Rect(rect.x + gap, curY, rect.width - (gap * 2), buttonH);
@@ -507,7 +507,7 @@ namespace emitbreaker.PawnControl
                     modExtension.toBeRemoved = true;
 
                     // Update cache
-                    Utility_UnifiedCache.UpdateModExtension(_def, modExtension);
+                    Utility_CacheManager.UpdateModExtension(_def, modExtension);
                     // Also remove from the current game component
                     if (Current.Game != null)
                     {
@@ -528,7 +528,7 @@ namespace emitbreaker.PawnControl
                 {
                     // Check mod extension and race properties
                     Utility_DebugManager.LogNormal($"{_def.defName} status:");
-                    Utility_DebugManager.LogNormal($"- Has mod extension: {Utility_UnifiedCache.GetModExtension(_def) != null}");
+                    Utility_DebugManager.LogNormal($"- Has mod extension: {Utility_CacheManager.GetModExtension(_def) != null}");
                     if (_def.modExtensions != null)
                     {
                         foreach (var ext in _def.modExtensions)
@@ -591,7 +591,7 @@ namespace emitbreaker.PawnControl
             try
             {
                 // If we're replacing an existing extension, clean up trackers first
-                var currentExt = Utility_UnifiedCache.GetModExtension(_def);
+                var currentExt = Utility_CacheManager.GetModExtension(_def);
                 if (currentExt != null)
                 {
                     Utility_DebugManager.LogWarning($"Race {_def.defName} already has a mod extension - will not replace");
@@ -622,14 +622,14 @@ namespace emitbreaker.PawnControl
                 _def.modExtensions.Add(newExtension);
 
                 // Clear only the specific race's cache entry
-                Utility_UnifiedCache.ClearModExtension(_def);
+                Utility_CacheManager.ClearModExtension(_def);
 
                 // CRITICAL FIX: Instead of calling global ResetCache methods that affect all races,
                 // clear only the cache entries for THIS race
                 Utility_TagManager.ClearCacheForRace(_def);
 
                 // Reload into cache for just this race
-                Utility_UnifiedCache.PreloadModExtensionForRace(_def);
+                Utility_CacheManager.PreloadModExtensionForRace(_def);
 
                 // Apply to existing pawns of THIS race only
                 ApplyExtensionToExistingPawns(_def, newExtension);
