@@ -96,7 +96,7 @@ namespace emitbreaker.PawnControl
             if (workSettings == null)
                 return null;
 
-            foreach (Pawn pawn in PawnsFinder.AllMapsCaravansAndTravelingTransportPods_Alive)
+            foreach (Pawn pawn in PawnsFinder.AllMapsCaravansAndTravellingTransporters_Alive)
             {
                 if (pawn.workSettings == workSettings)
                     return pawn;

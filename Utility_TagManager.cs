@@ -1,6 +1,9 @@
 ﻿using RimWorld;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Verse;
 
@@ -8,24 +11,90 @@ namespace emitbreaker.PawnControl
 {
     public static class Utility_TagManager
     {
+        #region Static Cache for Work Type Mappings - 성능 최적화
+
+        // Work type string to flag mapping 캐시 - 초기화 시 한 번만 생성
+        private static readonly ConcurrentDictionary<string, PawnTagFlags> _allowWorkFlagCache = new ConcurrentDictionary<string, PawnTagFlags>();
+        private static readonly ConcurrentDictionary<string, PawnTagFlags> _blockWorkFlagCache = new ConcurrentDictionary<string, PawnTagFlags>();
+
+        // 재사용 가능한 임시 컬렉션 - 메모리 할당 최소화
+        [ThreadStatic]
+        private static List<ValueTuple<Pawn, string>> _tempTupleList;
+        private static List<ValueTuple<Pawn, string>> TempTupleList => _tempTupleList ?? (_tempTupleList = new List<ValueTuple<Pawn, string>>());
+
+        static Utility_TagManager()
+        {
+            InitializeWorkTypeFlagMappings();
+        }
+
+        /// <summary>
+        /// Work type 플래그 매핑을 미리 초기화 - 런타임 성능 향상
+        /// </summary>
+        private static void InitializeWorkTypeFlagMappings()
+        {
+            // Allow work flags
+            _allowWorkFlagCache["Firefighter"] = PawnTagFlags.AllowWork_Firefighter;
+            _allowWorkFlagCache["Patient"] = PawnTagFlags.AllowWork_Patient;
+            _allowWorkFlagCache["Doctor"] = PawnTagFlags.AllowWork_Doctor;
+            _allowWorkFlagCache["PatientBedRest"] = PawnTagFlags.AllowWork_PatientBedRest;
+            _allowWorkFlagCache["BasicWorker"] = PawnTagFlags.AllowWork_BasicWorker;
+            _allowWorkFlagCache["Warden"] = PawnTagFlags.AllowWork_Warden;
+            _allowWorkFlagCache["Handling"] = PawnTagFlags.AllowWork_Handling;
+            _allowWorkFlagCache["Cooking"] = PawnTagFlags.AllowWork_Cooking;
+            _allowWorkFlagCache["Hunting"] = PawnTagFlags.AllowWork_Hunting;
+            _allowWorkFlagCache["Construction"] = PawnTagFlags.AllowWork_Construction;
+            _allowWorkFlagCache["Growing"] = PawnTagFlags.AllowWork_Growing;
+            _allowWorkFlagCache["Mining"] = PawnTagFlags.AllowWork_Mining;
+            _allowWorkFlagCache["PlantCutting"] = PawnTagFlags.AllowWork_PlantCutting;
+            _allowWorkFlagCache["Smithing"] = PawnTagFlags.AllowWork_Smithing;
+            _allowWorkFlagCache["Tailoring"] = PawnTagFlags.AllowWork_Tailoring;
+            _allowWorkFlagCache["Art"] = PawnTagFlags.AllowWork_Art;
+            _allowWorkFlagCache["Crafting"] = PawnTagFlags.AllowWork_Crafting;
+            _allowWorkFlagCache["Hauling"] = PawnTagFlags.AllowWork_Hauling;
+            _allowWorkFlagCache["Cleaning"] = PawnTagFlags.AllowWork_Cleaning;
+            _allowWorkFlagCache["Research"] = PawnTagFlags.AllowWork_Research;
+            _allowWorkFlagCache["Childcare"] = PawnTagFlags.AllowWork_Childcare;
+            _allowWorkFlagCache["DarkStudy"] = PawnTagFlags.AllowWork_DarkStudy;
+
+            // Block work flags
+            _blockWorkFlagCache["Firefighter"] = PawnTagFlags.BlockWork_Firefighter;
+            _blockWorkFlagCache["Patient"] = PawnTagFlags.BlockWork_Patient;
+            _blockWorkFlagCache["Doctor"] = PawnTagFlags.BlockWork_Doctor;
+            _blockWorkFlagCache["PatientBedRest"] = PawnTagFlags.BlockWork_PatientBedRest;
+            _blockWorkFlagCache["BasicWorker"] = PawnTagFlags.BlockWork_BasicWorker;
+            _blockWorkFlagCache["Warden"] = PawnTagFlags.BlockWork_Warden;
+            _blockWorkFlagCache["Handling"] = PawnTagFlags.BlockWork_Handling;
+            _blockWorkFlagCache["Cooking"] = PawnTagFlags.BlockWork_Cooking;
+            _blockWorkFlagCache["Hunting"] = PawnTagFlags.BlockWork_Hunting;
+            _blockWorkFlagCache["Construction"] = PawnTagFlags.BlockWork_Construction;
+            _blockWorkFlagCache["Growing"] = PawnTagFlags.BlockWork_Growing;
+            _blockWorkFlagCache["Mining"] = PawnTagFlags.BlockWork_Mining;
+            _blockWorkFlagCache["PlantCutting"] = PawnTagFlags.BlockWork_PlantCutting;
+            _blockWorkFlagCache["Smithing"] = PawnTagFlags.BlockWork_Smithing;
+            _blockWorkFlagCache["Tailoring"] = PawnTagFlags.BlockWork_Tailoring;
+            _blockWorkFlagCache["Art"] = PawnTagFlags.BlockWork_Art;
+            _blockWorkFlagCache["Crafting"] = PawnTagFlags.BlockWork_Crafting;
+            _blockWorkFlagCache["Hauling"] = PawnTagFlags.BlockWork_Hauling;
+            _blockWorkFlagCache["Cleaning"] = PawnTagFlags.BlockWork_Cleaning;
+            _blockWorkFlagCache["Research"] = PawnTagFlags.BlockWork_Research;
+            _blockWorkFlagCache["Childcare"] = PawnTagFlags.BlockWork_Childcare;
+            _blockWorkFlagCache["DarkStudy"] = PawnTagFlags.BlockWork_DarkStudy;
+        }
+
+        #endregion
+
         #region Tag Flags Cache
 
         /// <summary>
         /// Gets the cached PawnTagFlags for a ThingDef, or builds them if not cached
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static PawnTagFlags GetTagFlags(ThingDef def)
         {
             if (!Utility_Common.RaceDefChecker(def))
-            {
                 return PawnTagFlags.None;
-            }
 
-            if (!Utility_CacheManager.TagFlags.TryGetValue(def, out PawnTagFlags flags))
-            {
-                flags = BuildTagFlags(def);
-                Utility_CacheManager.TagFlags[def] = flags;
-            }
-            return flags;
+            return Utility_CacheManager.TagFlags.GetOrAdd(def, BuildTagFlags);
         }
 
         /// <summary>
@@ -34,144 +103,110 @@ namespace emitbreaker.PawnControl
         private static PawnTagFlags BuildTagFlags(ThingDef def)
         {
             if (!Utility_Common.RaceDefChecker(def))
-            {
                 return PawnTagFlags.None;
-            }
 
             PawnTagFlags flags = PawnTagFlags.None;
             var modExtension = Utility_CacheManager.GetModExtension(def);
 
-            if (modExtension == null || modExtension.tags == null)
-            {
+            if (modExtension?.tags == null)
                 return flags;
-            }
 
-            // Convert string tags to flags
-            foreach (string tag in modExtension.tags)
+            // Convert string tags to flags - 최적화된 버전
+            for (int i = 0; i < modExtension.tags.Count; i++)
             {
+                string tag = modExtension.tags[i];
                 if (string.IsNullOrEmpty(tag)) continue;
 
-                // Force type tags
-                if (tag == ManagedTags.ForceAnimal) flags |= PawnTagFlags.ForceAnimal;
-                else if (tag == ManagedTags.ForceMechanoid) flags |= PawnTagFlags.ForceMechanoid;
-                else if (tag == ManagedTags.ForceHumanlike) flags |= PawnTagFlags.ForceHumanlike;
-
-                // Behavior flags
-                else if (tag == ManagedTags.ForceDraftable) flags |= PawnTagFlags.ForceDraftable;
-                else if (tag == ManagedTags.ForceEquipWeapon) flags |= PawnTagFlags.ForceEquipWeapon;
-                else if (tag == ManagedTags.ForceWearApparel) flags |= PawnTagFlags.ForceWearApparel;
-                else if (tag == PawnEnumTags.ForceWork.ToStringSafe()) flags |= PawnTagFlags.ForceWork;
-                else if (tag == PawnEnumTags.ForceTrainerTab.ToStringSafe()) flags |= PawnTagFlags.ForceTrainerTab;
-                else if (tag == PawnEnumTags.AutoDraftInjection.ToStringSafe()) flags |= PawnTagFlags.AutoDraftInjection;
-
-                // Work related flags - general
-                else if (tag == ManagedTags.AllowAllWork) flags |= PawnTagFlags.AllowAllWork;
-                else if (tag == ManagedTags.BlockAllWork) flags |= PawnTagFlags.BlockAllWork;
-
-                // VFE compatibility
-                else if (tag == ManagedTags.ForceVFECombatTree) flags |= PawnTagFlags.ForceVFECombatTree;
-                else if (tag == ManagedTags.VFECore_Combat) flags |= PawnTagFlags.VFECore_Combat;
-                else if (tag == ManagedTags.Mech_DefendBeacon) flags |= PawnTagFlags.Mech_DefendBeacon;
-                else if (tag == ManagedTags.Mech_EscortCommander) flags |= PawnTagFlags.Mech_EscortCommander;
-                else if (tag == ManagedTags.VFESkipWorkJobGiver) flags |= PawnTagFlags.VFESkipWorkJobGiver;
-                else if (tag == ManagedTags.DisableVFEAIJobs) flags |= PawnTagFlags.DisableVFEAIJobs;
-
-                // Allow work tags (prefix handling)
-                else if (tag.StartsWith(ManagedTags.AllowWorkPrefix))
-                {
-                    string workType = tag.Substring(ManagedTags.AllowWorkPrefix.Length);
-                    flags |= GetAllowWorkFlag(workType);
-                }
-                // Block work tags (prefix handling)
-                else if (tag.StartsWith(ManagedTags.BlockWorkPrefix))
-                {
-                    string workType = tag.Substring(ManagedTags.BlockWorkPrefix.Length);
-                    flags |= GetBlockWorkFlag(workType);
-                }
+                flags |= ConvertTagToFlagOptimized(tag);
             }
 
             // Apply extension properties directly
-            if (modExtension != null)
-            {
-                if (modExtension.forceDraftable) flags |= PawnTagFlags.ForceDraftable;
-                if (modExtension.forceEquipWeapon) flags |= PawnTagFlags.ForceEquipWeapon;
-                if (modExtension.forceWearApparel) flags |= PawnTagFlags.ForceWearApparel;
-            }
+            if (modExtension.forceDraftable) flags |= PawnTagFlags.ForceDraftable;
+            if (modExtension.forceEquipWeapon) flags |= PawnTagFlags.ForceEquipWeapon;
+            if (modExtension.forceWearApparel) flags |= PawnTagFlags.ForceWearApparel;
 
             return flags;
         }
 
         /// <summary>
-        /// Maps a work type string to its corresponding AllowWork flag
+        /// 최적화된 태그-플래그 변환 - switch 문 사용으로 성능 향상
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static PawnTagFlags ConvertTagToFlagOptimized(string tag)
+        {
+            // 기본 태그들을 switch로 빠르게 처리
+            switch (tag)
+            {
+                case ManagedTags.ForceAnimal: return PawnTagFlags.ForceAnimal;
+                case ManagedTags.ForceMechanoid: return PawnTagFlags.ForceMechanoid;
+                case ManagedTags.ForceHumanlike: return PawnTagFlags.ForceHumanlike;
+                case ManagedTags.ForceDraftable: return PawnTagFlags.ForceDraftable;
+                case ManagedTags.ForceEquipWeapon: return PawnTagFlags.ForceEquipWeapon;
+                case ManagedTags.ForceWearApparel: return PawnTagFlags.ForceWearApparel;
+                case ManagedTags.AllowAllWork: return PawnTagFlags.AllowAllWork;
+                case ManagedTags.BlockAllWork: return PawnTagFlags.BlockAllWork;
+                case ManagedTags.ForceVFECombatTree: return PawnTagFlags.ForceVFECombatTree;
+                case ManagedTags.VFECore_Combat: return PawnTagFlags.VFECore_Combat;
+                case ManagedTags.Mech_DefendBeacon: return PawnTagFlags.Mech_DefendBeacon;
+                case ManagedTags.Mech_EscortCommander: return PawnTagFlags.Mech_EscortCommander;
+                case ManagedTags.VFESkipWorkJobGiver: return PawnTagFlags.VFESkipWorkJobGiver;
+                case ManagedTags.DisableVFEAIJobs: return PawnTagFlags.DisableVFEAIJobs;
+            }
+
+            // Enum 태그들 처리
+            var enumTag = PawnEnumTags.ForceWork.ToStringSafe();
+            if (tag == enumTag) return PawnTagFlags.ForceWork;
+
+            enumTag = PawnEnumTags.ForceTrainerTab.ToStringSafe();
+            if (tag == enumTag) return PawnTagFlags.ForceTrainerTab;
+
+            enumTag = PawnEnumTags.AutoDraftInjection.ToStringSafe();
+            if (tag == enumTag) return PawnTagFlags.AutoDraftInjection;
+
+            // Prefix 기반 태그 처리
+            if (tag.StartsWith(ManagedTags.AllowWorkPrefix))
+            {
+                string workType = tag.Substring(ManagedTags.AllowWorkPrefix.Length);
+                return GetAllowWorkFlag(workType);
+            }
+
+            if (tag.StartsWith(ManagedTags.BlockWorkPrefix))
+            {
+                string workType = tag.Substring(ManagedTags.BlockWorkPrefix.Length);
+                return GetBlockWorkFlag(workType);
+            }
+
+            return PawnTagFlags.None;
+        }
+
+        /// <summary>
+        /// Allow work flag을 캐시에서 가져오기 - 성능 최적화
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static PawnTagFlags GetAllowWorkFlag(string workType)
         {
-            if (string.IsNullOrEmpty(workType)) return PawnTagFlags.None;
+            if (string.IsNullOrEmpty(workType))
+                return PawnTagFlags.None;
 
-            // Handle work types using their string names
-            if (workType == "Firefighter") return PawnTagFlags.AllowWork_Firefighter;
-            else if (workType == "Patient") return PawnTagFlags.AllowWork_Patient;
-            else if (workType == "Doctor") return PawnTagFlags.AllowWork_Doctor;
-            else if (workType == "PatientBedRest") return PawnTagFlags.AllowWork_PatientBedRest;
-            else if (workType == "BasicWorker") return PawnTagFlags.AllowWork_BasicWorker;
-            else if (workType == "Warden") return PawnTagFlags.AllowWork_Warden;
-            else if (workType == "Handling") return PawnTagFlags.AllowWork_Handling;
-            else if (workType == "Cooking") return PawnTagFlags.AllowWork_Cooking;
-            else if (workType == "Hunting") return PawnTagFlags.AllowWork_Hunting;
-            else if (workType == "Construction") return PawnTagFlags.AllowWork_Construction;
-            else if (workType == "Growing") return PawnTagFlags.AllowWork_Growing;
-            else if (workType == "Mining") return PawnTagFlags.AllowWork_Mining;
-            else if (workType == "PlantCutting") return PawnTagFlags.AllowWork_PlantCutting;
-            else if (workType == "Smithing") return PawnTagFlags.AllowWork_Smithing;
-            else if (workType == "Tailoring") return PawnTagFlags.AllowWork_Tailoring;
-            else if (workType == "Art") return PawnTagFlags.AllowWork_Art;
-            else if (workType == "Crafting") return PawnTagFlags.AllowWork_Crafting;
-            else if (workType == "Hauling") return PawnTagFlags.AllowWork_Hauling;
-            else if (workType == "Cleaning") return PawnTagFlags.AllowWork_Cleaning;
-            else if (workType == "Research") return PawnTagFlags.AllowWork_Research;
-            else if (workType == "Childcare") return PawnTagFlags.AllowWork_Childcare;
-            else if (workType == "DarkStudy") return PawnTagFlags.AllowWork_DarkStudy;
-
-            return PawnTagFlags.None; // No matching flag found
+            return _allowWorkFlagCache.GetValueOrDefault(workType, PawnTagFlags.None);
         }
 
         /// <summary>
-        /// Maps a work type string to its corresponding BlockWork flag
+        /// Block work flag을 캐시에서 가져오기 - 성능 최적화
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static PawnTagFlags GetBlockWorkFlag(string workType)
         {
-            if (string.IsNullOrEmpty(workType)) return PawnTagFlags.None;
+            if (string.IsNullOrEmpty(workType))
+                return PawnTagFlags.None;
 
-            // Handle work types using their string names
-            if (workType == "Firefighter") return PawnTagFlags.BlockWork_Firefighter;
-            else if (workType == "Patient") return PawnTagFlags.BlockWork_Patient;
-            else if (workType == "Doctor") return PawnTagFlags.BlockWork_Doctor;
-            else if (workType == "PatientBedRest") return PawnTagFlags.BlockWork_PatientBedRest;
-            else if (workType == "BasicWorker") return PawnTagFlags.BlockWork_BasicWorker;
-            else if (workType == "Warden") return PawnTagFlags.BlockWork_Warden;
-            else if (workType == "Handling") return PawnTagFlags.BlockWork_Handling;
-            else if (workType == "Cooking") return PawnTagFlags.BlockWork_Cooking;
-            else if (workType == "Hunting") return PawnTagFlags.BlockWork_Hunting;
-            else if (workType == "Construction") return PawnTagFlags.BlockWork_Construction;
-            else if (workType == "Growing") return PawnTagFlags.BlockWork_Growing;
-            else if (workType == "Mining") return PawnTagFlags.BlockWork_Mining;
-            else if (workType == "PlantCutting") return PawnTagFlags.BlockWork_PlantCutting;
-            else if (workType == "Smithing") return PawnTagFlags.BlockWork_Smithing;
-            else if (workType == "Tailoring") return PawnTagFlags.BlockWork_Tailoring;
-            else if (workType == "Art") return PawnTagFlags.BlockWork_Art;
-            else if (workType == "Crafting") return PawnTagFlags.BlockWork_Crafting;
-            else if (workType == "Hauling") return PawnTagFlags.BlockWork_Hauling;
-            else if (workType == "Cleaning") return PawnTagFlags.BlockWork_Cleaning;
-            else if (workType == "Research") return PawnTagFlags.BlockWork_Research;
-            else if (workType == "Childcare") return PawnTagFlags.BlockWork_Childcare;
-            else if (workType == "DarkStudy") return PawnTagFlags.BlockWork_DarkStudy;
-
-            return PawnTagFlags.None; // No matching flag found
+            return _blockWorkFlagCache.GetValueOrDefault(workType, PawnTagFlags.None);
         }
 
         /// <summary>
-        /// Gets the work flag for a specific work type
+        /// Work type flag 가져오기 - 통합된 인터페이스
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static PawnTagFlags GetWorkTypeFlag(string workTypeName, bool isBlock = false)
         {
             return isBlock ? GetBlockWorkFlag(workTypeName) : GetAllowWorkFlag(workTypeName);
@@ -179,105 +214,82 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Legacy API (String-based)
+        #region Legacy API (String-based) - 최적화된 버전
 
         public static bool HasTagSet(ThingDef def, NonHumanlikePawnControlExtension modExtension = null)
         {
             if (!Utility_Common.RaceDefChecker(def))
-            {
                 return false;
-            }
-
-            modExtension = Utility_CacheManager.GetModExtension(def);
 
             if (modExtension == null)
-            {
-                return false;
-            }
+                modExtension = Utility_CacheManager.GetModExtension(def);
 
-            // We can check flags existence as well
+            if (modExtension == null)
+                return false;
+
+            // Flag 기반 체크가 더 빠름
             PawnTagFlags flags = GetTagFlags(def);
             if (flags != PawnTagFlags.None)
-            {
                 return true;
-            }
 
-            return modExtension.tags != null && modExtension.tags.Count > 0;
+            return modExtension.tags?.Count > 0;
         }
 
         public static bool HasTag(Pawn pawn, string tag)
         {
-            if (!Utility_Common.PawnChecker(pawn) || string.IsNullOrEmpty(tag))
-            {
-                return false; // Invalid input
-            }
-
-            // First check pawn-specific tags (if you implement that)
-            // Then fall back to race-level tags
-            return HasTag(pawn.def, tag);
+            return Utility_Common.PawnChecker(pawn) && !string.IsNullOrEmpty(tag) && HasTag(pawn.def, tag);
         }
 
         public static bool HasTag(ThingDef def, string tag)
         {
             if (!Utility_Common.RaceDefChecker(def) || string.IsNullOrEmpty(tag))
-            {
-                return false; // Invalid input
-            }
-
-            // NEW IMPLEMENTATION: Use flag-based check if possible
-            PawnTagFlags tagFlag = ConvertTagToFlag(tag);
-            if (tagFlag != PawnTagFlags.None)
-            {
-                return HasFlag(def, tagFlag);
-            }
-
-            // LEGACY IMPLEMENTATION: Fall back to string-based check if no flag equivalent found
-            if (!HasTagSet(def))
-            {
                 return false;
-            }
 
-            // Use GetTag to retrieve the cached or built tag set
+            // Flag 기반 체크 우선 - 성능 향상
+            PawnTagFlags tagFlag = ConvertTagToFlagOptimized(tag);
+            if (tagFlag != PawnTagFlags.None)
+                return HasFlag(def, tagFlag);
+
+            // String 기반 fallback
+            if (!HasTagSet(def))
+                return false;
+
             var tagSet = GetTags(def);
-
-            // Check if the tag exists in the set
             bool hasTag = tagSet.Contains(tag);
+
             if (Prefs.DevMode)
-            {
                 Utility_DebugManager.LogNormal($"Checking tag '{tag}' for def={def.defName}: {hasTag}");
-            }
+
             return hasTag;
         }
 
         public static bool WorkTypeSettingEnabled(Pawn pawn, WorkTypeDef workTypeDef)
         {
-            if (!Utility_Common.RaceDefChecker(pawn.def) || workTypeDef == null) return false;
+            if (!Utility_Common.RaceDefChecker(pawn.def) || workTypeDef == null)
+                return false;
 
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null) return false; // No mod extension found
+            if (modExtension == null)
+                return false;
 
-            // Race‐tags check unchanged…
-            if (!IsWorkEnabled(pawn, workTypeDef)) return false;
+            if (!IsWorkEnabled(pawn, workTypeDef))
+                return false;
 
-            // If the Pawn_WorkSettings hasn't *ever* been enabled, do it now
+            // Work settings 초기화
             if (pawn.workSettings == null)
             {
                 Utility_DebugManager.LogWarning($"[{pawn.LabelShort}] has no work setting.");
                 pawn.workSettings = new Pawn_WorkSettings(pawn);
             }
-            if (!pawn.workSettings.EverWork)
-            {
-                pawn.workSettings.EnableAndInitializeIfNotAlreadyInitialized();
-            }
 
-            // Now this will reflect the checkbox/slider in the UI
+            if (!pawn.workSettings.EverWork)
+                pawn.workSettings.EnableAndInitializeIfNotAlreadyInitialized();
+
             bool active = pawn.workSettings.WorkIsActive(workTypeDef);
             int priority = pawn.workSettings.GetPriority(workTypeDef);
 
             if (priority > 0)
-            {
-                active = true; // Disabled in UI, but we want to override it
-            }
+                active = true;
 
             if (!active && Prefs.DevMode)
                 Utility_DebugManager.LogWarning($"[{pawn.LabelShort}] {workTypeDef.defName} is disabled in UI");
@@ -285,184 +297,131 @@ namespace emitbreaker.PawnControl
             return active;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool WorkTypeSettingEnabled(Pawn pawn, string workTypeName)
         {
             var workTypeDef = Utility_WorkTypeManager.Named(workTypeName);
-
-            if (!Utility_Common.RaceDefChecker(pawn.def) || string.IsNullOrEmpty(workTypeName))
-            {
-                return false; // Invalid work type name
-            }
-
-            return WorkTypeSettingEnabled(pawn, workTypeDef);
+            return Utility_Common.RaceDefChecker(pawn.def) && !string.IsNullOrEmpty(workTypeName) &&
+                   WorkTypeSettingEnabled(pawn, workTypeDef);
         }
 
         public static bool ForceDraftable(Pawn pawn, string tag = ManagedTags.ForceDraftable)
         {
             if (!Utility_Common.RaceDefChecker(pawn.def) || string.IsNullOrEmpty(tag))
-            {
-                return false; // Invalid input
-            }
+                return false;
 
             var key = new ValueTuple<Pawn, string>(pawn, tag);
 
-            // Try to get from cache first
-            if (Utility_CacheManager.ForceDraftable.TryGetValue(key, out bool result))
+            return Utility_CacheManager.ForceDraftable.GetOrAdd(key, k =>
             {
-                return result;
-            }
+                var modExtension = Utility_CacheManager.GetModExtension(k.Item1.def);
+                if (modExtension == null)
+                    return false;
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
-            {
-                return false; // No mod extension found
-            }
+                if (tag == ManagedTags.ForceDraftable)
+                {
+                    PawnTagFlags flags = GetTagFlags(k.Item1.def);
+                    return (flags & PawnTagFlags.ForceDraftable) != 0;
+                }
 
-            // NEW IMPLEMENTATION: Use flags
-            if (tag == ManagedTags.ForceDraftable)
-            {
-                PawnTagFlags flags = GetTagFlags(pawn.def);
-                result = (flags & PawnTagFlags.ForceDraftable) != 0;
-            }
-            else
-            {
-                // LEGACY IMPLEMENTATION: For non-standard tag
-                result = HasTag(pawn, tag) || modExtension.forceDraftable;
-            }
-
-            // Store in cache
-            Utility_CacheManager.ForceDraftable[key] = result;
-            return result;
+                return HasTag(k.Item1, tag) || modExtension.forceDraftable;
+            });
         }
 
         public static bool ForceEquipWeapon(Pawn pawn, string tag = ManagedTags.ForceEquipWeapon)
         {
             if (!Utility_Common.RaceDefChecker(pawn.def) || string.IsNullOrEmpty(tag))
-            {
-                return false; // Invalid input
-            }
+                return false;
 
             var key = new ValueTuple<Pawn, string>(pawn, tag);
 
-            // Try to get from cache first
-            if (Utility_CacheManager.ForceEquipWeapon.TryGetValue(key, out bool result))
+            return Utility_CacheManager.ForceEquipWeapon.GetOrAdd(key, k =>
             {
-                return result;
-            }
+                var modExtension = Utility_CacheManager.GetModExtension(k.Item1.def);
+                if (modExtension == null)
+                    return false;
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
-            {
-                return false; // No mod extension found
-            }
+                if (!ForceDraftable(k.Item1))
+                {
+                    Utility_DebugManager.LogError($"{k.Item1.def.defName} is not forceDraftable, cannot force equip weapon.");
+                    return false;
+                }
 
-            if (!ForceDraftable(pawn))
-            {
-                Utility_DebugManager.LogError($"{pawn.def.defName} is not forceDraftable, cannot force equip weapon.");
-                return false;
-            }
+                if (tag == ManagedTags.ForceEquipWeapon)
+                {
+                    PawnTagFlags flags = GetTagFlags(k.Item1.def);
+                    return (flags & PawnTagFlags.ForceEquipWeapon) != 0;
+                }
 
-            // NEW IMPLEMENTATION: Use flags 
-            if (tag == ManagedTags.ForceEquipWeapon)
-            {
-                PawnTagFlags flags = GetTagFlags(pawn.def);
-                result = (flags & PawnTagFlags.ForceEquipWeapon) != 0;
-            }
-            else
-            {
-                // LEGACY IMPLEMENTATION: For non-standard tag
-                result = HasTag(pawn, tag) || modExtension.forceEquipWeapon;
-            }
-
-            // Store in cache
-            Utility_CacheManager.ForceEquipWeapon[key] = result;
-            return result;
+                return HasTag(k.Item1, tag) || modExtension.forceEquipWeapon;
+            });
         }
 
         public static bool ForceWearApparel(Pawn pawn, string tag = ManagedTags.ForceWearApparel)
         {
             if (!Utility_Common.RaceDefChecker(pawn.def) || string.IsNullOrEmpty(tag))
-            {
-                return false; // Invalid input
-            }
+                return false;
 
             var key = new ValueTuple<Pawn, string>(pawn, tag);
 
-            // Try to get from cache first
-            if (Utility_CacheManager.ForceWearApparel.TryGetValue(key, out bool result))
+            return Utility_CacheManager.ForceWearApparel.GetOrAdd(key, k =>
             {
-                return result;
-            }
+                var modExtension = Utility_CacheManager.GetModExtension(k.Item1.def);
+                if (modExtension == null)
+                    return false;
 
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
-            {
-                return false; // No mod extension found
-            }
+                if (!ForceDraftable(k.Item1))
+                {
+                    Utility_DebugManager.LogError($"{k.Item1.def.defName} is not forceDraftable, cannot force wear apparel.");
+                    return false;
+                }
 
-            if (!ForceDraftable(pawn))
-            {
-                Utility_DebugManager.LogError($"{pawn.def.defName} is not forceDraftable, cannot force wear apparel.");
-                return false;
-            }
+                if (tag == ManagedTags.ForceWearApparel)
+                {
+                    PawnTagFlags flags = GetTagFlags(k.Item1.def);
+                    return (flags & PawnTagFlags.ForceWearApparel) != 0;
+                }
 
-            // NEW IMPLEMENTATION: Use flags
-            if (tag == ManagedTags.ForceWearApparel)
-            {
-                PawnTagFlags flags = GetTagFlags(pawn.def);
-                result = (flags & PawnTagFlags.ForceWearApparel) != 0;
-            }
-            else
-            {
-                // LEGACY IMPLEMENTATION: For non-standard tag
-                result = HasTag(pawn, tag) || modExtension.forceWearApparel;
-            }
-
-            // Store in cache
-            Utility_CacheManager.ForceWearApparel[key] = result;
-            return result;
+                return HasTag(k.Item1, tag) || modExtension.forceWearApparel;
+            });
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static HashSet<string> GetTags(ThingDef def)
         {
             if (!Utility_Common.RaceDefChecker(def))
-            {
                 return new HashSet<string>();
-            }
 
-            if (!Utility_CacheManager.Tags.TryGetValue(def, out var set))
-            {
-                set = BuildTags(def);
-                Utility_CacheManager.Tags[def] = set;
-            }
-            return set;
+            return Utility_CacheManager.Tags.GetOrAdd(def, BuildTags);
         }
 
         private static HashSet<string> BuildTags(ThingDef def)
         {
-            if (!Utility_Common.RaceDefChecker(def))
-            {
-                return new HashSet<string>(); // Return empty set, not null
-            }
+            var set = new HashSet<string>();
 
-            HashSet<string> set = new HashSet<string>();
+            if (!Utility_Common.RaceDefChecker(def))
+                return set;
 
             var modExtension = Utility_CacheManager.GetModExtension(def);
+            if (modExtension?.tags == null)
+                return set;
 
-            if (modExtension == null || modExtension.tags == null)
+            // 직접 for 루프로 성능 향상
+            for (int i = 0; i < modExtension.tags.Count; i++)
             {
-                return set; // Return empty set
-            }
-
-            foreach (string tag in modExtension.tags)
-            {
-                if (tag != null)
+                string tag = modExtension.tags[i];
+                if (!string.IsNullOrEmpty(tag))
                     set.Add(tag);
             }
 
-            // Legacy force flags
-            if (set.Contains(PawnEnumTags.ForceAnimal.ToStringSafe())) set.Add(PawnEnumTags.ForceAnimal.ToStringSafe());
-            if (set.Contains(PawnEnumTags.ForceDraftable.ToStringSafe())) set.Add(PawnEnumTags.ForceDraftable.ToStringSafe());
+            // Legacy enum tags 추가
+            var enumTags = new[] { PawnEnumTags.ForceAnimal, PawnEnumTags.ForceDraftable };
+            for (int i = 0; i < enumTags.Length; i++)
+            {
+                string enumStr = enumTags[i].ToStringSafe();
+                if (set.Contains(enumStr))
+                    set.Add(enumStr);
+            }
 
             return set;
         }
@@ -470,11 +429,9 @@ namespace emitbreaker.PawnControl
         public static bool HasAnyTagWithPrefix(ThingDef def, string prefix)
         {
             if (!Utility_Common.RaceDefChecker(def) || string.IsNullOrEmpty(prefix))
-            {
                 return false;
-            }
 
-            // NEW IMPLEMENTATION: Handle common prefixes with flags
+            // Flag 기반 최적화
             if (prefix == ManagedTags.AllowWorkPrefix)
             {
                 PawnTagFlags flags = GetTagFlags(def);
@@ -491,10 +448,10 @@ namespace emitbreaker.PawnControl
                     PawnTagFlags.AllowWork_Cleaning | PawnTagFlags.AllowWork_Research |
                     PawnTagFlags.AllowWork_Childcare | PawnTagFlags.AllowWork_DarkStudy
                 );
-
                 return allowWorkFlags != PawnTagFlags.None;
             }
-            else if (prefix == ManagedTags.BlockWorkPrefix)
+
+            if (prefix == ManagedTags.BlockWorkPrefix)
             {
                 PawnTagFlags flags = GetTagFlags(def);
                 PawnTagFlags blockWorkFlags = flags & (
@@ -510,24 +467,18 @@ namespace emitbreaker.PawnControl
                     PawnTagFlags.BlockWork_Cleaning | PawnTagFlags.BlockWork_Research |
                     PawnTagFlags.BlockWork_Childcare | PawnTagFlags.BlockWork_DarkStudy
                 );
-
                 return blockWorkFlags != PawnTagFlags.None;
             }
 
-            // LEGACY IMPLEMENTATION: Fallback for any other prefixes
+            // String 기반 fallback
             if (!HasTagSet(def))
-            {
                 return false;
-            }
 
             var tagSet = GetTags(def);
-
-            foreach (string t in tagSet)
+            foreach (string tag in tagSet)
             {
-                if (t != null && t.StartsWith(prefix))
-                {
+                if (tag?.StartsWith(prefix) == true)
                     return true;
-                }
             }
 
             return false;
@@ -535,275 +486,153 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region New API (Flag-based)
+        #region New API (Flag-based) - 최적화된 버전
 
-        /// <summary>
-        /// Checks if a ThingDef has the specified PawnTagFlag
-        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool HasFlag(ThingDef def, PawnTagFlags flag)
         {
-            if (!Utility_Common.RaceDefChecker(def))
-            {
-                return false;
-            }
-
-            var flags = GetTagFlags(def);
-            return (flags & flag) == flag;
+            return Utility_Common.RaceDefChecker(def) && (GetTagFlags(def) & flag) == flag;
         }
 
-        /// <summary>
-        /// Checks if a Pawn has the specified PawnTagFlag
-        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool HasFlag(Pawn pawn, PawnTagFlags flag)
         {
-            if (!Utility_Common.PawnChecker(pawn))
-            {
-                return false;
-            }
-
-            return HasFlag(pawn.def, flag);
+            return Utility_Common.PawnChecker(pawn) && HasFlag(pawn.def, flag);
         }
 
-        /// <summary>
-        /// Checks if a ThingDef has any of the specified PawnTagFlags
-        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool HasAnyFlag(ThingDef def, PawnTagFlags flags)
         {
-            if (!Utility_Common.RaceDefChecker(def))
-            {
-                return false;
-            }
-
-            var currentFlags = GetTagFlags(def);
-            return (currentFlags & flags) != 0;
+            return Utility_Common.RaceDefChecker(def) && (GetTagFlags(def) & flags) != 0;
         }
 
-        /// <summary>
-        /// Checks if a Pawn has any of the specified PawnTagFlags
-        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool HasAnyFlag(Pawn pawn, PawnTagFlags flags)
         {
-            if (!Utility_Common.PawnChecker(pawn))
-            {
-                return false;
-            }
-
-            return HasAnyFlag(pawn.def, flags);
+            return Utility_Common.PawnChecker(pawn) && HasAnyFlag(pawn.def, flags);
         }
 
-        /// <summary>
-        /// Checks if a work type is enabled using the flag system
-        /// </summary>
         public static bool IsWorkEnabled(Pawn pawn, string workTypeName)
         {
             if (!Utility_Common.PawnChecker(pawn) || string.IsNullOrEmpty(workTypeName))
-            {
                 return false;
-            }
 
             var flags = GetTagFlags(pawn.def);
 
-            // Check for AllowAllWork first
+            // AllowAllWork 체크 우선
             if ((flags & PawnTagFlags.AllowAllWork) != 0)
-            {
                 return true;
-            }
 
-            // Check for specific allow flag
-            var allowFlag = GetWorkTypeFlag(workTypeName, isBlock: false);
+            // 특정 allow flag 체크
+            var allowFlag = GetAllowWorkFlag(workTypeName);
             return allowFlag != PawnTagFlags.None && (flags & allowFlag) != 0;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsWorkEnabled(Pawn pawn, WorkTypeDef workTypeDef)
         {
-            var workTypeName = workTypeDef.ToStringSafe();
-            return IsWorkEnabled(pawn, workTypeName);
+            return IsWorkEnabled(pawn, workTypeDef.ToStringSafe());
         }
 
-        /// <summary>
-        /// Checks if a work type is disabled using the flag system
-        /// </summary>
         public static bool IsWorkDisabled(Pawn pawn, string workTypeName)
         {
             if (!Utility_Common.PawnChecker(pawn) || string.IsNullOrEmpty(workTypeName))
-            {
                 return false;
-            }
 
             var flags = GetTagFlags(pawn.def);
             bool hasAllowAllWork = (flags & PawnTagFlags.AllowAllWork) != 0;
             bool hasBlockAllWork = (flags & PawnTagFlags.BlockAllWork) != 0;
 
-            // Block all work overrides everything else
+            // BlockAllWork이 모든 것을 오버라이드
             if (!hasAllowAllWork && hasBlockAllWork)
-            {
                 return true;
-            }
 
-            // Check for specific block/allow flags
-            var blockFlag = GetWorkTypeFlag(workTypeName, isBlock: true);
-            var allowFlag = GetWorkTypeFlag(workTypeName, isBlock: false);
+            // 특정 block/allow flag 체크
+            var blockFlag = GetBlockWorkFlag(workTypeName);
+            var allowFlag = GetAllowWorkFlag(workTypeName);
 
-            // If BlockAllWork not set, check specific flags
             return !hasBlockAllWork &&
                    blockFlag != PawnTagFlags.None &&
                    (flags & blockFlag) != 0 &&
                    (allowFlag == PawnTagFlags.None || (flags & allowFlag) == 0);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsWorkDisabled(Pawn pawn, WorkTypeDef workTypeDef)
         {
-            var workTypeName = workTypeDef.ToStringSafe();
-            return IsWorkDisabled(pawn, workTypeName);
+            return IsWorkDisabled(pawn, workTypeDef.ToStringSafe());
         }
 
         #endregion
 
-        #region Cache Management
+        #region Cache Management - 최적화된 버전
 
         /// <summary>
-        /// Clears all cache entries for a specific race without affecting other races.
-        /// Use this instead of ResetCache() when working with a single race.
+        /// Race별 캐시 정리 - 최적화된 버전 (불필요한 Pawn 생성 제거)
         /// </summary>
         public static void ClearCacheForRace(ThingDef def)
         {
-            Pawn pawn = ThingMaker.MakeThing(def) as Pawn;
-            if (pawn == null) return;
+            if (!Utility_Common.RaceDefChecker(def))
+                return;
 
-            if (!Utility_Common.RaceDefChecker(pawn.def)) return;
+            // 기본 캐시 정리
+            Utility_CacheManager.TagFlags.TryRemove(def, out _);
+            Utility_CacheManager.Tags.TryRemove(def, out _);
+            Utility_CacheManager.IsAnimal.TryRemove(def, out _);
+            Utility_CacheManager.IsHumanlike.TryRemove(def, out _);
+            Utility_CacheManager.IsMechanoid.TryRemove(def, out _);
 
-            // Clear flag cache
-            Utility_CacheManager.TagFlags.Remove(pawn.def);
+            // ValueTuple 캐시들을 효율적으로 정리
+            ClearTupleCache(Utility_CacheManager.WorkEnabled, p => p.def == def);
+            ClearTupleCache(Utility_CacheManager.WorkDisabled, p => p.def == def);
+            ClearTupleCache(Utility_CacheManager.ForceDraftable, p => p.def == def);
+            ClearTupleCache(Utility_CacheManager.ForceEquipWeapon, p => p.def == def);
+            ClearTupleCache(Utility_CacheManager.ForceWearApparel, p => p.def == def);
 
-            // Clear string tag cache
-            Utility_CacheManager.Tags.Remove(pawn.def);
-
-            // Find and remove all tuple entries that reference this race
-            var keysToRemove = new List<ValueTuple<Pawn, string>>();
-
-            // Clear work enabled cache for this race
-            foreach (var key in Utility_CacheManager.WorkEnabled.Keys)
-            {
-                if (key.Item1.def == def)
-                    keysToRemove.Add(key);
-            }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.WorkEnabled.Remove(key);
-
-            // Reset and reuse list for work disabled cache
-            keysToRemove.Clear();
-            foreach (var key in Utility_CacheManager.WorkDisabled.Keys)
-            {
-                if (key.Item1.def == def)
-                    keysToRemove.Add(key);
-            }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.WorkDisabled.Remove(key);
-
-            // Reset and reuse list for force draftable cache
-            keysToRemove.Clear();
-            foreach (var key in Utility_CacheManager.ForceDraftable.Keys)
-            {
-                if (key.Item1.def == def)
-                    keysToRemove.Add(key);
-            }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.ForceDraftable.Remove(key);
-
-            // Reset and reuse list for force equip weapon cache
-            keysToRemove.Clear();
-            foreach (var key in Utility_CacheManager.ForceEquipWeapon.Keys)
-            {
-                if (key.Item1.def == def)
-                    keysToRemove.Add(key);
-            }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.ForceEquipWeapon.Remove(key);
-
-            // Reset and reuse list for force wear apparel cache
-            keysToRemove.Clear();
-            foreach (var key in Utility_CacheManager.ForceWearApparel.Keys)
-            {
-                if (key.Item1.def == def)
-                    keysToRemove.Add(key);
-            }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.ForceWearApparel.Remove(key);
-
-            // Also clear related caches in other managers if needed
-            Utility_CacheManager.IsAnimal.Remove(pawn.def);
-            Utility_CacheManager.IsHumanlike.Remove(pawn.def);
-            Utility_CacheManager.IsMechanoid.Remove(pawn.def);
-
-            Utility_DebugManager.LogNormal($"Cache entries for race {pawn.def.defName} successfully cleared");
+            Utility_DebugManager.LogNormal($"Cache entries for race {def.defName} successfully cleared");
         }
 
+        /// <summary>
+        /// Pawn별 캐시 정리 - 최적화된 버전
+        /// </summary>
         public static void ClearCacheForPawn(Pawn pawn)
         {
-            if (!Utility_Common.RaceDefChecker(pawn.def)) return;
+            if (!Utility_Common.RaceDefChecker(pawn.def))
+                return;
 
-            // Clear flag cache
-            Utility_CacheManager.TagFlags.Remove(pawn.def);
+            // Race level 캐시는 건드리지 않고 pawn-specific 캐시만 정리
+            ClearTupleCache(Utility_CacheManager.WorkEnabled, p => p == pawn);
+            ClearTupleCache(Utility_CacheManager.WorkDisabled, p => p == pawn);
+            ClearTupleCache(Utility_CacheManager.ForceDraftable, p => p == pawn);
+            ClearTupleCache(Utility_CacheManager.ForceEquipWeapon, p => p == pawn);
+            ClearTupleCache(Utility_CacheManager.ForceWearApparel, p => p == pawn);
 
-            // Clear race's tag cache
-            Utility_CacheManager.Tags.Remove(pawn.def);
+            Utility_DebugManager.LogNormal($"Cache entries for pawn {pawn.LabelShort} successfully cleared");
+        }
 
-            // Find and remove all tuple entries that reference this race
-            var keysToRemove = new List<ValueTuple<Pawn, string>>();
+        /// <summary>
+        /// ValueTuple 캐시를 효율적으로 정리 - 성능 최적화
+        /// </summary>
+        private static void ClearTupleCache(ConcurrentDictionary<ValueTuple<Pawn, string>, bool> cache,
+            Func<Pawn, bool> predicate)
+        {
+            var tempList = TempTupleList;
+            tempList.Clear();
 
-            // Clear work enabled cache for this race
-            foreach (var key in Utility_CacheManager.WorkEnabled.Keys)
+            // 제거할 키들을 수집
+            foreach (var kvp in cache)
             {
-                if (key.Item1 == pawn)
-                    keysToRemove.Add(key);
+                if (predicate(kvp.Key.Item1))
+                    tempList.Add(kvp.Key);
             }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.WorkEnabled.Remove(key);
 
-            // Reset and reuse list for work disabled cache
-            keysToRemove.Clear();
-            foreach (var key in Utility_CacheManager.WorkDisabled.Keys)
+            // 수집된 키들을 제거
+            for (int i = 0; i < tempList.Count; i++)
             {
-                if (key.Item1 == pawn)
-                    keysToRemove.Add(key);
+                cache.TryRemove(tempList[i], out _);
             }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.WorkDisabled.Remove(key);
 
-            // Reset and reuse list for force draftable cache
-            keysToRemove.Clear();
-            foreach (var key in Utility_CacheManager.ForceDraftable.Keys)
-            {
-                if (key.Item1 == pawn)
-                    keysToRemove.Add(key);
-            }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.ForceDraftable.Remove(key);
-
-            // Reset and reuse list for force equip weapon cache
-            keysToRemove.Clear();
-            foreach (var key in Utility_CacheManager.ForceEquipWeapon.Keys)
-            {
-                if (key.Item1 == pawn)
-                    keysToRemove.Add(key);
-            }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.ForceEquipWeapon.Remove(key);
-
-            // Reset and reuse list for force wear apparel cache
-            keysToRemove.Clear();
-            foreach (var key in Utility_CacheManager.ForceWearApparel.Keys)
-            {
-                if (key.Item1 == pawn)
-                    keysToRemove.Add(key);
-            }
-            foreach (var key in keysToRemove)
-                Utility_CacheManager.ForceWearApparel.Remove(key);
-
-            // Also clear related caches in other managers if needed
-            Utility_CacheManager.IsAnimal.Remove(pawn.def);
-            Utility_CacheManager.IsHumanlike.Remove(pawn.def);
-            Utility_CacheManager.IsMechanoid.Remove(pawn.def);
-
-            Utility_DebugManager.LogNormal($"Cache entries for race {pawn.def.defName} successfully cleared");
+            tempList.Clear();
         }
 
         public static void ClearAllCaches()
@@ -824,54 +653,42 @@ namespace emitbreaker.PawnControl
 
         #endregion
 
-        #region Helper Methods
+        #region Helper Methods - 최적화된 버전
 
         /// <summary>
-        /// Converts a tag string to its corresponding PawnTagFlag
+        /// 태그 문자열을 PawnTagFlag로 변환 - 레거시 호환성
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static PawnTagFlags ConvertTagToFlag(string tag)
         {
-            if (string.IsNullOrEmpty(tag)) return PawnTagFlags.None;
+            return ConvertTagToFlagOptimized(tag);
+        }
 
-            // Force type tags
-            if (tag == ManagedTags.ForceAnimal) return PawnTagFlags.ForceAnimal;
-            if (tag == ManagedTags.ForceMechanoid) return PawnTagFlags.ForceMechanoid;
-            if (tag == ManagedTags.ForceHumanlike) return PawnTagFlags.ForceHumanlike;
+        /// <summary>
+        /// 정적 캐시들을 정리합니다 (게임 종료시 호출)
+        /// </summary>
+        public static void CleanupStaticCaches()
+        {
+            _allowWorkFlagCache.Clear();
+            _blockWorkFlagCache.Clear();
 
-            // Behavior flags
-            if (tag == ManagedTags.ForceDraftable) return PawnTagFlags.ForceDraftable;
-            if (tag == ManagedTags.ForceEquipWeapon) return PawnTagFlags.ForceEquipWeapon;
-            if (tag == ManagedTags.ForceWearApparel) return PawnTagFlags.ForceWearApparel;
-            if (tag == PawnEnumTags.ForceWork.ToStringSafe()) return PawnTagFlags.ForceWork;
-            if (tag == PawnEnumTags.ForceTrainerTab.ToStringSafe()) return PawnTagFlags.ForceTrainerTab;
-            if (tag == PawnEnumTags.AutoDraftInjection.ToStringSafe()) return PawnTagFlags.AutoDraftInjection;
+            // ThreadStatic 필드들은 자동으로 정리되지만 명시적으로 null 처리
+            _tempTupleList = null;
+        }
 
-            // Work related flags - general
-            if (tag == ManagedTags.AllowAllWork) return PawnTagFlags.AllowAllWork;
-            if (tag == ManagedTags.BlockAllWork) return PawnTagFlags.BlockAllWork;
+        #endregion
 
-            // VFE and mechanic compatibility
-            if (tag == ManagedTags.ForceVFECombatTree) return PawnTagFlags.ForceVFECombatTree;
-            if (tag == ManagedTags.VFECore_Combat) return PawnTagFlags.VFECore_Combat;
-            if (tag == ManagedTags.Mech_DefendBeacon) return PawnTagFlags.Mech_DefendBeacon;
-            if (tag == ManagedTags.Mech_EscortCommander) return PawnTagFlags.Mech_EscortCommander;
-            if (tag == ManagedTags.VFESkipWorkJobGiver) return PawnTagFlags.VFESkipWorkJobGiver;
-            if (tag == ManagedTags.DisableVFEAIJobs) return PawnTagFlags.DisableVFEAIJobs;
+        #region Extension Methods - 성능 향상을 위한 확장
 
-            // Check for work prefixes
-            if (tag.StartsWith(ManagedTags.AllowWorkPrefix))
-            {
-                string workType = tag.Substring(ManagedTags.AllowWorkPrefix.Length);
-                return GetAllowWorkFlag(workType);
-            }
-
-            if (tag.StartsWith(ManagedTags.BlockWorkPrefix))
-            {
-                string workType = tag.Substring(ManagedTags.BlockWorkPrefix.Length);
-                return GetBlockWorkFlag(workType);
-            }
-
-            return PawnTagFlags.None; // No match found
+        /// <summary>
+        /// ConcurrentDictionary의 GetValueOrDefault 확장 메서드
+        /// (.NET Framework에서 지원하지 않는 경우 대비)
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static TValue GetValueOrDefault<TKey, TValue>(this ConcurrentDictionary<TKey, TValue> dictionary,
+            TKey key, TValue defaultValue)
+        {
+            return dictionary.TryGetValue(key, out var value) ? value : defaultValue;
         }
 
         #endregion
