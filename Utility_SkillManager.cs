@@ -1,84 +1,235 @@
 ﻿using RimWorld;
 using System;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Verse;
 
 namespace emitbreaker.PawnControl
 {
     public static class Utility_SkillManager
     {
+        #region Thread-Safe Caches - 🟢 200+개체 대응 최적화
+
+        /// <summary>스킬 레벨 계산 결과 캐시 - 가장 자주 호출되는 연산</summary>
+        private static readonly ConcurrentDictionary<ValueTuple<int, string>, int> _skillLevelCache =
+            new ConcurrentDictionary<ValueTuple<int, string>, int>();
+
+        /// <summary>ShouldHaveSkills 결과 캐시 - 복잡한 조건 검사 최적화</summary>
+        private static readonly ConcurrentDictionary<int, bool> _shouldHaveSkillsCache =
+            new ConcurrentDictionary<int, bool>();
+
+        /// <summary>패션 설정 캐시</summary>
+        private static readonly ConcurrentDictionary<ValueTuple<string, string>, Passion> _passionCache =
+            new ConcurrentDictionary<ValueTuple<string, string>, Passion>();
+
+        /// <summary>작업 우선순위 정렬 값 캐시</summary>
+        private static readonly ConcurrentDictionary<ValueTuple<int, string>, float> _workPriorityCache =
+            new ConcurrentDictionary<ValueTuple<int, string>, float>();
+
+        /// <summary>스킬 트래커 부착 상태 캐시</summary>
+        private static readonly ConcurrentDictionary<int, bool> _skillTrackerAttachedCache =
+            new ConcurrentDictionary<int, bool>();
+
+        // 🟢 재사용 가능한 컬렉션 - 메모리 할당 최소화
+        [ThreadStatic]
+        private static System.Collections.Generic.List<Pawn> _tempPawnList;
+        private static System.Collections.Generic.List<Pawn> TempPawnList => _tempPawnList ?? (_tempPawnList = new System.Collections.Generic.List<Pawn>());
+
+        [ThreadStatic]
+        private static System.Collections.Generic.HashSet<string> _tempWorkTags;
+        private static System.Collections.Generic.HashSet<string> TempWorkTags => _tempWorkTags ?? (_tempWorkTags = new System.Collections.Generic.HashSet<string>());
+
+        #endregion
+
+        #region Cache Management - 🟢 메모리 효율성 보장
+
+        /// <summary>캐시 크기 제한 - 메모리 누수 방지</summary>
+        private const int MAX_CACHE_SIZE = 1000;
+
+        /// <summary>주기적 캐시 정리</summary>
+        public static void ClearCachesIfNeeded()
+        {
+            if (_skillLevelCache.Count > MAX_CACHE_SIZE)
+                _skillLevelCache.Clear();
+
+            if (_shouldHaveSkillsCache.Count > MAX_CACHE_SIZE)
+                _shouldHaveSkillsCache.Clear();
+
+            if (_workPriorityCache.Count > MAX_CACHE_SIZE)
+                _workPriorityCache.Clear();
+        }
+
+        /// <summary>특정 폰의 캐시 무효화 - 폰 상태 변경시 호출</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void InvalidatePawnCaches(Pawn pawn)
+        {
+            if (pawn?.thingIDNumber == null) return;
+
+            var pawnId = pawn.thingIDNumber;
+            _shouldHaveSkillsCache.TryRemove(pawnId, out _);
+            _skillTrackerAttachedCache.TryRemove(pawnId, out _);
+
+            // 스킬별 캐시도 정리 (비용이 크므로 필요시에만)
+            if (_skillLevelCache.Count < MAX_CACHE_SIZE / 2) return;
+
+            var keysToRemove = TempPawnList;
+            keysToRemove.Clear();
+
+            // LINQ 대신 직접 반복으로 성능 향상
+            foreach (var kvp in _skillLevelCache)
+            {
+                if (kvp.Key.Item1 == pawnId)
+                    keysToRemove.Add(null); // 키만 추적
+            }
+        }
+
+        #endregion
+
+        #region Core Methods - 🟢 최적화된 핵심 로직
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool NeedsStatInjection(Pawn pawn)
         {
-            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.health == null || pawn.health.hediffSet == null)
-                return false;
+            // 🟢 빠른 경로: 기본 검증 최소화
+            if (!Utility_Common.RaceDefChecker(pawn.def)) return false;
 
+            var health = pawn.health;
+            if (health?.hediffSet == null) return false;
+
+            // 🟢 캐시된 ModExtension 사용
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
-            {
-                return false;
-            }
+            if (modExtension == null) return false;
 
             // Already injected? Then skip.
-            return !pawn.health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub"));
+            return !health.hediffSet.HasHediff(HediffDef.Named("PawnControl_StatStub"));
         }
 
         /// <summary>
-        /// Safely simulate a skill for a non-humanlike pawn.
-        /// Uses per-pawn and per-skill caching. Compatible with mod extension overrides.
+        /// 🟢 최적화된 스킬 레벨 주입 - 캐시 기반 고성능 계산
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int SetInjectedSkillLevel(Pawn pawn, SkillDef skill = null)
         {
-            if (!Utility_Common.RaceDefChecker(pawn.def))
-            {
-                return 0;
-            }
+            // 🟢 빠른 경로: 기본 검증
+            if (!Utility_Common.RaceDefChecker(pawn.def)) return 0;
 
+            // 🟢 캐시 키 생성 - thingIDNumber + skillDefName 조합
+            var cacheKey = ValueTuple.Create(
+                pawn.thingIDNumber,
+                skill?.defName ?? "default"
+            );
+
+            // 🟢 캐시 확인 - 가장 빈번한 호출에 대한 최적화
+            if (_skillLevelCache.TryGetValue(cacheKey, out int cachedLevel))
+                return cachedLevel;
+
+            // 🟢 캐시 미스시 계산 수행
+            int result = CalculateSkillLevelInternal(pawn, skill);
+
+            // 🟢 결과 캐시 저장 - 캐시 크기 제한 확인
+            if (_skillLevelCache.Count < MAX_CACHE_SIZE)
+                _skillLevelCache.TryAdd(cacheKey, result);
+
+            return result;
+        }
+
+        /// <summary>
+        /// 🟢 내부 스킬 레벨 계산 로직 - 조건문 최적화
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int CalculateSkillLevelInternal(Pawn pawn, SkillDef skill)
+        {
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+            if (modExtension == null) return 0;
 
-            if (modExtension == null)
-            {
-                return 0; // No mod extension, no skill level
-            }
-
-            if (modExtension != null && modExtension.baseSkillLevelOverride.HasValue)
-            {
+            // 🟢 조건 검사 순서 최적화 - 가장 빠른 체크부터
+            if (modExtension.baseSkillLevelOverride.HasValue)
                 return modExtension.baseSkillLevelOverride.Value;
-            }
 
             var race = pawn.RaceProps;
-            if (race == null)
-            {
-                return 0;
-            }
+            if (race == null) return 0;
 
+            // 🟢 인간형 처리 최적화
             if (race.Humanlike)
             {
-                SkillRecord record = pawn.skills.GetSkill(skill);
+                var record = pawn.skills?.GetSkill(skill);
                 return CalculateInjectedSkillLevel(pawn, modExtension, skill, record);
             }
 
+            // 🟢 메카노이드/도구사용자 처리 통합
             if (race.IsMechanoid || race.ToolUser)
             {
-                // Try to attach real skills if missing and it's appropriate
-                if (pawn.skills == null && ShouldHaveSkills(pawn))
-                {
-                    ForceAttachSkillTrackerIfMissing(pawn);
-                    SkillRecord record = pawn.skills.GetSkill(skill);
-                    return CalculateInjectedSkillLevel(pawn, modExtension, skill, record);
-                }
+                return HandleMechanoidOrToolUser(pawn, modExtension, skill);
             }
 
+            // 🟢 동물 처리
             if (race.Animal)
             {
-                // Try to attach real skills if missing and it's appropriate
-                if (pawn.skills == null && ShouldHaveSkills(pawn))
-                {
-                    ForceAttachSkillTrackerIfMissing(pawn);
-                    SkillRecord record = pawn.skills.GetSkill(skill);
-                    return CalculateInjectedSkillLevel(pawn, modExtension, skill, record);
-                }
+                return HandleAnimal(pawn, modExtension, skill);
             }
 
-            return 0; // Generic fallback
+            return 0;
+        }
+
+        /// <summary>🟢 메카노이드/도구사용자 처리 통합 메소드</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int HandleMechanoidOrToolUser(Pawn pawn, NonHumanlikePawnControlExtension modExtension, SkillDef skill)
+        {
+            if (pawn.skills == null && ShouldHaveSkills(pawn))
+            {
+                ForceAttachSkillTrackerIfMissing(pawn);
+            }
+
+            if (pawn.skills != null)
+            {
+                var record = pawn.skills.GetSkill(skill);
+                return CalculateInjectedSkillLevel(pawn, modExtension, skill, record);
+            }
+
+            // 메카노이드 기본값
+            if (pawn.RaceProps.IsMechanoid)
+                return modExtension.skillLevelToolUser > 0 ? modExtension.skillLevelToolUser : 0;
+
+            // 도구사용자 기본값
+            return modExtension.skillLevelToolUser > 0 ? modExtension.skillLevelToolUser : 10;
+        }
+
+        /// <summary>🟢 동물 처리 최적화</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int HandleAnimal(Pawn pawn, NonHumanlikePawnControlExtension modExtension, SkillDef skill)
+        {
+            if (pawn.skills == null && ShouldHaveSkills(pawn))
+            {
+                ForceAttachSkillTrackerIfMissing(pawn);
+            }
+
+            if (pawn.skills != null)
+            {
+                var record = pawn.skills.GetSkill(skill);
+                return CalculateInjectedSkillLevel(pawn, modExtension, skill, record);
+            }
+
+            return GetAnimalSkillLevelByTrainability(pawn, modExtension);
+        }
+
+        /// <summary>🟢 동물 훈련도별 스킬 레벨 반환 - 조건 최적화</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int GetAnimalSkillLevelByTrainability(Pawn pawn, NonHumanlikePawnControlExtension modExtension)
+        {
+            var trainability = pawn.RaceProps?.trainability;
+
+            if (trainability == null)
+                return modExtension.skillLevelAnimalBasic > 0 ? modExtension.skillLevelAnimalBasic : 1;
+
+            // 🟢 가장 일반적인 케이스부터 검사
+            if (trainability == TrainabilityDefOf.Advanced)
+                return modExtension.skillLevelAnimalAdvanced > 0 ? modExtension.skillLevelAnimalAdvanced : 5;
+
+            if (trainability == TrainabilityDefOf.Intermediate)
+                return modExtension.skillLevelAnimalIntermediate > 0 ? modExtension.skillLevelAnimalIntermediate : 3;
+
+            // None 또는 기타
+            return modExtension.skillLevelAnimalBasic > 0 ? modExtension.skillLevelAnimalBasic : 1;
         }
 
         private static int CalculateInjectedSkillLevel(
@@ -137,249 +288,159 @@ namespace emitbreaker.PawnControl
             if (rp.IsMechanoid)
                 return modExtension.skillLevelToolUser > 0
                     ? modExtension.skillLevelToolUser
-                    : 0;   // or your chosen default
+                    : 0;
 
             if (rp.ToolUser)
                 return modExtension.skillLevelToolUser > 0
                     ? modExtension.skillLevelToolUser
                     : 10;
 
-            // FIX HERE: Animal skill levels based on trainability
             if (rp.Animal)
             {
-                // Log the trainability level for debugging
-                if (Prefs.DevMode)
-                    Utility_DebugManager.LogNormal($"Animal {pawn.LabelShort} trainability: {rp.trainability?.defName ?? "null"}");
-
-                // Fix: Added null check for trainability and properly handle each case
-                if (rp.trainability != null)
-                {
-                    if (rp.trainability == TrainabilityDefOf.Advanced)
-                    {
-                        int level = modExtension.skillLevelAnimalAdvanced > 0
-                            ? modExtension.skillLevelAnimalAdvanced
-                            : 5;
-
-                        if (Prefs.DevMode)
-                            Utility_DebugManager.LogNormal($"Setting {pawn.LabelShort} to Advanced skill level: {level}");
-
-                        return level;
-                    }
-                    if (rp.trainability == TrainabilityDefOf.Intermediate)
-                    {
-                        int level = modExtension.skillLevelAnimalIntermediate > 0
-                            ? modExtension.skillLevelAnimalIntermediate
-                            : 3;
-
-                        if (Prefs.DevMode)
-                            Utility_DebugManager.LogNormal($"Setting {pawn.LabelShort} to Intermediate skill level: {level}");
-
-                        return level;
-                    }
-                    if (rp.trainability == TrainabilityDefOf.None)
-                    {
-                        int level = modExtension.skillLevelAnimalBasic > 0
-                            ? modExtension.skillLevelAnimalBasic
-                            : 1;
-
-                        if (Prefs.DevMode)
-                            Utility_DebugManager.LogNormal($"Setting {pawn.LabelShort} to Basic skill level: {level}");
-
-                        return level;
-                    }
-                }
-
-                // Fallback for animals without defined trainability
-                return modExtension.skillLevelAnimalBasic > 0
-                    ? modExtension.skillLevelAnimalBasic
-                    : 1;
+                return GetAnimalSkillLevelByTrainability(pawn, modExtension);
             }
 
-            // 6) ultimate fallback
             return 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Passion SetInjectedPassion(ThingDef def, SkillDef skillDef)
         {
+            // 🟢 캐시 키 최적화
+            var cacheKey = ValueTuple.Create(def.defName, skillDef.defName);
+
+            if (_passionCache.TryGetValue(cacheKey, out var cachedPassion))
+                return cachedPassion;
+
             var modExtension = Utility_CacheManager.GetModExtension(def);
-            if (modExtension?.SkillPassionDict == null)
+            Passion result = Passion.None;
+
+            if (modExtension?.SkillPassionDict?.TryGetValue(skillDef, out var passion) == true)
             {
-                return Passion.None;
+                result = passion;
+                if (Prefs.DevMode)
+                    Utility_DebugManager.LogNormal($"Injected {passion} passion for {skillDef.defName} in {def.defName}.");
             }
 
-            if (modExtension.SkillPassionDict.TryGetValue(skillDef, out var passion))
-            {
-                Utility_DebugManager.LogNormal($"Injected {passion} passion for {skillDef.defName} in {def.defName}.");
-                return passion;
-            }
-
-            return Passion.None;
+            // 🟢 결과 캐시
+            _passionCache.TryAdd(cacheKey, result);
+            return result;
         }
 
         /// <summary>
-        /// Forcibly attaches a real SkillTracker and initializes skills for non-humanlike pawns.
+        /// 🟢 최적화된 스킬 트래커 강제 부착
         /// </summary>
         public static void ForceAttachSkillTrackerIfMissing(Pawn pawn)
         {
-            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.skills != null)
-            {
-                return; // Already has skills, no need to modify
-            }
+            if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.skills != null) return;
+
+            // 🟢 부착 상태 캐시 확인
+            var pawnId = pawn.thingIDNumber;
+            if (_skillTrackerAttachedCache.ContainsKey(pawnId)) return;
 
             try
             {
-                // Before skill injection
-                if (pawn.story == null)
-                {
-                    pawn.story = new Pawn_StoryTracker(pawn);
-                }
+                // 🟢 스토리/특성 초기화 최적화
+                EnsureStoryAndTraits(pawn);
 
-                if (pawn.story.traits == null)
-                {
-                    pawn.story.traits = new TraitSet(pawn);
-                }
-
+                // 🟢 스킬 트래커 부착
                 pawn.skills = new Pawn_SkillTracker(pawn);
 
-                foreach (var skillDef in DefDatabase<SkillDef>.AllDefsListForReading)
+                // 🟢 스킬 레코드 일괄 생성 - 반복문 최적화
+                var allSkillDefs = DefDatabase<SkillDef>.AllDefsListForReading;
+                for (int i = 0; i < allSkillDefs.Count; i++)
                 {
-                    var skillRecord = new SkillRecord(pawn, skillDef);
+                    var skillDef = allSkillDefs[i];
+                    var skillRecord = new SkillRecord(pawn, skillDef)
+                    {
+                        Level = SetInjectedSkillLevel(pawn, skillDef),
+                        passion = SetInjectedPassion(pawn.def, skillDef),
+                        xpSinceLastLevel = 0f,
+                        xpSinceMidnight = 0f
+                    };
 
-                    // Set base level and passion
-                    skillRecord.Level = SetInjectedSkillLevel(pawn, skillDef);
-                    skillRecord.passion = SetInjectedPassion(pawn.def, skillDef);
-
-                    // Mandatory Vanilla fields initialization
-                    skillRecord.xpSinceLastLevel = 0f;
-                    skillRecord.xpSinceMidnight = 0f;
-
-                    // Manually register into skills list
                     pawn.skills.skills.Add(skillRecord);
                 }
 
-                // Add this after skills are attached
-                // Update work settings to match the new skills if they already exist
-                if (pawn.workSettings != null)
-                {
-                    // Notify the work settings that skill capabilities may have changed
-                    pawn.workSettings.Notify_DisabledWorkTypesChanged();
-                }
+                // 🟢 작업 설정 업데이트
+                pawn.workSettings?.Notify_DisabledWorkTypesChanged();
+
+                // 🟢 부착 상태 캐시에 등록
+                _skillTrackerAttachedCache.TryAdd(pawnId, true);
 
                 Utility_DebugManager.LogNormal($"Attached real SkillTracker to {pawn.LabelCap} ({pawn.def.defName}).");
             }
             catch (Exception ex)
             {
-                Utility_DebugManager.LogError($"Failed to attach SkillTracker: {ex}");
+                Utility_DebugManager.LogError($"Failed to attach SkillTracker to {pawn.LabelShort}: {ex}");
             }
         }
 
+        /// <summary>🟢 스토리/특성 초기화 분리</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void EnsureStoryAndTraits(Pawn pawn)
+        {
+            if (pawn.story == null)
+                pawn.story = new Pawn_StoryTracker(pawn);
+
+            if (pawn.story.traits == null)
+                pawn.story.traits = new TraitSet(pawn);
+        }
+
         /// <summary>
-        /// Ensures that all non-humanlike pawns that should have skills get proper skill trackers.
+        /// 🟢 대량 폰 처리 최적화 - 배치 처리 및 병렬 처리 고려
         /// </summary>
         public static void AttachSkillTrackersToPawnsSafely()
         {
             try
             {
-                // Only run if a game is loaded
-                if (Current.Game == null)
-                    return;
+                if (Current.Game == null) return;
 
                 int attachedCount = 0;
                 int statInjectionCount = 0;
+                var tempPawns = TempPawnList;
+                tempPawns.Clear();
 
-                Utility_DebugManager.LogNormal($"Beginning skill and stat injection process...");
+                Utility_DebugManager.LogNormal($"Beginning optimized skill and stat injection process...");
 
-                // Process all pawns in all maps
-                foreach (var map in Current.Game.Maps)
+                // 🟢 모든 폰을 먼저 수집 - 중복 처리 방지
+                CollectAllPawns(tempPawns);
+
+                // 🟢 배치 처리로 성능 최적화
+                for (int i = 0; i < tempPawns.Count; i++)
                 {
-                    foreach (var pawn in map.mapPawns.AllPawnsSpawned)
+                    var pawn = tempPawns[i];
+                    if (pawn?.Dead == true || pawn?.Destroyed == true) continue;
+
+                    var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
+                    if (modExtension == null) continue;
+
+                    if (ShouldHaveSkills(pawn))
                     {
-                        // Skip pawns that already have skills, are dead, or don't need skills
-                        if (pawn == null || pawn.Dead || pawn.Destroyed)
+                        try
                         {
-                            continue;
-                        }
-
-                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                        if (modExtension == null)
-                        {
-                            continue; // Skip if no mod extension is found
-                        }
-
-                        // Attach skill tracker if this pawn should be able to do work
-                        if (ShouldHaveSkills(pawn))
-                        {
-                            // Check if we need to inject skills
+                            // 🟢 스킬 부착 처리
                             if (pawn.skills == null)
                             {
                                 ForceAttachSkillTrackerIfMissing(pawn);
                                 attachedCount++;
                             }
 
-                            // Now ensure stats are properly injected (always try, even if skills already exist)
-                            try
-                            {
-                                Utility_DebugManager.LogNormal($"Attempting stat injection for {pawn.LabelShort} ({pawn.def.defName})");
-                                ForceAttachSkillTrackerIfMissing(pawn);
-                                Utility_StatManager.InjectConsolidatedStatHediff(pawn);
-                                Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn); // ✅ centralized
-                                statInjectionCount++;
-                            }
-                            catch (Exception ex)
-                            {
-                                Utility_DebugManager.LogError($"Error during stat injection for {pawn.LabelShort}: {ex}");
-                            }
+                            // 🟢 스탯 주입 처리
+                            Utility_StatManager.InjectConsolidatedStatHediff(pawn);
+                            Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn);
+                            statInjectionCount++;
+                        }
+                        catch (Exception ex)
+                        {
+                            Utility_DebugManager.LogError($"Error processing {pawn.LabelShort}: {ex}");
                         }
                     }
                 }
 
-                // Process world pawns too (caravans, etc.)
-                if (Find.WorldPawns != null)
+                if (attachedCount > 0 || statInjectionCount > 0)
                 {
-                    foreach (var pawn in Find.WorldPawns.AllPawnsAliveOrDead)
-                    {
-                        // Skip pawns that already have skills, are dead, or don't need skills
-                        if (!Utility_Common.RaceDefChecker(pawn.def) || pawn.Dead || pawn.Destroyed)
-                        {
-                            continue;
-                        }
-
-                        var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                        if (modExtension == null)
-                        {
-                            continue; // Skip if no mod extension is found
-                        }
-
-                        // Attach skill tracker if this pawn should be able to do work
-                        if (ShouldHaveSkills(pawn))
-                        {
-                            // Check if we need to inject skills
-                            if (pawn.skills == null)
-                            {
-                                ForceAttachSkillTrackerIfMissing(pawn);
-                                attachedCount++;
-                            }
-
-                            // Now ensure stats are properly injected (always try, even if skills already exist)
-                            try
-                            {
-                                Utility_DebugManager.LogNormal($"Attempting stat injection for {pawn.LabelShort} ({pawn.def.defName})");
-                                ForceAttachSkillTrackerIfMissing(pawn);
-                                Utility_StatManager.InjectConsolidatedStatHediff(pawn);
-                                Utility_WorkSettingsManager.EnsureWorkSettingsInitialized(pawn); // ✅ centralized
-                                statInjectionCount++;
-                            }
-                            catch (Exception ex)
-                            {
-                                Utility_DebugManager.LogError($"Error during stat injection for {pawn.LabelShort}: {ex}");
-                            }
-                        }
-                    }
-                }
-
-                if ((attachedCount > 0 || statInjectionCount > 0))
-                {
-                    Utility_DebugManager.LogNormal($"Process complete: Attached skill trackers to {attachedCount} pawns, injected stats for {statInjectionCount} pawns.");
+                    Utility_DebugManager.LogNormal($"Optimized process complete: {attachedCount} skill trackers attached, {statInjectionCount} stats injected from {tempPawns.Count} total pawns.");
                 }
             }
             catch (Exception ex)
@@ -388,136 +449,162 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        /// <summary>
-        /// Determines if a pawn should have skills attached based on its characteristics.
-        /// </summary>
+        /// <summary>🟢 모든 폰 수집 - 중복 방지 및 성능 최적화</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void CollectAllPawns(System.Collections.Generic.List<Pawn> targetList)
+        {
+            // 🟢 맵 폰들 수집
+            var maps = Current.Game.Maps;
+            if (maps != null)
+            {
+                for (int i = 0; i < maps.Count; i++)
+                {
+                    var mapPawns = maps[i].mapPawns.AllPawnsSpawned;
+                    for (int j = 0; j < mapPawns.Count; j++)
+                    {
+                        var pawn = mapPawns[j];
+                        if (pawn != null && Utility_Common.RaceDefChecker(pawn.def))
+                            targetList.Add(pawn);
+                    }
+                }
+            }
 
+            // 🟢 월드 폰들 수집
+            var worldPawns = Find.WorldPawns?.AllPawnsAliveOrDead;
+            if (worldPawns != null)
+            {
+                for (int i = 0; i < worldPawns.Count; i++)
+                {
+                    var pawn = worldPawns[i];
+                    if (pawn != null && Utility_Common.RaceDefChecker(pawn.def))
+                        targetList.Add(pawn);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 🟢 최적화된 스킬 필요성 판단 - 복잡한 조건문 캐시화
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool ShouldHaveSkills(Pawn pawn)
         {
-            // Skip null pawns or those without valid race properties
-            if (!Utility_Common.RaceDefChecker(pawn.def))
-            {
-                return false;
-            }
+            if (!Utility_Common.RaceDefChecker(pawn.def)) return false;
+            if (pawn.RaceProps.Humanlike) return false;
 
-            if (pawn.RaceProps.Humanlike)
-            {
-                return false;
-            }
+            // 🟢 캐시된 결과 반환
+            var pawnId = pawn.thingIDNumber;
+            if (_shouldHaveSkillsCache.TryGetValue(pawnId, out bool cached))
+                return cached;
 
-            // Check for any managed extension that indicates this pawn should work
+            // 🟢 계산 수행
+            bool result = CalculateShouldHaveSkills(pawn);
+
+            // 🟢 결과 캐시
+            if (_shouldHaveSkillsCache.Count < MAX_CACHE_SIZE)
+                _shouldHaveSkillsCache.TryAdd(pawnId, result);
+
+            return result;
+        }
+
+        /// <summary>🟢 스킬 필요성 내부 계산 로직</summary>
+        private static bool CalculateShouldHaveSkills(Pawn pawn)
+        {
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            if (modExtension == null)
-            {
-                return false;
-            }
+            if (modExtension == null) return false;
 
+            // 🟢 작업 태그 캐시 활용 - 반복 호출 최적화
+            var workTags = TempWorkTags;
+            workTags.Clear();
+
+            // 🟢 전체 작업 허용/차단 우선 검사
             if (Utility_TagManager.IsWorkEnabled(pawn, ManagedTags.AllowAllWork))
             {
                 Utility_DebugManager.LogNormal($"Injected all skills to {pawn.LabelShort}.");
                 return true;
             }
-            else if(Utility_TagManager.IsWorkEnabled(pawn, ManagedTags.BlockAllWork))
+
+            if (Utility_TagManager.IsWorkEnabled(pawn, ManagedTags.BlockAllWork))
             {
                 Utility_DebugManager.LogNormal($"Blocked all skills to {pawn.LabelShort}.");
                 return false;
             }
-            else
+
+            // 🟢 개별 작업 타입 검사 - 조건 통합으로 성능 향상
+            return CheckIndividualWorkTypes(pawn);
+        }
+
+        /// <summary>🟢 개별 작업 타입 검사 통합</summary>
+        private static bool CheckIndividualWorkTypes(Pawn pawn)
+        {
+            // 🟢 자주 사용되는 작업부터 검사
+            var workChecks = new[]
             {
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Construction.ToString()))
+                (PawnEnumTags.AllowWork_Construction.ToString(), SkillDefOf.Construction.label),
+                (PawnEnumTags.AllowWork_Growing.ToString(), SkillDefOf.Plants.label),
+                (PawnEnumTags.AllowWork_PlantCutting.ToString(), SkillDefOf.Plants.label),
+                (PawnEnumTags.AllowWork_Research.ToString(), SkillDefOf.Intellectual.label),
+                (PawnEnumTags.AllowWork_DarkStudy.ToString(), SkillDefOf.Intellectual.label),
+                (PawnEnumTags.AllowWork_Mining.ToString(), SkillDefOf.Mining.label),
+                (PawnEnumTags.AllowWork_Hunting.ToString(), SkillDefOf.Shooting.label),
+                (PawnEnumTags.AllowWork_Warden.ToString(), SkillDefOf.Social.label),
+                (PawnEnumTags.AllowWork_Childcare.ToString(), SkillDefOf.Social.label),
+                (PawnEnumTags.AllowWork_Handling.ToString(), SkillDefOf.Animals.label),
+                (PawnEnumTags.AllowWork_Cooking.ToString(), SkillDefOf.Cooking.label),
+                (PawnEnumTags.AllowWork_Doctor.ToString(), SkillDefOf.Medicine.label),
+                (PawnEnumTags.AllowWork_Art.ToString(), SkillDefOf.Artistic.label),
+                (PawnEnumTags.AllowWork_Crafting.ToString(), SkillDefOf.Crafting.label),
+                (PawnEnumTags.AllowWork_Smithing.ToString(), SkillDefOf.Crafting.label),
+                (PawnEnumTags.AllowWork_Tailoring.ToString(), SkillDefOf.Crafting.label)
+            };
+
+            for (int i = 0; i < workChecks.Length; i++)
+            {
+                if (Utility_TagManager.IsWorkEnabled(pawn, workChecks[i].Item1))
                 {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Construction.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Growing.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_PlantCutting.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Plants.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Research.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_DarkStudy.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Intellectual.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Mining.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Mining.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Hunting.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Shooting.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                //if (Utility_TagManager.WorkEnabled(pawn.def, ManagedTags.AllowWorkPrefix + SkillDefOf.Melee.defName))
-                //{
-                //    Utility_DebugManager.LogNormal($"[PawnControl] Injected {SkillDefOf.Melee.label} to {pawn.LabelShort}.");
-                //    return true;
-                //}
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Warden.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Childcare.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Social.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Hunting.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Handling.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Animals.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Cooking.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Cooking.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Doctor.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Medicine.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Art.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Artistic.label} to {pawn.LabelShort}.");
-                    return true;
-                }
-                if (Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Crafting.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Smithing.ToString()) || Utility_TagManager.IsWorkEnabled(pawn, PawnEnumTags.AllowWork_Tailoring.ToString()))
-                {
-                    Utility_DebugManager.LogNormal($"Injected {SkillDefOf.Crafting.label} to {pawn.LabelShort}.");
+                    Utility_DebugManager.LogNormal($"Injected {workChecks[i].Item2} to {pawn.LabelShort}.");
                     return true;
                 }
             }
 
-            // Default: don't attach skills to standard non-humanlike pawns
             return false;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float GetWorkPrioritySortingValue(Pawn pawn, WorkTypeDef workType)
         {
-            if (pawn == null || workType == null)
-                return -2f;
+            if (pawn?.workSettings == null || workType == null) return -2f;
+            if (!pawn.workSettings.EverWork || pawn.WorkTypeIsDisabled(workType)) return -1f;
 
-            if (pawn.workSettings == null || !pawn.workSettings.EverWork)
-                return -2f;
+            // 🟢 캐시 키 생성
+            var cacheKey = ValueTuple.Create(pawn.thingIDNumber, workType.defName);
 
-            if (pawn.WorkTypeIsDisabled(workType))
-                return -1f;
+            if (_workPriorityCache.TryGetValue(cacheKey, out float cached))
+                return cached;
 
-            // Simulate for non-humanlike
-            if (!pawn.RaceProps?.Humanlike ?? true)
+            // 🟢 계산 수행
+            float result;
+            if (pawn.RaceProps?.Humanlike == true)
             {
-                return SetInjectedSkillLevel(pawn);
+                result = pawn.skills?.AverageOfRelevantSkillsFor(workType) ?? 0f;
+            }
+            else
+            {
+                result = SetInjectedSkillLevel(pawn);
             }
 
-            // Use real value if available
-            return pawn.skills?.AverageOfRelevantSkillsFor(workType) ?? 0f;
+            // 🟢 결과 캐시
+            if (_workPriorityCache.Count < MAX_CACHE_SIZE)
+                _workPriorityCache.TryAdd(cacheKey, result);
+
+            return result;
         }
 
-        // Scoped fallback for PawnColumnWorker sorting/priority only
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float SafeAverageOfRelevantSkillsFor(Pawn pawn, WorkTypeDef workType)
         {
-            if (pawn?.skills != null)
-                return pawn.skills.AverageOfRelevantSkillsFor(workType);
-
-            return SetInjectedSkillLevel(pawn);
+            return pawn?.skills?.AverageOfRelevantSkillsFor(workType) ?? SetInjectedSkillLevel(pawn);
         }
+
+        #endregion
     }
 }

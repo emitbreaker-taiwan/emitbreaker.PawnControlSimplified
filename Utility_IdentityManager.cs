@@ -1,6 +1,8 @@
 ﻿using RimWorld;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Verse;
 
@@ -11,26 +13,50 @@ namespace emitbreaker.PawnControl
         public static bool identityFlagsPreloaded = false;
         public static bool IsIdentityFlagsPreloaded => identityFlagsPreloaded;
 
-        private static int CountTrueValues<TKey>(Dictionary<TKey, bool> dict)
+        #region Optimized Helper Methods
+
+        /// <summary>
+        /// ConcurrentDictionary의 true 값 개수를 효율적으로 계산
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int CountTrueValues<TKey>(ConcurrentDictionary<TKey, bool> dict)
         {
-            int cnt = 0;
-            foreach (var kv in dict)
-                if (kv.Value) cnt++;
-            return cnt;
+            int count = 0;
+            foreach (var kvp in dict)
+            {
+                if (kvp.Value) count++;
+            }
+            return count;
         }
 
+        /// <summary>
+        /// 태그 prefix 체크 - 최적화된 버전 (LINQ 제거)
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool AnyTagStartsWith(ThingDef def, string prefix)
         {
-            List<string> tags = Utility_TagManager.GetTags(def).ToList();
-            if (tags == null) return false;
-            for (int i = 0, c = tags.Count; i < c; i++)
+            // Flag 기반 체크 우선 - 성능 향상
+            if (prefix == ManagedTags.AllowWorkPrefix)
+                return Utility_TagManager.HasAnyTagWithPrefix(def, prefix);
+
+            if (prefix == ManagedTags.BlockWorkPrefix)
+                return Utility_TagManager.HasAnyTagWithPrefix(def, prefix);
+
+            // String 기반 fallback - LINQ 제거
+            var tags = Utility_TagManager.GetTags(def);
+            if (tags.Count == 0) return false;
+
+            foreach (string tag in tags)
             {
-                string t = tags[i];
-                if (t != null && t.StartsWith(prefix))
+                if (tag?.StartsWith(prefix) == true)
                     return true;
             }
             return false;
         }
+
+        #endregion
+
+        #region Main Cache Building
 
         public static void BuildIdentityFlagCache(bool reload = false)
         {
@@ -48,29 +74,33 @@ namespace emitbreaker.PawnControl
                 mechanoidCount = CountTrueValues(Utility_CacheManager.IsMechanoid);
             }
 
+            // Clear caches
             Utility_CacheManager.IsAnimal.Clear();
             Utility_CacheManager.IsHumanlike.Clear();
             Utility_CacheManager.IsMechanoid.Clear();
 
-            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
+            var defs = DefDatabase<ThingDef>.AllDefsListForReading;
+
+            // 직접 for 루프로 성능 향상
+            for (int i = 0; i < defs.Count; i++)
             {
+                var def = defs[i];
                 if (def?.race == null)
-                {
                     continue;
-                }
 
                 var modExtension = Utility_CacheManager.GetModExtension(def);
                 if (modExtension == null)
-                {                    
                     continue;
-                }
 
+                // 조건 체크를 한 번만 수행하고 결과를 캐시에 저장
                 bool forceAnimal = ForcedAnimalCondition(def, modExtension);
                 bool forceHumanlike = ForcedHumanlikeCondition(def, modExtension);
                 bool forceMechanoid = ForcedMechanoidCondition(def, modExtension);
-                Utility_CacheManager.IsAnimal[def] = forceAnimal;
-                Utility_CacheManager.IsHumanlike[def] = forceHumanlike;
-                Utility_CacheManager.IsMechanoid[def] = forceMechanoid;
+
+                // ConcurrentDictionary에 안전하게 추가
+                Utility_CacheManager.IsAnimal.TryAdd(def, forceAnimal);
+                Utility_CacheManager.IsHumanlike.TryAdd(def, forceHumanlike);
+                Utility_CacheManager.IsMechanoid.TryAdd(def, forceMechanoid);
             }
 
             identityFlagsPreloaded = true;
@@ -87,106 +117,143 @@ namespace emitbreaker.PawnControl
                 }
             }
         }
-        
-        // For Harmony Patch in early loading stage where Mod Extensions are not fully loaded yet.
-        public static bool IsForcedAnimal(ThingDef def) => def != null && Utility_CacheManager.IsAnimal.TryGetValue(def, out var result) && result;
-        public static bool IsForcedHumanlike(ThingDef def) => def != null && Utility_CacheManager.IsHumanlike.TryGetValue(def, out var result) && result;
-        public static bool IsForcedMechanoid(ThingDef def) => def != null && Utility_CacheManager.IsMechanoid.TryGetValue(def, out var result) && result;
 
-        // Check whether does pawn forcefully converted to other type or not.
+        #endregion
+
+        #region Quick Check Methods - Harmony Patches 호환
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsForcedAnimal(ThingDef def) =>
+            def != null && Utility_CacheManager.IsAnimal.TryGetValue(def, out var result) && result;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsForcedHumanlike(ThingDef def) =>
+            def != null && Utility_CacheManager.IsHumanlike.TryGetValue(def, out var result) && result;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsForcedMechanoid(ThingDef def) =>
+            def != null && Utility_CacheManager.IsMechanoid.TryGetValue(def, out var result) && result;
+
+        #endregion
+
+        #region Condition Checkers - 최적화된 버전
+
+        /// <summary>
+        /// Animal 강제 조건 체크 - Flag 기반 최적화
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool ForcedAnimalCondition(ThingDef def, NonHumanlikePawnControlExtension modExtension)
         {
-            bool result = false;
+            if (modExtension.forceIdentity == ForcedIdentityType.ForceAnimal)
+                return true;
 
-            if (modExtension.forceIdentity == ForcedIdentityType.ForceAnimal || Utility_TagManager.HasTag(def, ManagedTags.ForceAnimal))
-            {
-                result = true;
-            }
-
-            return result;
+            // Flag 기반 체크로 성능 향상
+            return Utility_TagManager.HasFlag(def, PawnTagFlags.ForceAnimal);
         }
 
+        /// <summary>
+        /// Humanlike 강제 조건 체크 - Flag 기반 최적화
+        /// </summary>
         private static bool ForcedHumanlikeCondition(ThingDef def, NonHumanlikePawnControlExtension modExtension)
         {
-            bool result = false;
+            if (modExtension.forceDraftable)
+                return true;
 
-            if (modExtension.forceDraftable
-                       || Utility_TagManager.HasTag(def, ManagedTags.ForceDraftable)
-                       || Utility_TagManager.HasTag(def, ManagedTags.AllowAllWork)
-                       || AnyTagStartsWith(def, ManagedTags.AllowWorkPrefix)
-                       || Utility_TagManager.HasTag(def, ManagedTags.BlockAllWork)
-                       || AnyTagStartsWith(def, ManagedTags.BlockWorkPrefix))
-            {
-                result = true;
-            }
+            // Flag 기반 체크로 한 번에 처리 - 성능 대폭 향상
+            var flags = Utility_TagManager.GetTagFlags(def);
 
-            return result;
+            // 관련 플래그들을 한 번에 체크
+            var relevantFlags = PawnTagFlags.ForceDraftable |
+                               PawnTagFlags.AllowAllWork |
+                               PawnTagFlags.BlockAllWork;
+
+            if ((flags & relevantFlags) != PawnTagFlags.None)
+                return true;
+
+            // Work-related flags 체크
+            var workFlags = flags & (
+                PawnTagFlags.AllowWork_Firefighter | PawnTagFlags.AllowWork_Patient |
+                PawnTagFlags.AllowWork_Doctor | PawnTagFlags.AllowWork_PatientBedRest |
+                PawnTagFlags.AllowWork_BasicWorker | PawnTagFlags.AllowWork_Warden |
+                PawnTagFlags.AllowWork_Handling | PawnTagFlags.AllowWork_Cooking |
+                PawnTagFlags.AllowWork_Hunting | PawnTagFlags.AllowWork_Construction |
+                PawnTagFlags.AllowWork_Growing | PawnTagFlags.AllowWork_Mining |
+                PawnTagFlags.AllowWork_PlantCutting | PawnTagFlags.AllowWork_Smithing |
+                PawnTagFlags.AllowWork_Tailoring | PawnTagFlags.AllowWork_Art |
+                PawnTagFlags.AllowWork_Crafting | PawnTagFlags.AllowWork_Hauling |
+                PawnTagFlags.AllowWork_Cleaning | PawnTagFlags.AllowWork_Research |
+                PawnTagFlags.AllowWork_Childcare | PawnTagFlags.AllowWork_DarkStudy |
+                PawnTagFlags.BlockWork_Firefighter | PawnTagFlags.BlockWork_Patient |
+                PawnTagFlags.BlockWork_Doctor | PawnTagFlags.BlockWork_PatientBedRest |
+                PawnTagFlags.BlockWork_BasicWorker | PawnTagFlags.BlockWork_Warden |
+                PawnTagFlags.BlockWork_Handling | PawnTagFlags.BlockWork_Cooking |
+                PawnTagFlags.BlockWork_Hunting | PawnTagFlags.BlockWork_Construction |
+                PawnTagFlags.BlockWork_Growing | PawnTagFlags.BlockWork_Mining |
+                PawnTagFlags.BlockWork_PlantCutting | PawnTagFlags.BlockWork_Smithing |
+                PawnTagFlags.BlockWork_Tailoring | PawnTagFlags.BlockWork_Art |
+                PawnTagFlags.BlockWork_Crafting | PawnTagFlags.BlockWork_Hauling |
+                PawnTagFlags.BlockWork_Cleaning | PawnTagFlags.BlockWork_Research |
+                PawnTagFlags.BlockWork_Childcare | PawnTagFlags.BlockWork_DarkStudy
+            );
+
+            return workFlags != PawnTagFlags.None;
         }
 
+        /// <summary>
+        /// Mechanoid 강제 조건 체크 - Flag 기반 최적화
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool ForcedMechanoidCondition(ThingDef def, NonHumanlikePawnControlExtension modExtension)
         {
-            bool result = false;
+            if (modExtension.forceIdentity == ForcedIdentityType.ForceMechanoid)
+                return true;
 
-            if (modExtension.forceIdentity == ForcedIdentityType.ForceMechanoid || Utility_TagManager.HasTag(def, ManagedTags.ForceMechanoid))
-            {
-                result = true;
-            }
-
-            return result;
+            // Flag 기반 체크로 성능 향상
+            return Utility_TagManager.HasFlag(def, PawnTagFlags.ForceMechanoid);
         }
 
-        // For Caching
+        #endregion
+
+        #region Identity Checks - 캐시 활용
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsAnimal(ThingDef def)
         {
-            if (def == null || def.race == null)
-            {
+            if (def?.race == null)
                 return false;
-            }
 
-            if (Utility_CacheManager.IsAnimal.TryGetValue(def, out bool value))
-            {
-                return value;
-            }
-
-            return def.race.Animal;
+            return Utility_CacheManager.IsAnimal.TryGetValue(def, out bool value) ? value : def.race.Animal;
         }
-        
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsHumanlike(ThingDef def)
         {
-            if (def == null || def.race == null)
-            {
+            if (def?.race == null)
                 return false;
-            }
 
-            if (Utility_CacheManager.IsHumanlike.TryGetValue(def, out bool value))
-            {
-                return value;
-            }
-
-            return def.race.Humanlike;
+            return Utility_CacheManager.IsHumanlike.TryGetValue(def, out bool value) ? value : def.race.Humanlike;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsMechanoid(ThingDef def)
         {
-            if (def == null || def.race == null)
-            {
+            if (def?.race == null)
                 return false;
-            }
 
-            if (Utility_CacheManager.IsMechanoid.TryGetValue(def, out bool value))
-            {
-                return value;
-            }
-
-            return def.race.IsMechanoid;
+            return Utility_CacheManager.IsMechanoid.TryGetValue(def, out bool value) ? value : def.race.IsMechanoid;
         }
 
-        // Dynamic Flag Management
+        #endregion
+
+        #region Dynamic Flag Management
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetFlagOverride(FlagScopeTarget flag, bool value)
         {
-            Utility_CacheManager.FlagOverrides[flag] = value;
+            Utility_CacheManager.FlagOverrides.AddOrUpdate(flag, value, (key, oldValue) => value);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsFlagOverridden(FlagScopeTarget flag)
         {
             return Utility_CacheManager.FlagOverrides.TryGetValue(flag, out bool active) && active;
@@ -194,37 +261,39 @@ namespace emitbreaker.PawnControl
 
         public static bool MatchesIdentityFlags(Pawn pawn, PawnIdentityFlags flags)
         {
-            if (pawn == null || pawn.def == null) return false;
+            if (pawn?.def == null) return false;
 
             bool match = false;
 
-            if (flags.HasFlag(PawnIdentityFlags.IsColonist)) match |= IsColonist(pawn);
-            if (flags.HasFlag(PawnIdentityFlags.IsPrisoner)) match |= IsPrisoner(pawn);
-            if (flags.HasFlag(PawnIdentityFlags.IsPrisonerOfColony)) match |= IsPrisonerOfColony(pawn);
-            if (flags.HasFlag(PawnIdentityFlags.IsSlave)) match |= IsSlave(pawn);
-            if (flags.HasFlag(PawnIdentityFlags.IsSlaveOfColony)) match |= IsSlaveOfColony(pawn);
-            if (flags.HasFlag(PawnIdentityFlags.IsGuest)) match |= IsGuest(pawn);
+            // 비트 연산으로 한 번에 체크하여 성능 향상
+            if ((flags & PawnIdentityFlags.IsColonist) != 0) match |= IsColonist(pawn);
+            if ((flags & PawnIdentityFlags.IsPrisoner) != 0) match |= IsPrisoner(pawn);
+            if ((flags & PawnIdentityFlags.IsPrisonerOfColony) != 0) match |= IsPrisonerOfColony(pawn);
+            if ((flags & PawnIdentityFlags.IsSlave) != 0) match |= IsSlave(pawn);
+            if ((flags & PawnIdentityFlags.IsSlaveOfColony) != 0) match |= IsSlaveOfColony(pawn);
+            if ((flags & PawnIdentityFlags.IsGuest) != 0) match |= IsGuest(pawn);
 
-            // Cached identity traits
-            if (flags.HasFlag(PawnIdentityFlags.IsHumanlike)) match |= IsHumanlike(pawn.def);
-            if (flags.HasFlag(PawnIdentityFlags.IsAnimal)) match |= IsAnimal(pawn.def);
-            if (flags.HasFlag(PawnIdentityFlags.IsMechanoid)) match |= IsMechanoid(pawn.def);
+            // 캐시된 identity traits
+            if ((flags & PawnIdentityFlags.IsHumanlike) != 0) match |= IsHumanlike(pawn.def);
+            if ((flags & PawnIdentityFlags.IsAnimal) != 0) match |= IsAnimal(pawn.def);
+            if ((flags & PawnIdentityFlags.IsMechanoid) != 0) match |= IsMechanoid(pawn.def);
 
             // Dynamic traits
-            if (flags.HasFlag(PawnIdentityFlags.IsWildMan)) match |= pawn.IsWildMan();
-            if (flags.HasFlag(PawnIdentityFlags.IsQuestLodger)) match |= pawn.IsQuestLodger();
-            if (flags.HasFlag(PawnIdentityFlags.IsMutant)) match |= pawn.IsMutant;
+            if ((flags & PawnIdentityFlags.IsWildMan) != 0) match |= pawn.IsWildMan();
+            if ((flags & PawnIdentityFlags.IsQuestLodger) != 0) match |= pawn.IsQuestLodger();
+            if ((flags & PawnIdentityFlags.IsMutant) != 0) match |= pawn.IsMutant;
 
             return match;
         }
 
         public static PawnIdentityFlags GetEffectiveIdentityFlags(Pawn pawn)
         {
-            if (pawn == null || pawn.def == null || pawn.RaceProps == null)
+            if (pawn?.def == null || pawn.RaceProps == null)
                 return PawnIdentityFlags.None;
 
             PawnIdentityFlags result = PawnIdentityFlags.None;
 
+            // 조건부 OR 연산으로 플래그 설정
             if (IsColonist(pawn)) result |= PawnIdentityFlags.IsColonist;
             if (IsPrisoner(pawn)) result |= PawnIdentityFlags.IsPrisoner;
             if (IsPrisonerOfColony(pawn)) result |= PawnIdentityFlags.IsPrisonerOfColony;
@@ -232,7 +301,7 @@ namespace emitbreaker.PawnControl
             if (IsSlaveOfColony(pawn)) result |= PawnIdentityFlags.IsSlaveOfColony;
             if (IsGuest(pawn)) result |= PawnIdentityFlags.IsGuest;
 
-            // Use cached identity evaluation
+            // 캐시된 identity 평가 사용
             if (IsHumanlike(pawn.def)) result |= PawnIdentityFlags.IsHumanlike;
             if (IsAnimal(pawn.def)) result |= PawnIdentityFlags.IsAnimal;
             if (IsMechanoid(pawn.def)) result |= PawnIdentityFlags.IsMechanoid;
@@ -244,26 +313,65 @@ namespace emitbreaker.PawnControl
             return result;
         }
 
-        // === Scoped Identity Checks ===
+        #endregion
+
+        #region Scoped Identity Checks - 최적화된 버전
+
+        /// <summary>
+        /// 공통 작업 태그 체크 로직 - 중복 코드 제거
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool HasWorkTags(ThingDef def)
+        {
+            // Flag 기반 체크로 성능 향상
+            var flags = Utility_TagManager.GetTagFlags(def);
+
+            var workRelatedFlags = PawnTagFlags.AllowAllWork | PawnTagFlags.BlockAllWork;
+            if ((flags & workRelatedFlags) != PawnTagFlags.None)
+                return true;
+
+            // Allow/Block work flags 체크
+            var allowWorkFlags = flags & (
+                PawnTagFlags.AllowWork_Firefighter | PawnTagFlags.AllowWork_Patient |
+                PawnTagFlags.AllowWork_Doctor | PawnTagFlags.AllowWork_PatientBedRest |
+                PawnTagFlags.AllowWork_BasicWorker | PawnTagFlags.AllowWork_Warden |
+                PawnTagFlags.AllowWork_Handling | PawnTagFlags.AllowWork_Cooking |
+                PawnTagFlags.AllowWork_Hunting | PawnTagFlags.AllowWork_Construction |
+                PawnTagFlags.AllowWork_Growing | PawnTagFlags.AllowWork_Mining |
+                PawnTagFlags.AllowWork_PlantCutting | PawnTagFlags.AllowWork_Smithing |
+                PawnTagFlags.AllowWork_Tailoring | PawnTagFlags.AllowWork_Art |
+                PawnTagFlags.AllowWork_Crafting | PawnTagFlags.AllowWork_Hauling |
+                PawnTagFlags.AllowWork_Cleaning | PawnTagFlags.AllowWork_Research |
+                PawnTagFlags.AllowWork_Childcare | PawnTagFlags.AllowWork_DarkStudy
+            );
+
+            var blockWorkFlags = flags & (
+                PawnTagFlags.BlockWork_Firefighter | PawnTagFlags.BlockWork_Patient |
+                PawnTagFlags.BlockWork_Doctor | PawnTagFlags.BlockWork_PatientBedRest |
+                PawnTagFlags.BlockWork_BasicWorker | PawnTagFlags.BlockWork_Warden |
+                PawnTagFlags.BlockWork_Handling | PawnTagFlags.BlockWork_Cooking |
+                PawnTagFlags.BlockWork_Hunting | PawnTagFlags.BlockWork_Construction |
+                PawnTagFlags.BlockWork_Growing | PawnTagFlags.BlockWork_Mining |
+                PawnTagFlags.BlockWork_PlantCutting | PawnTagFlags.BlockWork_Smithing |
+                PawnTagFlags.BlockWork_Tailoring | PawnTagFlags.BlockWork_Art |
+                PawnTagFlags.BlockWork_Crafting | PawnTagFlags.BlockWork_Hauling |
+                PawnTagFlags.BlockWork_Cleaning | PawnTagFlags.BlockWork_Research |
+                PawnTagFlags.BlockWork_Childcare | PawnTagFlags.BlockWork_DarkStudy
+            );
+
+            return (allowWorkFlags | blockWorkFlags) != PawnTagFlags.None;
+        }
+
         public static bool IsColonist(Pawn pawn)
         {
             if (pawn?.def == null || pawn.Faction != Faction.OfPlayer)
-            {
                 return false;
-            }
 
             if (IsFlagOverridden(FlagScopeTarget.IsColonist))
             {
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension != null && (
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
-                    ))
-                {
+                if (modExtension != null && HasWorkTags(pawn.def))
                     return true;
-                }
             }
 
             return pawn.RaceProps?.Humanlike == true && pawn.Faction == Faction.OfPlayer;
@@ -272,22 +380,13 @@ namespace emitbreaker.PawnControl
         public static bool IsPrisoner(Pawn pawn)
         {
             if (pawn?.def == null || pawn.Faction != Faction.OfPlayer)
-            {
                 return false;
-            }
 
             if (IsFlagOverridden(FlagScopeTarget.IsPrisoner))
             {
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension != null && (
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
-                    ))
-                {
+                if (modExtension != null && HasWorkTags(pawn.def))
                     return true;
-                }
             }
 
             return pawn.IsPrisoner;
@@ -296,22 +395,13 @@ namespace emitbreaker.PawnControl
         public static bool IsSlave(Pawn pawn)
         {
             if (pawn?.def == null || pawn.Faction != Faction.OfPlayer)
-            {
                 return false;
-            }
 
             if (IsFlagOverridden(FlagScopeTarget.IsSlave))
             {
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension != null && (
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
-                    ))
-                {
+                if (modExtension != null && HasWorkTags(pawn.def))
                     return true;
-                }
             }
 
             return pawn.IsSlave;
@@ -320,22 +410,13 @@ namespace emitbreaker.PawnControl
         public static bool IsGuest(Pawn pawn)
         {
             if (pawn?.def == null || pawn.HostFaction != Faction.OfPlayer)
-            {
                 return false;
-            }
 
             if (IsFlagOverridden(FlagScopeTarget.IsGuest))
             {
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension != null && (
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
-                    ))
-                {
+                if (modExtension != null && HasWorkTags(pawn.def))
                     return true;
-                }
             }
 
             return pawn.HostFaction != null && !pawn.IsPrisoner && !pawn.IsSlave;
@@ -344,22 +425,13 @@ namespace emitbreaker.PawnControl
         public static bool IsPrisonerOfColony(Pawn pawn)
         {
             if (pawn?.def == null || pawn.HostFaction != Faction.OfPlayer)
-            {
                 return false;
-            }
 
             if (IsFlagOverridden(FlagScopeTarget.IsPrisonerOfColony))
             {
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension != null && (
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
-                    ))
-                {
+                if (modExtension != null && HasWorkTags(pawn.def))
                     return true;
-                }
             }
 
             return pawn.IsPrisonerOfColony;
@@ -368,25 +440,18 @@ namespace emitbreaker.PawnControl
         public static bool IsSlaveOfColony(Pawn pawn)
         {
             if (pawn?.def == null || pawn.HostFaction != Faction.OfPlayer)
-            {
                 return false;
-            }
 
             if (IsFlagOverridden(FlagScopeTarget.IsSlaveOfColony))
             {
                 var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-                if (modExtension != null && (
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.AllowWorkPrefix) ||
-                        Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                        AnyTagStartsWith(pawn.def, ManagedTags.BlockWorkPrefix)
-                    ))
-                {
+                if (modExtension != null && HasWorkTags(pawn.def))
                     return true;
-                }
             }
 
             return pawn.IsSlaveOfColony;
         }
+
+        #endregion
     }
 }

@@ -1,115 +1,436 @@
 ﻿using HarmonyLib;
 using RimWorld;
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Verse;
 using Verse.AI;
 
 namespace emitbreaker.PawnControl
 {
     /// <summary>
-    /// Manages ThinkTree operations for pawns, including injecting subtrees, checking work tags,
-    /// and modifying AI behavior trees at runtime or during game startup.
+    /// 최적화된 ThinkTree 매니저 - 리플렉션 캐싱과 스레드 안전성 개선
     /// </summary>
     public static class Utility_ThinkTreeManager
     {
+        #region Reflection Caching - 🟢 모든 리플렉션 호출을 캐시
+
+        /// <summary>Cached reflection access to avoid repeated AccessTools calls</summary>
+        private static readonly MethodInfo _resolveMethod = AccessTools.Method(typeof(ThinkNode), "ResolveSubnodes");
+        private static readonly FieldInfo _thinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTree");
+        private static readonly FieldInfo _thinkTreeConstantField = AccessTools.Field(typeof(Pawn_MindState), "thinkTreeConstant");
+        private static readonly FieldInfo _thinkerField = AccessTools.Field(typeof(Pawn_MindState), "thinker");
+        private static readonly FieldInfo _thinkRootField = AccessTools.Field(typeof(Pawn_Thinker), "thinkRoot");
+        private static readonly FieldInfo _nextThinkField = AccessTools.Field(typeof(Pawn_Thinker), "nextThink");
+
+        // WorkSettings reflection cache
+        private static readonly MethodInfo _cacheWorkGiversMethod = AccessTools.Method(typeof(Pawn_WorkSettings), "CacheWorkGiversInOrder");
+        private static readonly FieldInfo _workGiversNormalField = AccessTools.Field(typeof(Pawn_WorkSettings), "workGiversInOrderNormal");
+        private static readonly FieldInfo _workGiversEmergencyField = AccessTools.Field(typeof(Pawn_WorkSettings), "workGiversInOrderEmergency");
+
+        #endregion
+
+        #region Thread-Safe Caches - 🟢 ConcurrentDictionary로 변경
+
+        /// <summary>Thread-safe work tag caches</summary>
+        private static readonly ConcurrentDictionary<Pawn, bool> _allowWorkTagCache = new ConcurrentDictionary<Pawn, bool>();
+        private static readonly ConcurrentDictionary<Pawn, bool> _blockWorkTagCache = new ConcurrentDictionary<Pawn, bool>();
+        private static readonly ConcurrentDictionary<Pawn, bool> _combinedWorkTagCache = new ConcurrentDictionary<Pawn, bool>();
+
+        /// <summary>ThinkTree definition cache</summary>
+        private static readonly ConcurrentDictionary<string, ThinkTreeDef> _thinkTreeDefCache = new ConcurrentDictionary<string, ThinkTreeDef>();
+
+        #endregion
+
+        #region Public API Methods
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ThinkTreeDef ThinkTreeDefNamed(string defName)
         {
-            return DefDatabase<ThinkTreeDef>.GetNamed(defName);
+            if (string.IsNullOrEmpty(defName))
+                return null;
+
+            // 🟢 Use cached lookup instead of repeated DefDatabase calls
+            return _thinkTreeDefCache.GetOrAdd(defName,
+                name => DefDatabase<ThinkTreeDef>.GetNamedSilentFail(name));
         }
 
-        /// <summary>Cached reflection access to the ResolveSubnodes method</summary>
-        private static readonly MethodInfo resolveMethod = AccessTools.Method(typeof(ThinkNode), "ResolveSubnodes");
-
         /// <summary>
-        /// Determines if a ThingDef has any allow or block work tags.
+        /// 🟢 최적화된 work tag 검사 - 한번의 계산으로 모든 캐시 업데이트
         /// </summary>
-        /// <param name="def">The ThingDef to check</param>
-        /// <returns>True if the def has any allow or block work tags, false otherwise</returns>
         public static bool HasAllowOrBlockWorkTag(Pawn pawn)
         {
             if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
 
+            // Fast path: check combined cache first
+            if (_combinedWorkTagCache.TryGetValue(pawn, out bool combinedResult))
+                return combinedResult;
+
             // Quick reject if no extension
             var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
             if (modExtension == null)
             {
-                Utility_CacheManager.CombinedWorkTag[pawn] = false;
+                // Cache all three results as false
+                _allowWorkTagCache.TryAdd(pawn, false);
+                _blockWorkTagCache.TryAdd(pawn, false);
+                _combinedWorkTagCache.TryAdd(pawn, false);
                 return false;
             }
 
-            // Calculate once and cache all results
+            // 🟢 Calculate once and cache all results atomically
             bool allowResult = Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
                               Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.AllowWorkPrefix);
 
             bool blockResult = Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
                                Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.BlockWorkPrefix);
 
-            // Store in respective caches
-            Utility_CacheManager.AllowWorkTag[pawn] = allowResult;
-            Utility_CacheManager.BlockWorkTag[pawn] = blockResult;
-            Utility_CacheManager.CombinedWorkTag[pawn] = allowResult || blockResult;
+            bool combined = allowResult || blockResult;
 
-            return allowResult || blockResult;
+            // Store in all caches
+            _allowWorkTagCache.TryAdd(pawn, allowResult);
+            _blockWorkTagCache.TryAdd(pawn, blockResult);
+            _combinedWorkTagCache.TryAdd(pawn, combined);
+
+            return combined;
         }
 
-        /// <summary>
-        /// Checks if a ThingDef has any allow work tags.
-        /// </summary>
-        /// <param name="def">The ThingDef to check</param>
-        /// <returns>True if the def has any allow work tags, false otherwise</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool HasAllowWorkTag(Pawn pawn)
         {
             if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
 
-            if (Utility_CacheManager.AllowWorkTag.TryGetValue(pawn, out bool hasTag))
-            {
+            // Try cache first
+            if (_allowWorkTagCache.TryGetValue(pawn, out bool hasTag))
                 return hasTag;
-            }
 
-            if (Utility_CacheManager.GetModExtension(pawn.def) == null)
-            {
-                Utility_CacheManager.AllowWorkTag[pawn] = false;
-                return false; // No mod extension, no tags
-            }
+            // Trigger full calculation which will cache all results
+            HasAllowOrBlockWorkTag(pawn);
 
-            bool result =
-                Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.AllowWorkPrefix);
-
-            Utility_CacheManager.AllowWorkTag[pawn] = result; // ✅ Cache the computed result
-            return result;
+            // Return cached result (guaranteed to exist now)
+            return _allowWorkTagCache.TryGetValue(pawn, out hasTag) && hasTag;
         }
 
-        /// <summary>
-        /// Checks if a ThingDef has any block work tags.
-        /// </summary>
-        /// <param name="def">The ThingDef to check</param>
-        /// <returns>True if the def has any block work tags, false otherwise</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool HasBlockWorkTag(Pawn pawn)
         {
             if (!Utility_Common.RaceDefChecker(pawn.def))
                 return false;
 
-            if (Utility_CacheManager.BlockWorkTag.TryGetValue(pawn, out bool hasTag))
-            {
+            // Try cache first
+            if (_blockWorkTagCache.TryGetValue(pawn, out bool hasTag))
                 return hasTag;
-            }
 
-            if (Utility_CacheManager.GetModExtension(pawn.def) == null)
+            // Trigger full calculation which will cache all results
+            HasAllowOrBlockWorkTag(pawn);
+
+            // Return cached result (guaranteed to exist now)
+            return _blockWorkTagCache.TryGetValue(pawn, out hasTag) && hasTag;
+        }
+
+        /// <summary>
+        /// 최적화된 ApplyThinkTreeToRaceDefs - 종족별 ThinkTree 적용
+        /// </summary>
+        public static void ApplyThinkTreeToRaceDefs()
+        {
+            foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
-                Utility_CacheManager.BlockWorkTag[pawn] = false;
-                return false; // No mod extension, no tags
+                if (def?.race == null)
+                    continue;
+
+                var modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
+                if (modExtension == null)
+                    continue;
+
+                // 태그 체크 최적화
+                bool hasTag = Utility_TagManager.HasTag(def, ManagedTags.AllowAllWork) ||
+                             Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.AllowWorkPrefix) ||
+                             Utility_TagManager.HasTag(def, ManagedTags.BlockAllWork) ||
+                             Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.BlockWorkPrefix);
+
+                if (!hasTag)
+                    continue;
+
+                // Main ThinkTree 교체
+                if (!string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
+                {
+                    var thinkTree = ThinkTreeDefNamed(modExtension.mainWorkThinkTreeDefName);
+                    if (thinkTree != null)
+                    {
+                        def.race.thinkTreeMain = thinkTree;
+                        if (Utility_DebugManager.ShouldLogDetailed())
+                        {
+                            Utility_DebugManager.LogNormal($"Replaced MainThinkTree '{modExtension.mainWorkThinkTreeDefName}' on race def {def.defName}");
+                        }
+                    }
+                }
+
+                // Constant ThinkTree 교체
+                if (!string.IsNullOrEmpty(modExtension.constantThinkTreeDefName))
+                {
+                    var constantTree = ThinkTreeDefNamed(modExtension.constantThinkTreeDefName);
+                    if (constantTree != null)
+                    {
+                        def.race.thinkTreeConstant = constantTree;
+                        if (Utility_DebugManager.ShouldLogDetailed())
+                        {
+                            Utility_DebugManager.LogNormal($"Replaced ConstantThinkTree '{modExtension.constantThinkTreeDefName}' on race def {def.defName}");
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 최적화된 ResetThinkTreeToVanilla - 바닐라 ThinkTree로 복원
+        /// </summary>
+        public static void ResetThinkTreeToVanilla(Pawn pawn, string originalMainTree = null, string originalConstTree = null)
+        {
+            if (pawn?.mindState == null) return;
+
+            try
+            {
+                // 바닐라 기본값으로 복원
+                ThinkTreeDef mainThinkTree = null;
+                ThinkTreeDef constantThinkTree = null;
+
+                if (!string.IsNullOrEmpty(originalMainTree))
+                {
+                    mainThinkTree = ThinkTreeDefNamed(originalMainTree);
+                }
+                else
+                {
+                    // 기본 바닐라 ThinkTree 선택
+                    mainThinkTree = pawn.RaceProps.Humanlike ? ThinkTreeDefNamed("Humanlike")
+                                  : pawn.RaceProps.Animal ? ThinkTreeDefNamed("Animal")
+                                  : pawn.RaceProps.IsMechanoid ? ThinkTreeDefNamed("Mechanoid")
+                                  : null;
+                }
+
+                if (!string.IsNullOrEmpty(originalConstTree))
+                {
+                    constantThinkTree = ThinkTreeDefNamed(originalConstTree);
+                }
+                else
+                {
+                    // 기본 바닐라 상수 ThinkTree 선택
+                    constantThinkTree = pawn.RaceProps.Humanlike ? ThinkTreeDefNamed("HumanlikeConstant")
+                                      : pawn.RaceProps.Animal ? ThinkTreeDefNamed("AnimalConstant")
+                                      : null;
+                }
+
+                // ThinkTree 리셋 적용
+                ResetPawnThinkTree(pawn, mainThinkTree, constantThinkTree);
+
+                if (Utility_DebugManager.ShouldLogDetailed())
+                {
+                    Utility_DebugManager.LogNormal($"Reset think tree to vanilla for {pawn.LabelShort}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error resetting think tree to vanilla for {pawn?.LabelShort}: {ex}");
+            }
+        }
+
+        #endregion
+
+        #region Optimized Reflection Operations - 🟢 캐시된 FieldInfo 사용
+
+        /// <summary>
+        /// 🟢 최적화된 ThinkTree 리셋 - 캐시된 리플렉션 사용
+        /// </summary>
+        public static void ResetPawnThinkTree(Pawn pawn, ThinkTreeDef mainThinkTree = null, ThinkTreeDef constantThinkTree = null)
+        {
+            if (pawn?.mindState == null) return;
+
+            try
+            {
+                // 🟢 Reset main think tree using cached FieldInfo
+                if (mainThinkTree != null && _thinkTreeField != null)
+                {
+                    _thinkTreeField.SetValue(pawn.mindState, mainThinkTree);
+                }
+
+                // 🟢 Reset constant think tree using cached FieldInfo
+                if (constantThinkTree != null && _thinkTreeConstantField != null)
+                {
+                    _thinkTreeConstantField.SetValue(pawn.mindState, constantThinkTree);
+                }
+
+                // 🟢 Force think node rebuild using cached reflection
+                ForceThinkNodeRebuild(pawn);
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error resetting think tree for {pawn?.LabelShort}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 🟢 최적화된 think node 강제 재구축
+        /// </summary>
+        private static void ForceThinkNodeRebuild(Pawn pawn)
+        {
+            if (pawn?.mindState == null || _thinkerField == null) return;
+
+            try
+            {
+                // Get thinker using cached FieldInfo
+                object thinkerObj = _thinkerField.GetValue(pawn.mindState);
+                if (thinkerObj == null) return;
+
+                // Reset thinkRoot using cached FieldInfo
+                if (_thinkRootField != null)
+                {
+                    _thinkRootField.SetValue(thinkerObj, null);
+                }
+
+                // Reset nextThink if field exists
+                if (_nextThinkField != null)
+                {
+                    _nextThinkField.SetValue(thinkerObj, 0);
+                }
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error during think node rebuild for {pawn?.LabelShort}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 🟢 최적화된 WorkSettings 초기화
+        /// </summary>
+        public static void OptimizedEnsureWorkSettingsInitialized(Pawn pawn)
+        {
+            if (pawn?.workSettings == null) return;
+
+            try
+            {
+                // Force cache rebuild using cached MethodInfo
+                if (_cacheWorkGiversMethod != null)
+                {
+                    _cacheWorkGiversMethod.Invoke(pawn.workSettings, null);
+                }
+
+                // Ensure lists are populated using cached FieldInfo
+                var normalList = _workGiversNormalField?.GetValue(pawn.workSettings);
+                var emergencyList = _workGiversEmergencyField?.GetValue(pawn.workSettings);
+
+                if (normalList == null && _workGiversNormalField != null)
+                {
+                    var newNormalList = new List<WorkGiver>();
+                    var newEmergencyList = new List<WorkGiver>();
+
+                    // Populate with available work givers
+                    foreach (WorkGiverDef def in DefDatabase<WorkGiverDef>.AllDefsListForReading)
+                    {
+                        if (pawn.workSettings.GetPriority(def.workType) > 0)
+                        {
+                            newNormalList.Add(def.Worker);
+                            if (def.emergency)
+                                newEmergencyList.Add(def.Worker);
+                        }
+                    }
+
+                    _workGiversNormalField.SetValue(pawn.workSettings, newNormalList);
+                    if (_workGiversEmergencyField != null)
+                        _workGiversEmergencyField.SetValue(pawn.workSettings, newEmergencyList);
+                }
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error initializing work settings for {pawn?.LabelShort}: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Utility Methods
+
+        public static void ResolveSubnodesAndRecur(ThinkNode node)
+        {
+            if (node == null) return;
+
+            // 🟢 Use cached MethodInfo instead of repeated reflection
+            _resolveMethod?.Invoke(node, null);
+
+            if (node.subNodes != null)
+            {
+                foreach (var sub in node.subNodes)
+                {
+                    ResolveSubnodesAndRecur(sub);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 🟢 Thread-safe cache cleanup
+        /// </summary>
+        public static void ResetCache()
+        {
+            _allowWorkTagCache.Clear();
+            _blockWorkTagCache.Clear();
+            _combinedWorkTagCache.Clear();
+            _thinkTreeDefCache.Clear();
+        }
+
+        /// <summary>
+        /// 🟢 Memory-conscious cache maintenance
+        /// </summary>
+        public static void PerformCacheMaintenance()
+        {
+            const int MAX_CACHE_SIZE = 1000;
+
+            try
+            {
+                // Clean up work tag caches if they get too large
+                if (_allowWorkTagCache.Count > MAX_CACHE_SIZE)
+                {
+                    CleanupWorkTagCache(_allowWorkTagCache, "AllowWorkTag");
+                }
+
+                if (_blockWorkTagCache.Count > MAX_CACHE_SIZE)
+                {
+                    CleanupWorkTagCache(_blockWorkTagCache, "BlockWorkTag");
+                }
+
+                if (_combinedWorkTagCache.Count > MAX_CACHE_SIZE)
+                {
+                    CleanupWorkTagCache(_combinedWorkTagCache, "CombinedWorkTag");
+                }
+            }
+            catch (Exception ex)
+            {
+                Utility_DebugManager.LogError($"Error during cache maintenance: {ex.Message}");
+            }
+        }
+
+        private static void CleanupWorkTagCache(ConcurrentDictionary<Pawn, bool> cache, string cacheName)
+        {
+            var keysToRemove = new List<Pawn>();
+
+            foreach (var kvp in cache)
+            {
+                // Remove entries for destroyed or invalid pawns
+                if (kvp.Key?.Destroyed == true || kvp.Key?.def == null)
+                {
+                    keysToRemove.Add(kvp.Key);
+                }
             }
 
-            bool result =
-                Utility_TagManager.HasTag(pawn.def, ManagedTags.BlockAllWork) ||
-                Utility_TagManager.HasAnyTagWithPrefix(pawn.def, ManagedTags.BlockWorkPrefix);
+            foreach (var key in keysToRemove)
+            {
+                cache.TryRemove(key, out _);
+            }
 
-            Utility_CacheManager.BlockWorkTag[pawn] = result; // ✅ Cache the computed result
-            return result;
+            if (keysToRemove.Count > 0 && Utility_DebugManager.ShouldLogDetailed())
+            {
+                Utility_DebugManager.LogNormal($"[ThinkTreeManager] Cleaned up {keysToRemove.Count} stale entries from {cacheName} cache");
+            }
         }
 
         private static ThinkNode_PrioritySorter FindFirstPrioritySorter(ThinkNode root)
@@ -129,11 +450,12 @@ namespace emitbreaker.PawnControl
                     }
                 }
             }
-            else if (root is ThinkNode_PrioritySorter sorter)
+            else if (root is ThinkNode_PrioritySorter prioritySorter)
             {
-                return sorter;
+                return prioritySorter;
             }
 
+            // Recursively search all subnodes
             if (root.subNodes != null)
             {
                 foreach (var subNode in root.subNodes)
@@ -147,187 +469,10 @@ namespace emitbreaker.PawnControl
             return null;
         }
 
-        public static void InjectPawnControlThinkTreesStaticRaceLevel()
-        {
-            try
-            {
-                // Get all pawns in the game world
-                foreach (Map map in Find.Maps)
-                {
-                    if (map?.mapPawns?.AllPawnsSpawned == null) continue;
 
-                    foreach (Pawn pawn in map.mapPawns.AllPawnsSpawned)
-                    {
-                        if (pawn?.def?.race == null)
-                            continue;
-
-                        try
-                        {
-                            // Get the mod extension from the pawn's race def
-                            var modExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
-                            if (modExtension == null)
-                                continue;
-
-                            // Check if the pawn has work tags
-                            if (!HasAllowOrBlockWorkTag(pawn))
-                                continue;
-
-                            // ✅ Replace Main Work ThinkTree if specified
-                            if (!string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
-                            {
-                                var thinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.mainWorkThinkTreeDefName);
-                                if (thinkTree != null)
-                                {
-                                    // Update the race-level think tree
-                                    pawn.def.race.thinkTreeMain = thinkTree;
-
-                                    // Also update the individual pawn's think tree if it exists
-                                    var thinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTree");
-                                    if (thinkTreeField != null && pawn.mindState != null)
-                                    {
-                                        thinkTreeField.SetValue(pawn.mindState, thinkTree);
-                                    }
-
-                                    Utility_DebugManager.LogNormal($"Replaced MainThinkTree '{modExtension.mainWorkThinkTreeDefName}' for pawn {pawn.LabelShort} of race {pawn.def.defName}.");
-                                }
-                                else
-                                {
-                                    Utility_DebugManager.LogWarning($"MainThinkTreeDef '{modExtension.mainWorkThinkTreeDefName}' not found for {pawn.LabelShort} of race {pawn.def.defName}.");
-                                }
-                            }
-
-                            // ✅ Replace Constant ThinkTree if specified
-                            if (!string.IsNullOrEmpty(modExtension.constantThinkTreeDefName))
-                            {
-                                var constantTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.constantThinkTreeDefName);
-                                if (constantTree != null)
-                                {
-                                    // Update the race-level constant think tree
-                                    pawn.def.race.thinkTreeConstant = constantTree;
-
-                                    // Also update the individual pawn's constant think tree if it exists
-                                    var constThinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTreeConstant");
-                                    if (constThinkTreeField != null && pawn.mindState != null)
-                                    {
-                                        constThinkTreeField.SetValue(pawn.mindState, constantTree);
-                                    }
-
-                                    Utility_DebugManager.LogNormal($"Replaced ConstantThinkTree '{modExtension.constantThinkTreeDefName}' for pawn {pawn.LabelShort} of race {pawn.def.defName}.");
-                                }
-                                else
-                                {
-                                    Utility_DebugManager.LogWarning($"ConstantThinkTreeDef '{modExtension.constantThinkTreeDefName}' not found for {pawn.LabelShort} of race {pawn.def.defName}.");
-                                }
-                            }
-
-                            // Force the pawn's thinker to rebuild its think nodes
-                            if (pawn.thinker != null)
-                            {
-                                // Get the thinkRoot field via reflection
-                                Type thinkerType = pawn.thinker.GetType();
-                                FieldInfo thinkRootField = AccessTools.Field(thinkerType, "thinkRoot");
-                                if (thinkRootField != null)
-                                {
-                                    // Set it to null to force a rebuild on next think cycle
-                                    thinkRootField.SetValue(pawn.thinker, null);
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Utility_DebugManager.LogError($"Error processing pawn {pawn?.LabelShort ?? "null"}: {ex.Message}");
-                        }
-                    }
-                }
-
-                // Handle CaravanPawns if needed
-                if (Find.WorldPawns?.AllPawnsAlive != null)
-                {
-                    foreach (Pawn pawn in Find.WorldPawns.AllPawnsAlive)
-                    {
-                        if (pawn?.def?.race == null)
-                            continue;
-
-                        try
-                        {
-                            var modExtension = pawn.def.GetModExtension<NonHumanlikePawnControlExtension>();
-                            if (modExtension == null || !HasAllowOrBlockWorkTag(pawn))
-                                continue;
-
-                            // Apply think trees similar to the code above
-                            // (Similar code block as before for world pawns)
-                        }
-                        catch (Exception ex)
-                        {
-                            Utility_DebugManager.LogError($"Error processing world pawn {pawn?.LabelShort ?? "null"}: {ex.Message}");
-                        }
-                    }
-                }
-
-                // Also run once for ThingDefs to ensure newly spawned pawns get the right think trees
-                try
-                {
-                    ApplyThinkTreeToRaceDefs();
-                }
-                catch (Exception ex)
-                {
-                    Utility_DebugManager.LogError($"Error in ApplyThinkTreeToRaceDefs: {ex.Message}");
-                }
-
-                Utility_DebugManager.LogNormal("Finished pawn-level ThinkTree injection phase.");
-            }
-            catch (Exception ex)
-            {
-                Utility_DebugManager.LogError($"Critical error in InjectPawnControlThinkTreesStaticRaceLevel: {ex}");
-            }
-        }
-
-        // Helper method to ensure ThingDefs still get updated for future pawns
-        public static void ApplyThinkTreeToRaceDefs()
-        {
-            foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
-            {
-                if (def?.race == null)
-                    continue;
-
-                var modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
-                if (modExtension == null)
-                    continue;
-
-                // Use HasAllowOrBlockWorkTag with a generic pawn from this race def
-                // We can't create a real pawn, so we'll simulate the check
-                bool hasTag = Utility_TagManager.HasTag(def, ManagedTags.AllowAllWork) ||
-                             Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.AllowWorkPrefix) ||
-                             Utility_TagManager.HasTag(def, ManagedTags.BlockAllWork) ||
-                             Utility_TagManager.HasAnyTagWithPrefix(def, ManagedTags.BlockWorkPrefix);
-
-                if (!hasTag)
-                    continue;
-
-                // ✅ Replace Main Work ThinkTree if specified
-                if (!string.IsNullOrEmpty(modExtension.mainWorkThinkTreeDefName))
-                {
-                    var thinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.mainWorkThinkTreeDefName);
-                    if (thinkTree != null)
-                    {
-                        def.race.thinkTreeMain = thinkTree;
-                        Utility_DebugManager.LogNormal($"Replaced MainThinkTree '{modExtension.mainWorkThinkTreeDefName}' on race def {def.defName}.");
-                    }
-                }
-
-                // ✅ Replace Constant ThinkTree if specified
-                if (!string.IsNullOrEmpty(modExtension.constantThinkTreeDefName))
-                {
-                    var constantTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.constantThinkTreeDefName);
-                    if (constantTree != null)
-                    {
-                        def.race.thinkTreeConstant = constantTree;
-                        Utility_DebugManager.LogNormal($"Replaced ConstantThinkTree '{modExtension.constantThinkTreeDefName}' on race def {def.defName}.");
-                    }
-                }
-            }
-        }
-
+        /// <summary>
+        /// 🟢 최적화된 ThinkTree 검증 메서드
+        /// </summary>
         public static void ValidateThinkTree(Pawn pawn)
         {
             if (pawn?.thinker?.MainThinkNodeRoot == null)
@@ -335,22 +480,48 @@ namespace emitbreaker.PawnControl
 
             try
             {
-                // Traverse the think tree
                 bool hasWorkGiver = false;
                 bool hasConditionalColonist = false;
 
-                foreach (var node in pawn.thinker.MainThinkNodeRoot.ThisAndChildrenRecursive)
-                {
-                    if (node is JobGiver_Work)
-                        hasWorkGiver = true;
+                // 스택 기반 탐색으로 재귀 오버헤드 제거
+                var nodeStack = new Stack<ThinkNode>();
+                nodeStack.Push(pawn.thinker.MainThinkNodeRoot);
 
-                    if (node is ThinkNode_ConditionalColonist)
-                        hasConditionalColonist = true;
+                while (nodeStack.Count > 0)
+                {
+                    var node = nodeStack.Pop();
+
+                    // 타입 체크 최적화
+                    switch (node)
+                    {
+                        case JobGiver_Work _:
+                            hasWorkGiver = true;
+                            break;
+                        case ThinkNode_ConditionalColonist _:
+                            hasConditionalColonist = true;
+                            break;
+                    }
+
+                    // 자식 노드 스택에 추가
+                    if (node.subNodes?.Count > 0)
+                    {
+                        for (int i = node.subNodes.Count - 1; i >= 0; i--)
+                        {
+                            nodeStack.Push(node.subNodes[i]);
+                        }
+                    }
+
+                    // 조기 종료 최적화
+                    if (hasWorkGiver && hasConditionalColonist)
+                        break;
                 }
 
-                Utility_DebugManager.LogNormal($"[PawnControl DEBUG] ThinkTree validation for {pawn.LabelCap}:");
-                Utility_DebugManager.LogNormal($"- Has JobGiver_Work: {hasWorkGiver}");
-                Utility_DebugManager.LogNormal($"- Has ConditionalColonist: {hasConditionalColonist}");
+                if (Utility_DebugManager.ShouldLogDetailed())
+                {
+                    Utility_DebugManager.LogNormal($"ThinkTree validation for {pawn.LabelCap}:");
+                    Utility_DebugManager.LogNormal($"- Has JobGiver_Work: {hasWorkGiver}");
+                    Utility_DebugManager.LogNormal($"- Has ConditionalColonist: {hasConditionalColonist}");
+                }
             }
             catch (Exception ex)
             {
@@ -358,264 +529,28 @@ namespace emitbreaker.PawnControl
             }
         }
 
-        /// <summary>
-        /// Resets a pawn's think trees back to vanilla defaults
-        /// </summary>
-        public static void ResetThinkTreeToVanilla(Pawn pawn, string originalMainTreeName = null, string originalConstTreeName = null)
-        {
-            if (pawn == null) return;
+        #endregion
 
-            // Check if there's a mod extension with stored original think trees
-            var modExtension = Utility_CacheManager.GetModExtension(pawn.def);
-            bool debugLogging = modExtension?.debugMode == true;
-
-            try
-            {
-                // ---- MAIN THINK TREE HANDLING ----
-                // Get the original main think tree - first check passed parameters
-                ThinkTreeDef mainThinkTree = null;
-
-                // First try passed parameters (useful when mod extension is already removed)
-                if (!string.IsNullOrEmpty(originalMainTreeName))
-                {
-                    mainThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(originalMainTreeName);
-                    if (mainThinkTree != null)
-                    {
-                        if (debugLogging)
-                            Utility_DebugManager.LogNormal($"Using provided original main think tree: {mainThinkTree.defName} for {pawn.LabelShort}");
-                    }
-                    else
-                    {
-                        if (debugLogging)
-                            Utility_DebugManager.LogWarning($"Provided original main think tree '{originalMainTreeName}' not found - using fallbacks");
-                    }
-                }
-
-                // Then check mod extension if available
-                if (mainThinkTree == null)
-                {
-                    if (modExtension != null && !string.IsNullOrEmpty(modExtension.originalMainWorkThinkTreeDefName))
-                    {
-                        mainThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.originalMainWorkThinkTreeDefName);
-                        if (mainThinkTree != null)
-                        {
-                            if (debugLogging)
-                                Utility_DebugManager.LogNormal($"Using stored original main think tree: {mainThinkTree.defName} for {pawn.LabelShort}");
-                        }
-                        else
-                        {
-                            if (debugLogging)
-                                Utility_DebugManager.LogWarning($"Stored original main think tree '{modExtension.originalMainWorkThinkTreeDefName}' not found - using fallbacks");
-                        }
-                    }
-                }
-
-                // Finally fall back to vanilla defaults based on race properties
-                if (mainThinkTree == null)
-                {
-                    // If no race-specific tree, use appropriate default
-                    mainThinkTree = pawn.RaceProps.Humanlike
-                        ? ThinkTreeDefNamed("Humanlike")
-                        : (pawn.RaceProps.Animal ? ThinkTreeDefNamed("Animal")
-                        : (pawn.RaceProps.IsMechanoid ? ThinkTreeDefNamed("Mechanoid")
-                        : null));
-
-                    // Ultimate fallback - try to find ANY think tree if all else fails
-                    if (mainThinkTree == null)
-                    {
-                        // First try the "Animal" tree
-                        var animalTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail("Animal");
-                        if (animalTree != null)
-                        {
-                            mainThinkTree = animalTree;
-                        }
-                        else
-                        {
-                            // Manual equivalent of FirstOrDefault()
-                            var allTrees = DefDatabase<ThinkTreeDef>.AllDefsListForReading;
-                            mainThinkTree = (allTrees.Count > 0) ? allTrees[0] : null;
-                        }
-
-                        if (mainThinkTree != null)
-                        {
-                            if (debugLogging)
-                                Utility_DebugManager.LogWarning(
-                                    $"Using ultimate fallback think tree {mainThinkTree.defName} for {pawn.LabelShort}");
-                        }
-                    }
-                }
-
-                // Reset main think tree if it was customized
-                var thinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTree");
-                if (thinkTreeField != null && mainThinkTree != null)
-                {
-                    thinkTreeField.SetValue(pawn.mindState, mainThinkTree);
-                }
-
-                // ---- CONSTANT THINK TREE HANDLING ----
-                // Similar process for constant think tree
-                ThinkTreeDef constantThinkTree = null;
-
-                // First try passed parameter
-                if (!string.IsNullOrEmpty(originalConstTreeName))
-                {
-                    constantThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(originalConstTreeName);
-                    if (constantThinkTree != null)
-                    {
-                        if (debugLogging)
-                            Utility_DebugManager.LogNormal($"Using provided original constant think tree: {constantThinkTree.defName} for {pawn.LabelShort}");
-                    }
-                    else
-                    {
-                        if (debugLogging)
-                            Utility_DebugManager.LogWarning($"Provided original constant think tree '{originalConstTreeName}' not found - using fallbacks");
-                    }
-                }
-
-                // Then check mod extension
-                if (constantThinkTree == null)
-                {
-                    if (modExtension != null && !string.IsNullOrEmpty(modExtension.originalConstantThinkTreeDefName))
-                    {
-                        constantThinkTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail(modExtension.originalConstantThinkTreeDefName);
-                        if (constantThinkTree != null)
-                        {
-                            if (debugLogging)
-                                Utility_DebugManager.LogNormal($"Using stored original constant think tree: {constantThinkTree.defName} for {pawn.LabelShort}");
-                        }
-                        else
-                        {
-                            if (debugLogging)
-                                Utility_DebugManager.LogWarning($"Stored original constant think tree '{modExtension.originalConstantThinkTreeDefName}' not found - using fallbacks");
-                        }
-                    }
-                }
-
-                // Finally fall back to defaults (note: constant think trees are optional, so null is OK)
-                if (constantThinkTree == null)
-                {
-                    constantThinkTree = pawn.RaceProps.Humanlike
-                        ? ThinkTreeDefNamed("HumanlikeConstant")
-                        : (pawn.RaceProps.Animal ? ThinkTreeDefNamed("AnimalConstant")
-                        : null);
-                }
-
-                // Reset constant think tree
-                var constThinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTreeConstant");
-                if (constThinkTreeField != null && constantThinkTree != null && pawn.mindState != null)
-                {
-                    constThinkTreeField.SetValue(pawn.mindState, constantThinkTree);
-                }
-
-                // Reset any cached think nodes using reflection exclusively
-                if (pawn.mindState != null)
-                {
-                    // Get the thinker field via reflection
-                    var thinkerField = AccessTools.Field(typeof(Pawn_MindState), "thinker");
-                    if (thinkerField != null)
-                    {
-                        // Get the actual thinker object
-                        object thinkerObj = thinkerField.GetValue(pawn.mindState);
-                        if (thinkerObj != null)
-                        {
-                            // Find the thinkRoot field in whatever type thinkerObj is
-                            var thinkRootField = AccessTools.Field(thinkerObj.GetType(), "thinkRoot");
-                            if (thinkRootField != null)
-                            {
-                                // Set it to null to force a rebuild
-                                thinkRootField.SetValue(thinkerObj, null);
-                            }
-
-                            // Optionally, look for a "nextThink" field and reset it too
-                            var nextThinkField = AccessTools.Field(thinkerObj.GetType(), "nextThink");
-                            if (nextThinkField != null)
-                            {
-                                nextThinkField.SetValue(thinkerObj, 0);
-                            }
-                        }
-                    }
-                }
-
-                if (debugLogging)
-                    Utility_DebugManager.LogNormal($"Reset think tree for {pawn.LabelShort} to vanilla");
-            }
-            catch (Exception ex)
-            {
-                Utility_DebugManager.LogError($"Error resetting think tree for {pawn.LabelShort}: {ex}");
-                // Attempt emergency fallback for critical failures
-                try
-                {
-                    EmergencyThinkTreeFallback(pawn);
-                }
-                catch
-                {
-                    // Silent fail for emergency handler
-                }
-            }
-        }
+        #region Compatibility Methods - replace Utility_CacheManager calls
 
         /// <summary>
-        /// Last resort emergency fallback used when normal reset fails
+        /// 🟢 Utility_CacheManager의 Dictionary 사용을 이 클래스의 ConcurrentDictionary로 대체
         /// </summary>
-        private static void EmergencyThinkTreeFallback(Pawn pawn)
+        [Obsolete("Use HasAllowWorkTag instead for better performance")]
+        public static void UpdateLegacyCacheCompat(Pawn pawn)
         {
-            if (pawn?.mindState == null) return;
+            // Trigger our optimized calculation
+            HasAllowOrBlockWorkTag(pawn);
 
-            // Try to get the most basic think trees
-            ThinkTreeDef animalTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail("Animal");
-            ThinkTreeDef animalConstTree = DefDatabase<ThinkTreeDef>.GetNamedSilentFail("AnimalConstant");
-
-            if (animalTree != null)
+            // Update legacy caches for backward compatibility if needed
+            if (Utility_CacheManager.AllowWorkTag.ContainsKey(pawn))
             {
-                var thinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTree");
-                if (thinkTreeField != null)
-                {
-                    thinkTreeField.SetValue(pawn.mindState, animalTree);
-                    Utility_DebugManager.LogWarning($"Applied emergency Animal think tree for {pawn.LabelShort}");
-                }
-            }
-
-            if (animalConstTree != null)
-            {
-                var constThinkTreeField = AccessTools.Field(typeof(Pawn_MindState), "thinkTreeConstant");
-                if (constThinkTreeField != null)
-                {
-                    constThinkTreeField.SetValue(pawn.mindState, animalConstTree);
-                }
-            }
-
-            // Force think node rebuild
-            if (pawn.thinker != null)
-            {
-                Type thinkerType = pawn.thinker.GetType();
-                FieldInfo thinkRootField = AccessTools.Field(thinkerType, "thinkRoot");
-                if (thinkRootField != null)
-                {
-                    thinkRootField.SetValue(pawn.thinker, null);
-                }
+                Utility_CacheManager.AllowWorkTag[pawn] = _allowWorkTagCache.TryGetValue(pawn, out bool allow) && allow;
+                Utility_CacheManager.BlockWorkTag[pawn] = _blockWorkTagCache.TryGetValue(pawn, out bool block) && block;
+                Utility_CacheManager.CombinedWorkTag[pawn] = _combinedWorkTagCache.TryGetValue(pawn, out bool combined) && combined;
             }
         }
 
-        public static void ResolveSubnodesAndRecur(ThinkNode node)
-        {
-            if (node == null) return;
-
-            resolveMethod?.Invoke(node, null);
-
-            if (node.subNodes != null)
-            {
-                foreach (var sub in node.subNodes)
-                {
-                    ResolveSubnodesAndRecur(sub);
-                }
-            }
-        }
-
-        public static void ResetCache()
-        {
-            Utility_CacheManager.AllowWorkTag.Clear();
-            Utility_CacheManager.BlockWorkTag.Clear();
-            Utility_CacheManager.CombinedWorkTag.Clear();
-        }
+        #endregion
     }
 }

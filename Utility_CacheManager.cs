@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using Verse;
@@ -15,47 +16,56 @@ namespace emitbreaker.PawnControl
     {
         #region Caches
 
-        // ModExtension caching
-        public static readonly Dictionary<ThingDef, NonHumanlikePawnControlExtension> _modExtensionCache = new Dictionary<ThingDef, NonHumanlikePawnControlExtension>();
+        // ModExtension caching - Thread-safe
+        public static readonly ConcurrentDictionary<ThingDef, NonHumanlikePawnControlExtension> _modExtensionCache = new ConcurrentDictionary<ThingDef, NonHumanlikePawnControlExtension>();
 
-        // Tag caching
-        public static readonly Dictionary<ThingDef, HashSet<string>> Tags = new Dictionary<ThingDef, HashSet<string>>();
-        public static readonly Dictionary<ThingDef, PawnTagFlags> TagFlags = new Dictionary<ThingDef, PawnTagFlags>();
+        // Tag caching - Thread-safe
+        public static readonly ConcurrentDictionary<ThingDef, HashSet<string>> Tags = new ConcurrentDictionary<ThingDef, HashSet<string>>();
+        public static readonly ConcurrentDictionary<ThingDef, PawnTagFlags> TagFlags = new ConcurrentDictionary<ThingDef, PawnTagFlags>();
 
         // Thread-safe animal caching
         public static readonly ConcurrentDictionary<ThingDef, bool> ForcedAnimals = new ConcurrentDictionary<ThingDef, bool>();
 
-        // Colony pawns caching
-        private static readonly Dictionary<Map, List<Pawn>> _colonistLikePawns = new Dictionary<Map, List<Pawn>>();
-        public static readonly Dictionary<Map, int> FrameIndices = new Dictionary<Map, int>();
+        // Colony pawns caching - Thread-safe
+        private static readonly ConcurrentDictionary<Map, List<Pawn>> _colonistLikePawns = new ConcurrentDictionary<Map, List<Pawn>>();
+        public static readonly ConcurrentDictionary<Map, int> FrameIndices = new ConcurrentDictionary<Map, int>();
 
-        // Duty caching
-        private static readonly Dictionary<string, DutyDef> _dutyDefs = new Dictionary<string, DutyDef>();
+        // Duty caching - Thread-safe
+        private static readonly ConcurrentDictionary<string, DutyDef> _dutyDefs = new ConcurrentDictionary<string, DutyDef>();
 
-        // Apparel restriction caching
-        private static readonly Dictionary<Pawn, bool> _apparelRestrictions = new Dictionary<Pawn, bool>();
+        // Apparel restriction caching - Thread-safe
+        private static readonly ConcurrentDictionary<Pawn, bool> _apparelRestrictions = new ConcurrentDictionary<Pawn, bool>();
 
-        // Work-related caches
-        public static readonly Dictionary<ValueTuple<Pawn, string>, bool> WorkEnabled = new Dictionary<ValueTuple<Pawn, string>, bool>();
-        public static readonly Dictionary<ValueTuple<Pawn, WorkTypeDef>, bool> WorkTypeEnabled = new Dictionary<ValueTuple<Pawn, WorkTypeDef>, bool>();
-        public static readonly Dictionary<ValueTuple<Pawn, string>, bool> WorkDisabled = new Dictionary<ValueTuple<Pawn, string>, bool>();
-        public static readonly Dictionary<ValueTuple<Pawn, string>, bool> ForceDraftable = new Dictionary<ValueTuple<Pawn, string>, bool>();
-        public static readonly Dictionary<ValueTuple<Pawn, string>, bool> ForceEquipWeapon = new Dictionary<ValueTuple<Pawn, string>, bool>();
-        public static readonly Dictionary<ValueTuple<Pawn, string>, bool> ForceWearApparel = new Dictionary<ValueTuple<Pawn, string>, bool>();
+        // Work-related caches - Thread-safe
+        public static readonly ConcurrentDictionary<ValueTuple<Pawn, string>, bool> WorkEnabled = new ConcurrentDictionary<ValueTuple<Pawn, string>, bool>();
+        public static readonly ConcurrentDictionary<ValueTuple<Pawn, WorkTypeDef>, bool> WorkTypeEnabled = new ConcurrentDictionary<ValueTuple<Pawn, WorkTypeDef>, bool>();
+        public static readonly ConcurrentDictionary<ValueTuple<Pawn, string>, bool> WorkDisabled = new ConcurrentDictionary<ValueTuple<Pawn, string>, bool>();
+        public static readonly ConcurrentDictionary<ValueTuple<Pawn, string>, bool> ForceDraftable = new ConcurrentDictionary<ValueTuple<Pawn, string>, bool>();
+        public static readonly ConcurrentDictionary<ValueTuple<Pawn, string>, bool> ForceEquipWeapon = new ConcurrentDictionary<ValueTuple<Pawn, string>, bool>();
+        public static readonly ConcurrentDictionary<ValueTuple<Pawn, string>, bool> ForceWearApparel = new ConcurrentDictionary<ValueTuple<Pawn, string>, bool>();
 
-        // Work tag caching
-        public static readonly Dictionary<Pawn, bool> AllowWorkTag = new Dictionary<Pawn, bool>();
-        public static readonly Dictionary<Pawn, bool> BlockWorkTag = new Dictionary<Pawn, bool>();
-        public static readonly Dictionary<Pawn, bool> CombinedWorkTag = new Dictionary<Pawn, bool>();
+        // Work tag caching - Thread-safe
+        public static readonly ConcurrentDictionary<Pawn, bool> AllowWorkTag = new ConcurrentDictionary<Pawn, bool>();
+        public static readonly ConcurrentDictionary<Pawn, bool> BlockWorkTag = new ConcurrentDictionary<Pawn, bool>();
+        public static readonly ConcurrentDictionary<Pawn, bool> CombinedWorkTag = new ConcurrentDictionary<Pawn, bool>();
 
-        // Race identity caches
-        public static readonly Dictionary<ThingDef, bool> IsAnimal = new Dictionary<ThingDef, bool>();
-        public static readonly Dictionary<ThingDef, bool> IsHumanlike = new Dictionary<ThingDef, bool>();
-        public static readonly Dictionary<ThingDef, bool> IsMechanoid = new Dictionary<ThingDef, bool>();
-        public static readonly Dictionary<FlagScopeTarget, bool> FlagOverrides = new Dictionary<FlagScopeTarget, bool>();
+        // Race identity caches - Thread-safe
+        public static readonly ConcurrentDictionary<ThingDef, bool> IsAnimal = new ConcurrentDictionary<ThingDef, bool>();
+        public static readonly ConcurrentDictionary<ThingDef, bool> IsHumanlike = new ConcurrentDictionary<ThingDef, bool>();
+        public static readonly ConcurrentDictionary<ThingDef, bool> IsMechanoid = new ConcurrentDictionary<ThingDef, bool>();
+        public static readonly ConcurrentDictionary<FlagScopeTarget, bool> FlagOverrides = new ConcurrentDictionary<FlagScopeTarget, bool>();
 
-        // UI caching
-        public static readonly Dictionary<int, bool> BioTabVisibility =  new Dictionary<int, bool>();
+        // UI caching - Thread-safe
+        public static readonly ConcurrentDictionary<int, bool> BioTabVisibility = new ConcurrentDictionary<int, bool>();
+
+        // 재사용 가능한 리스트 - 메모리 할당 최소화
+        [ThreadStatic]
+        private static List<ValueTuple<Pawn, string>> _tempTupleList;
+        private static List<ValueTuple<Pawn, string>> TempTupleList => _tempTupleList ?? (_tempTupleList = new List<ValueTuple<Pawn, string>>());
+
+        [ThreadStatic]
+        private static List<ValueTuple<Pawn, WorkTypeDef>> _tempWorkTypeTupleList;
+        private static List<ValueTuple<Pawn, WorkTypeDef>> TempWorkTypeTupleList => _tempWorkTypeTupleList ?? (_tempWorkTypeTupleList = new List<ValueTuple<Pawn, WorkTypeDef>>());
 
         #endregion
 
@@ -64,42 +74,39 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Gets a cached ModExtension for a ThingDef or creates one if not present
         /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         public static NonHumanlikePawnControlExtension GetModExtension(ThingDef def)
         {
             if (def == null)
                 return null;
 
-            // Check cache first
-            if (_modExtensionCache.TryGetValue(def, out var cached))
-                return cached;
-
-            // Safely try to get the extension
-            NonHumanlikePawnControlExtension modExtension = null;
-            try
+            return _modExtensionCache.GetOrAdd(def, defKey =>
             {
-                if (def.modExtensions != null)
-                    modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
-            }
-            catch (Exception ex)
-            {
-                if (Prefs.DevMode)
-                    Log.Warning($"[PawnControl] GetModExtension failed for def {def.defName}: {ex.Message}");
-            }
-
-            // Cache for future use (even if null)
-            _modExtensionCache[def] = modExtension;
-            return modExtension;
+                NonHumanlikePawnControlExtension modExtension = null;
+                try
+                {
+                    if (defKey.modExtensions != null)
+                        modExtension = defKey.GetModExtension<NonHumanlikePawnControlExtension>();
+                }
+                catch (Exception ex)
+                {
+                    if (Prefs.DevMode)
+                        Log.Warning($"[PawnControl] GetModExtension failed for def {defKey.defName}: {ex.Message}");
+                }
+                return modExtension;
+            });
         }
 
         /// <summary>
         /// Updates the cached ModExtension for a ThingDef
         /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         public static void UpdateModExtension(ThingDef def, NonHumanlikePawnControlExtension extension)
         {
             if (def == null)
                 return;
 
-            _modExtensionCache[def] = extension;
+            _modExtensionCache.AddOrUpdate(def, extension, (key, oldValue) => extension);
         }
 
         /// <summary>
@@ -108,20 +115,22 @@ namespace emitbreaker.PawnControl
         public static void PreloadModExtensions()
         {
             int loadedCount = 0;
+            var defs = DefDatabase<ThingDef>.AllDefsListForReading;
 
-            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
+            // 병렬 처리로 성능 향상
+            Parallel.ForEach(defs, def =>
             {
                 if (def?.race == null)
-                    continue;
+                    return;
 
                 var modExtension = def.GetModExtension<NonHumanlikePawnControlExtension>();
                 if (modExtension != null)
                 {
-                    _modExtensionCache[def] = modExtension;
+                    _modExtensionCache.TryAdd(def, modExtension);
                     modExtension.CacheSkillPassions();
-                    loadedCount++;
+                    Interlocked.Increment(ref loadedCount);
                 }
-            }
+            });
 
             Utility_DebugManager.LogNormal($"Non Humanlike Pawn Controller refreshed: {loadedCount} extensions loaded.");
         }
@@ -134,21 +143,21 @@ namespace emitbreaker.PawnControl
             if (def == null)
                 return;
 
-            // Look for our extension type in the mod extensions
-            if (def.modExtensions != null)
+            _modExtensionCache.GetOrAdd(def, defKey =>
             {
-                foreach (var ext in def.modExtensions)
+                // Look for our extension type in the mod extensions
+                if (defKey.modExtensions != null)
                 {
-                    if (ext is NonHumanlikePawnControlExtension controlExt)
+                    foreach (var ext in defKey.modExtensions)
                     {
-                        _modExtensionCache[def] = controlExt;
-                        return;
+                        if (ext is NonHumanlikePawnControlExtension controlExt)
+                        {
+                            return controlExt;
+                        }
                     }
                 }
-            }
-
-            // No extension found, ensure null is cached
-            _modExtensionCache[def] = null;
+                return null; // No extension found
+            });
         }
 
         /// <summary>
@@ -168,7 +177,7 @@ namespace emitbreaker.PawnControl
             if (def == null)
                 return;
 
-            _modExtensionCache.Remove(def);
+            _modExtensionCache.TryRemove(def, out _);
 
             if (Prefs.DevMode)
                 Utility_DebugManager.LogNormal($"Cleared mod extension cache for {def.defName}.");
@@ -182,9 +191,10 @@ namespace emitbreaker.PawnControl
             Log.Message("[PawnControl] Cleaning up runtime mod extensions for new game");
 
             int removedCount = 0;
+            var defs = DefDatabase<ThingDef>.AllDefsListForReading;
 
             // Clean all ThingDefs that have our extensions
-            foreach (ThingDef def in DefDatabase<ThingDef>.AllDefsListForReading)
+            foreach (ThingDef def in defs)
             {
                 if (def?.modExtensions == null)
                     continue;
@@ -201,18 +211,7 @@ namespace emitbreaker.PawnControl
             }
 
             // Clear all runtime caches
-            _modExtensionCache.Clear();
-            Tags.Clear();
-            ForcedAnimals.Clear();
-            WorkEnabled.Clear();
-            WorkTypeEnabled.Clear();
-            WorkDisabled.Clear();
-            ForceDraftable.Clear();
-            ForceEquipWeapon.Clear();
-            ForceWearApparel.Clear();
-            IsAnimal.Clear();
-            IsHumanlike.Clear();
-            IsMechanoid.Clear();
+            Clear();
 
             Log.Message($"[PawnControl] Removed {removedCount} runtime mod extensions when starting new game");
         }
@@ -224,18 +223,13 @@ namespace emitbreaker.PawnControl
         /// <summary>
         /// Gets a cached DutyDef by name
         /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         public static DutyDef GetDuty(string defName)
         {
             if (string.IsNullOrEmpty(defName))
                 return null;
 
-            if (!_dutyDefs.TryGetValue(defName, out var result))
-            {
-                result = DefDatabase<DutyDef>.GetNamedSilentFail(defName);
-                _dutyDefs[defName] = result;
-            }
-
-            return result;
+            return _dutyDefs.GetOrAdd(defName, name => DefDatabase<DutyDef>.GetNamedSilentFail(name));
         }
 
         /// <summary>
@@ -247,20 +241,32 @@ namespace emitbreaker.PawnControl
                 return Enumerable.Empty<Pawn>();
 
             int frame = Time.frameCount;
-            if (_colonistLikePawns.TryGetValue(map, out var cached) &&
-                FrameIndices.TryGetValue(map, out var cachedFrame) &&
-                frame - cachedFrame <= 5) // 5-frame TTL
-            {
-                return cached;
-            }
 
-            var result = map.mapPawns.AllPawns.Where(pawn =>
+            // TTL 체크를 GetOrAdd 내부에서 처리
+            return _colonistLikePawns.GetOrAdd(map, mapKey =>
             {
+                FrameIndices.AddOrUpdate(mapKey, frame, (key, oldFrame) => frame);
+                return CalculateColonistLikePawns(mapKey);
+            });
+        }
+
+        /// <summary>
+        /// 실제 계산 로직을 별도 메서드로 분리 - LINQ 제거로 성능 향상
+        /// </summary>
+        private static List<Pawn> CalculateColonistLikePawns(Map map)
+        {
+            var result = new List<Pawn>();
+            var allPawns = map.mapPawns.AllPawns;
+
+            for (int i = 0; i < allPawns.Count; i++)
+            {
+                var pawn = allPawns[i];
+
                 if (pawn == null || pawn.def == null || pawn.def.race == null)
-                    return false;
+                    continue;
 
                 if (pawn.Faction != Faction.OfPlayer)
-                    return false;
+                    continue;
 
                 // Require at least one valid work type to be enabled
                 var modExtension = GetModExtension(pawn.def);
@@ -268,26 +274,41 @@ namespace emitbreaker.PawnControl
                 // Fallback: vanilla logic
                 if (modExtension == null)
                 {
-                    foreach (WorkTypeDef workType in DefDatabase<WorkTypeDef>.AllDefsListForReading)
+                    var workTypeDefs = DefDatabase<WorkTypeDef>.AllDefsListForReading;
+                    bool hasValidWork = false;
+
+                    for (int j = 0; j < workTypeDefs.Count; j++)
                     {
-                        if (pawn.workSettings?.WorkIsActive(workType) == true)
-                            return true;
+                        if (pawn.workSettings?.WorkIsActive(workTypeDefs[j]) == true)
+                        {
+                            hasValidWork = true;
+                            break;
+                        }
                     }
-                    return false;
-                }
 
-                // If extension exists, check for at least one tag-allowed work type
-                foreach (var workTypeDef in DefDatabase<WorkTypeDef>.AllDefsListForReading)
+                    if (hasValidWork)
+                        result.Add(pawn);
+                }
+                else
                 {
-                    if (IsWorkTypeEnabledForPawn(pawn, workTypeDef))
-                        return true;
+                    // If extension exists, check for at least one tag-allowed work type
+                    var workTypeDefs = DefDatabase<WorkTypeDef>.AllDefsListForReading;
+                    bool hasValidWork = false;
+
+                    for (int j = 0; j < workTypeDefs.Count; j++)
+                    {
+                        if (IsWorkTypeEnabledForPawn(pawn, workTypeDefs[j]))
+                        {
+                            hasValidWork = true;
+                            break;
+                        }
+                    }
+
+                    if (hasValidWork)
+                        result.Add(pawn);
                 }
+            }
 
-                return false;
-            }).ToList();
-
-            _colonistLikePawns[map] = result;
-            FrameIndices[map] = frame;
             return result;
         }
 
@@ -299,8 +320,8 @@ namespace emitbreaker.PawnControl
             if (map == null)
                 return;
 
-            _colonistLikePawns.Remove(map);
-            FrameIndices.Remove(map);
+            _colonistLikePawns.TryRemove(map, out _);
+            FrameIndices.TryRemove(map, out _);
         }
 
         #endregion
@@ -315,35 +336,214 @@ namespace emitbreaker.PawnControl
             if (pawn == null || workType == null)
                 return false;
 
-            // Only non-humanlike pawns with valid mod extensions AND allow tags can enable work
-            var modExtension = GetModExtension(pawn.def);
+            var key = new ValueTuple<Pawn, WorkTypeDef>(pawn, workType);
 
-            if (modExtension == null)
-                return pawn.workSettings?.WorkIsActive(workType) == true; // Vanilla fallback
+            return WorkTypeEnabled.GetOrAdd(key, tuple =>
+            {
+                var (targetPawn, targetWorkType) = tuple;
 
-            if (modExtension.tags == null)
-                return false;
+                // Only non-humanlike pawns with valid mod extensions AND allow tags can enable work
+                var modExtension = GetModExtension(targetPawn.def);
 
-            return Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowAllWork) ||
-                   Utility_TagManager.HasTag(pawn.def, ManagedTags.AllowWorkPrefix + workType.defName);
+                if (modExtension == null)
+                    return targetPawn.workSettings?.WorkIsActive(targetWorkType) == true; // Vanilla fallback
+
+                if (modExtension.tags == null)
+                    return false;
+
+                return Utility_TagManager.HasTag(targetPawn.def, ManagedTags.AllowAllWork) ||
+                       Utility_TagManager.HasTag(targetPawn.def, ManagedTags.AllowWorkPrefix + targetWorkType.defName);
+            });
         }
 
         /// <summary>
         /// Checks if a pawn has apparel restrictions
         /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         public static bool IsApparelRestricted(Pawn pawn)
         {
             if (pawn == null || pawn.def == null)
                 return false;
 
-            if (!_apparelRestrictions.TryGetValue(pawn, out var result))
+            return _apparelRestrictions.GetOrAdd(pawn, targetPawn =>
             {
-                var modExtension = GetModExtension(pawn.def);
-                result = modExtension != null && modExtension.restrictApparelByBodyType;
-                _apparelRestrictions[pawn] = result;
+                var modExtension = GetModExtension(targetPawn.def);
+                return modExtension != null && modExtension.restrictApparelByBodyType;
+            });
+        }
+
+        #endregion
+
+        #region Efficient Cache Cleanup Methods
+
+        /// <summary>
+        /// 효율적인 Pawn별 캐시 정리 - 메모리 할당 최소화
+        /// </summary>
+        public static void ClearCacheForPawn(Pawn pawn)
+        {
+            if (pawn == null)
+                return;
+
+            // 기본 캐시들
+            AllowWorkTag.TryRemove(pawn, out _);
+            BlockWorkTag.TryRemove(pawn, out _);
+            CombinedWorkTag.TryRemove(pawn, out _);
+            _apparelRestrictions.TryRemove(pawn, out _);
+
+            // ValueTuple 캐시들 - 효율적으로 정리
+            ClearTupleCache(WorkEnabled, pawn);
+            ClearTupleCache(WorkDisabled, pawn);
+            ClearTupleCache(ForceDraftable, pawn);
+            ClearTupleCache(ForceEquipWeapon, pawn);
+            ClearTupleCache(ForceWearApparel, pawn);
+            ClearWorkTypeTupleCache(WorkTypeEnabled, pawn);
+
+            if (Prefs.DevMode)
+                Utility_DebugManager.LogNormal($"Cleared all cache entries for pawn {pawn.NameShortColored}");
+        }
+
+        /// <summary>
+        /// 효율적인 Race별 캐시 정리
+        /// </summary>
+        public static void ClearCacheForRace(ThingDef def)
+        {
+            if (def == null)
+                return;
+
+            // 기본 캐시들
+            Tags.TryRemove(def, out _);
+            TagFlags.TryRemove(def, out _);
+            _modExtensionCache.TryRemove(def, out _);
+            ForcedAnimals.TryRemove(def, out _);
+            IsAnimal.TryRemove(def, out _);
+            IsHumanlike.TryRemove(def, out _);
+            IsMechanoid.TryRemove(def, out _);
+
+            // ValueTuple 캐시들을 Race별로 정리
+            ClearTuplesCacheByRace(def);
+
+            if (Prefs.DevMode)
+                Utility_DebugManager.LogNormal($"Cache entries for race {def.defName} successfully cleared");
+        }
+
+        /// <summary>
+        /// ValueTuple<Pawn, string> 캐시를 효율적으로 정리
+        /// </summary>
+        private static void ClearTupleCache(ConcurrentDictionary<ValueTuple<Pawn, string>, bool> cache, Pawn pawn)
+        {
+            var tempList = TempTupleList;
+            tempList.Clear();
+
+            // 제거할 키들을 먼저 수집
+            foreach (var kvp in cache)
+            {
+                if (kvp.Key.Item1 == pawn)
+                    tempList.Add(kvp.Key);
             }
 
-            return result;
+            // 수집된 키들을 제거
+            for (int i = 0; i < tempList.Count; i++)
+            {
+                cache.TryRemove(tempList[i], out _);
+            }
+
+            tempList.Clear();
+        }
+
+        /// <summary>
+        /// ValueTuple<Pawn, WorkTypeDef> 캐시를 효율적으로 정리
+        /// </summary>
+        private static void ClearWorkTypeTupleCache(ConcurrentDictionary<ValueTuple<Pawn, WorkTypeDef>, bool> cache, Pawn pawn)
+        {
+            var tempList = TempWorkTypeTupleList;
+            tempList.Clear();
+
+            // 제거할 키들을 먼저 수집
+            foreach (var kvp in cache)
+            {
+                if (kvp.Key.Item1 == pawn)
+                    tempList.Add(kvp.Key);
+            }
+
+            // 수집된 키들을 제거
+            for (int i = 0; i < tempList.Count; i++)
+            {
+                cache.TryRemove(tempList[i], out _);
+            }
+
+            tempList.Clear();
+        }
+
+        /// <summary>
+        /// Race별 ValueTuple 캐시들을 효율적으로 정리
+        /// </summary>
+        private static void ClearTuplesCacheByRace(ThingDef def)
+        {
+            var tempList = TempTupleList;
+            var tempWorkTypeList = TempWorkTypeTupleList;
+
+            // WorkEnabled 캐시 정리
+            tempList.Clear();
+            foreach (var kvp in WorkEnabled)
+            {
+                if (kvp.Key.Item1?.def == def)
+                    tempList.Add(kvp.Key);
+            }
+            for (int i = 0; i < tempList.Count; i++)
+                WorkEnabled.TryRemove(tempList[i], out _);
+
+            // WorkDisabled 캐시 정리
+            tempList.Clear();
+            foreach (var kvp in WorkDisabled)
+            {
+                if (kvp.Key.Item1?.def == def)
+                    tempList.Add(kvp.Key);
+            }
+            for (int i = 0; i < tempList.Count; i++)
+                WorkDisabled.TryRemove(tempList[i], out _);
+
+            // ForceDraftable 캐시 정리
+            tempList.Clear();
+            foreach (var kvp in ForceDraftable)
+            {
+                if (kvp.Key.Item1?.def == def)
+                    tempList.Add(kvp.Key);
+            }
+            for (int i = 0; i < tempList.Count; i++)
+                ForceDraftable.TryRemove(tempList[i], out _);
+
+            // ForceEquipWeapon 캐시 정리
+            tempList.Clear();
+            foreach (var kvp in ForceEquipWeapon)
+            {
+                if (kvp.Key.Item1?.def == def)
+                    tempList.Add(kvp.Key);
+            }
+            for (int i = 0; i < tempList.Count; i++)
+                ForceEquipWeapon.TryRemove(tempList[i], out _);
+
+            // ForceWearApparel 캐시 정리
+            tempList.Clear();
+            foreach (var kvp in ForceWearApparel)
+            {
+                if (kvp.Key.Item1?.def == def)
+                    tempList.Add(kvp.Key);
+            }
+            for (int i = 0; i < tempList.Count; i++)
+                ForceWearApparel.TryRemove(tempList[i], out _);
+
+            // WorkTypeEnabled 캐시 정리
+            tempWorkTypeList.Clear();
+            foreach (var kvp in WorkTypeEnabled)
+            {
+                if (kvp.Key.Item1?.def == def)
+                    tempWorkTypeList.Add(kvp.Key);
+            }
+            for (int i = 0; i < tempWorkTypeList.Count; i++)
+                WorkTypeEnabled.TryRemove(tempWorkTypeList[i], out _);
+
+            tempList.Clear();
+            tempWorkTypeList.Clear();
         }
 
         #endregion
@@ -355,16 +555,10 @@ namespace emitbreaker.PawnControl
         /// </summary>
         public static void Clear()
         {
-            // Clear generic caches
-            //foreach (var priorityLevel in _genericCaches.Keys)
-            //    _genericCaches[priorityLevel].Clear();
-
-            //_dependencies.Clear();
-            //_keyToPriority.Clear();
-
             // Clear specialized caches
             _modExtensionCache.Clear();
             Tags.Clear();
+            TagFlags.Clear();
             ForcedAnimals.Clear();
             _colonistLikePawns.Clear();
             FrameIndices.Clear();
@@ -380,12 +574,10 @@ namespace emitbreaker.PawnControl
             IsHumanlike.Clear();
             IsMechanoid.Clear();
             FlagOverrides.Clear();
-            //JobCache.Clear();
             AllowWorkTag.Clear();
             BlockWorkTag.Clear();
             CombinedWorkTag.Clear();
             BioTabVisibility.Clear();
-            TagFlags.Clear();
 
             if (Prefs.DevMode)
                 Utility_DebugManager.LogNormal("All caches cleared.");
